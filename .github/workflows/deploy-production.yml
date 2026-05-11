@@ -1,0 +1,47 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Build & Deploy LIE (Production)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env (production)
+        run: echo "${{ secrets.ENV_PRODUCTION }}" > .env
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Deploy hosting (production)
+        run: npx firebase-tools deploy --only hosting --project default --non-interactive --debug
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+      - name: Deploy Firestore rules + indexes (production)
+        run: npx firebase-tools deploy --only firestore --project default --non-interactive --debug
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+      - name: Deploy Storage rules (production)
+        run: npx firebase-tools deploy --only storage --project default --non-interactive --debug
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}

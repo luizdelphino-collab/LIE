@@ -1,0 +1,47 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [homolog]
+
+jobs:
+  deploy:
+    name: Build & Deploy LIE (Staging)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env.development (staging)
+        run: echo "${{ secrets.ENV_STAGING }}" > .env.development
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build frontend (staging mode)
+        run: npm run build:homolog
+
+      - name: Deploy hosting (staging)
+        run: npx firebase-tools deploy --only hosting --project lie-stage --non-interactive --debug
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+      - name: Deploy Firestore rules + indexes (staging)
+        run: npx firebase-tools deploy --only firestore --project lie-stage --non-interactive --debug
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+      - name: Deploy Storage rules (staging)
+        run: npx firebase-tools deploy --only storage --project lie-stage --non-interactive --debug
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}

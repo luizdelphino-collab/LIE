@@ -1,0 +1,55 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated()
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
+    function hasAnyRole(roles) {
+      return isAuthenticated()
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in roles;
+    }
+
+    // Documentos vinculados a um projeto (planos, aprovações, ofícios).
+    match /projects/{projectId}/documents/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+    }
+
+    // Comprovantes de despesas (notas fiscais, recibos).
+    match /projects/{projectId}/expenses/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+    }
+
+    // Relatórios PDF gerados/anexados.
+    match /projects/{projectId}/reports/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+    }
+
+    // Fotos/anexos de beneficiários.
+    match /projects/{projectId}/beneficiaries/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if hasAnyRole(['admin', 'coordenador']);
+    }
+
+    // Logos de patrocinadores/parceiros.
+    match /sponsors/{allPaths=**} {
+      allow read: if true;
+      allow write: if hasAnyRole(['admin', 'coordenador']);
+    }
+
+    // Default: bloqueia o resto, só admin.
+    match /{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if hasRole('admin');
+    }
+  }
+}

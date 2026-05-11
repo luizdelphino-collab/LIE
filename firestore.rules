@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helpers ---
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && getUserData().role == role;
+    }
+
+    function hasAnyRole(roles) {
+      return isAuthenticated() && getUserData().role in roles;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // --- USUÁRIOS ---
+    // Perfis: admin, coordenador, captador, financeiro, beneficiado, leitor
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId) || hasRole('admin');
+      allow delete: if hasRole('admin');
+    }
+
+    // --- PROJETOS ---
+    // Documento principal de um projeto LIE (nº PRONAS/PROESPI, valor aprovado,
+    // patrocinadores, status, datas-chave).
+    match /projects/{projectId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['admin', 'coordenador']);
+      allow update: if hasAnyRole(['admin', 'coordenador', 'captador', 'financeiro']);
+      allow delete: if hasRole('admin');
+
+      // --- Subcoleções do projeto ---
+
+      // Cronograma físico-financeiro (metas/etapas/atividades).
+      match /schedule/{itemId} {
+        allow read: if isAuthenticated();
+        allow write: if hasAnyRole(['admin', 'coordenador']);
+      }
+
+      // Captação (aportes/incentivadores).
+      match /funding/{entryId} {
+        allow read: if isAuthenticated();
+        allow create, update: if hasAnyRole(['admin', 'coordenador', 'captador']);
+        allow delete: if hasAnyRole(['admin', 'coordenador']);
+      }
+
+      // Despesas (pagamentos, notas fiscais, comprovantes).
+      match /expenses/{expenseId} {
+        allow read: if isAuthenticated();
+        allow create, update: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+        allow delete: if hasAnyRole(['admin', 'financeiro']);
+      }
+
+      // Beneficiários (atletas, alunos, comunidades atendidas).
+      match /beneficiaries/{benefId} {
+        allow read: if isAuthenticated();
+        allow create, update: if hasAnyRole(['admin', 'coordenador']);
+        allow delete: if hasAnyRole(['admin', 'coordenador']);
+      }
+
+      // Documentos do projeto (planos, aprovações, ofícios).
+      match /documents/{docId} {
+        allow read: if isAuthenticated();
+        allow create, update: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+        allow delete: if hasAnyRole(['admin', 'coordenador']);
+      }
+
+      // Relatórios (mensais, trimestrais, prestação de contas).
+      match /reports/{reportId} {
+        allow read: if isAuthenticated();
+        allow create, update: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+        allow delete: if hasAnyRole(['admin', 'coordenador']);
+      }
+    }
+
+    // --- Logs de auditoria ---
+    match /activity_logs/{logId} {
+      allow create: if isAuthenticated();
+      allow read: if hasRole('admin');
+      allow update, delete: if false;
+    }
+
+    // --- Configurações de sistema ---
+    match /system_settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if hasRole('admin');
+    }
+
+    // --- Default: bloqueia tudo o resto exceto admin ---
+    match /{document=**} {
+      allow read, write: if hasRole('admin');
+    }
+  }
+}

@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependências e builds
+node_modules
+dist
+dist-ssr
+*.local
+
+# Credenciais Firebase (NUNCA commitar)
+chave-prod.json
+*chave*.json
+serviceAccountKey.json
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+
+# Firebase deploy cache
+.firebase/*
+
+# Variáveis de ambiente
+.env
+.env.development
+.env.local
+.env.*.local
+functions/.env
+
+# Claude
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
