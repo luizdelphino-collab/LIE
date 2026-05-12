@@ -1,0 +1,7 @@
+# Owners do projeto LIE.
+# Qualquer PR pede revisão automática do Luiz por padrão.
+# (Branch protection clássica não é enforced em repo privado pessoal,
+# mas o CODEOWNERS adiciona pressão social: Luiz aparece como reviewer
+# requerido no painel do PR.)
+
+* @luizdelphino-collab
