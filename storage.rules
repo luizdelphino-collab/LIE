@@ -46,6 +46,16 @@ service firebase.storage {
       allow write: if hasAnyRole(['admin', 'coordenador']);
     }
 
+    // Logos e Documentos de Entidades
+    match /logos/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+    match /entities/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
     // Default: bloqueia o resto, só admin.
     match /{allPaths=**} {
       allow read: if isAuthenticated();

@@ -284,3 +284,128 @@ export interface ActivityLog {
   metadata?: Record<string, unknown>;
   criadoEm: Timestamp;
 }
+
+// ---------- Entidades (Proponentes, Patrocinadores, etc) ----------
+
+export type TipoEntidade = 'proponente' | 'patrocinador' | 'parceiro' | 'outro';
+
+export interface Entidade {
+  id: string;
+  tipo: TipoEntidade;
+  nome: string;
+  sigla?: string;
+  cnpj: string;
+  logoUrl?: string;
+
+  // Endereço
+  cep?: string;
+  logradouro?: string;
+  numero?: string;
+  complemento?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+
+  // Contato
+  telefones?: string[];
+  email?: string;
+  site?: string;
+  instagram?: string;
+  facebook?: string;
+  tiktok?: string;
+  youtube?: string;
+  linkedin?: string;
+
+  // Responsável Legal
+  responsavelLegal?: {
+    nome: string;
+    cargo?: string;
+    cpf?: string;
+    email?: string;
+    telefone?: string;
+  };
+
+  historico?: string;
+  capacidadeTecnica?: string;
+
+  criadoEm: Timestamp;
+  atualizadoEm?: Timestamp;
+}
+
+export type TipoDocumentoEntidade = 
+  | 'Ata' 
+  | 'Estatuto' 
+  | 'Contrato Social' 
+  | 'Certidão' 
+  | 'CNPJ' 
+  | 'Comprovante de Endereço' 
+  | 'Capacidade Técnica e Operacional' 
+  | 'Portfólio' 
+  | 'Outro';
+
+export interface DocumentoEntidade {
+  id: string;
+  entidadeId: string;
+  nome: string;
+  tipo: TipoDocumentoEntidade | string;
+  emissao?: Timestamp;
+  validade?: Timestamp;
+  observacao?: string;
+  arquivoUrl: string;
+  ordem?: number;
+  criadoEm: Timestamp;
+}
+
+export type EscolaridadeDirigente = 
+  | 'Ensino Fundamental Incompleto'
+  | 'Ensino Fundamental Completo'
+  | 'Ensino Médio Incompleto'
+  | 'Ensino Médio Completo'
+  | 'Ensino Superior Incompleto'
+  | 'Ensino Superior Completo (Graduação)'
+  | 'Pós-graduação Especialização / MBA'
+  | 'Mestrado'
+  | 'Doutorado / Pós-doutorado';
+
+export interface Dirigente {
+  id: string;
+  entidadeId: string;
+  nome: string;
+  cargo?: string;
+  escolaridade?: EscolaridadeDirigente | string;
+  cpf?: string;
+  telefone?: string;
+  email?: string;
+  
+  // Endereço
+  cep?: string;
+  logradouro?: string;
+  numero?: string;
+  complemento?: string;
+  cidade?: string;
+  uf?: string;
+
+  criadoEm: Timestamp;
+  atualizadoEm?: Timestamp;
+}
+
+export type TipoDocumentoDirigente = 
+  | 'Documento Pessoal'
+  | 'Comprovante de Endereço'
+  | 'Comprovante de Escolaridade'
+  | 'Certidão'
+  | 'Currículo'
+  | 'Outros';
+
+export interface DocumentoDirigente {
+  id: string;
+  dirigenteId: string;
+  entidadeId: string; // denormalizado para facilitar
+  nome: string;
+  tipo: TipoDocumentoDirigente | string;
+  emissao?: Timestamp;
+  validade?: Timestamp;
+  observacao?: string;
+  arquivoUrl: string;
+  criadoEm: Timestamp;
+}
