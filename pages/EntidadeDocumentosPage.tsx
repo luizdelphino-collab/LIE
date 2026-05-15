@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import type { DocumentoEntidade, Entidade } from '../types';
@@ -14,9 +14,9 @@ export default function EntidadeDocumentosPage() {
   const [documentos, setDocumentos] = useState<DocumentoEntidade[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Formulário State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [editId, setEditId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -135,8 +135,25 @@ export default function EntidadeDocumentosPage() {
         const ext = selectedFile.name.split('.').pop();
         const path = `entities/${id}/documentos/${docId}_${Date.now()}.${ext}`;
         const fileRef = ref(storage, path);
-        await uploadBytes(fileRef, selectedFile);
-        finalUrl = await getDownloadURL(fileRef);
+        
+        const uploadTask = uploadBytesResumable(fileRef, selectedFile);
+        
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on('state_changed', 
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(progress);
+            }, 
+            (error) => {
+              console.error(error);
+              reject(error);
+            }, 
+            async () => {
+              finalUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve();
+            }
+          );
+        });
       }
 
       if (!finalUrl && !editId) {
@@ -252,9 +269,15 @@ export default function EntidadeDocumentosPage() {
                 <textarea name="observacao" rows={2} value={formData.observacao} onChange={handleChange} className="w-full border-gray-300 rounded-lg shadow-sm focus:ring-lie-green focus:border-lie-green"></textarea>
               </div>
             </div>
+            {uploadProgress > 0 && uploadProgress < 100 && (
+              <div className="w-full bg-gray-200 rounded-full h-2.5 mt-4">
+                <div className="bg-lie-green h-2.5 rounded-full" style={{ width: `${uploadProgress}%` }}></div>
+                <p className="text-xs text-gray-500 mt-1 text-right">{Math.round(uploadProgress)}% enviado...</p>
+              </div>
+            )}
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 font-medium rounded-lg">Cancelar</button>
-              <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-6 py-2 font-medium rounded-lg">{saving ? 'Salvando...' : 'Salvar'}</button>
+              <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-6 py-2 font-medium rounded-lg">{saving ? 'Enviando...' : 'Salvar'}</button>
             </div>
           </form>
         </div>
