@@ -97,6 +97,26 @@ service cloud.firestore {
       allow write: if hasRole('admin');
     }
 
+    // --- ENTIDADES ---
+    match /entities/{entityId} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasAnyRole(['admin', 'coordenador', 'captador']);
+      allow delete: if hasRole('admin');
+
+      match /documentos/{docId} {
+        allow read: if isAuthenticated();
+        allow write: if hasAnyRole(['admin', 'coordenador', 'captador']);
+      }
+      match /dirigentes/{dirId} {
+        allow read: if isAuthenticated();
+        allow write: if hasAnyRole(['admin', 'coordenador', 'captador']);
+      }
+      match /{document=**} {
+        allow read: if isAuthenticated();
+        allow write: if hasAnyRole(['admin', 'coordenador', 'captador']);
+      }
+    }
+
     // --- Default: bloqueia tudo o resto exceto admin ---
     match /{document=**} {
       allow read, write: if hasRole('admin');
