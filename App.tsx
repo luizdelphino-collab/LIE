@@ -8,6 +8,8 @@ import ProjetosPage from './pages/ProjetosPage';
 import EntidadesPage from './pages/EntidadesPage';
 import EntidadeFormPage from './pages/EntidadeFormPage';
 import EntidadeDocumentosPage from './pages/EntidadeDocumentosPage';
+import DirigentesPage from './pages/DirigentesPage';
+import DirigenteFormPage from './pages/DirigenteFormPage';
 
 function ProtectedRoutes() {
   const { fbUser, loading } = useAuth();
@@ -46,6 +48,9 @@ export default function App() {
           <Route path="/entidades/nova" element={<EntidadeFormPage />} />
           <Route path="/entidades/:id" element={<EntidadeFormPage />} />
           <Route path="/entidades/:id/documentos" element={<EntidadeDocumentosPage />} />
+          <Route path="/entidades/:id/dirigentes" element={<DirigentesPage />} />
+          <Route path="/entidades/:id/dirigentes/novo" element={<DirigenteFormPage />} />
+          <Route path="/entidades/:id/dirigentes/:dirId" element={<DirigenteFormPage />} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

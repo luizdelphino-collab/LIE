@@ -178,9 +178,9 @@ export default function EntidadeDocumentosPage() {
       
       setIsFormOpen(false);
       carregarDados();
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Erro ao salvar documento. Se o arquivo for muito grande ou você não for admin, o Firebase pode ter bloqueado o envio.");
+      alert(`Erro técnico: ${error?.message || error}. Verifique se é problema de permissão no Firebase ou tamanho do arquivo.`);
     } finally {
       setSaving(false);
     }

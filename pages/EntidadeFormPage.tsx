@@ -412,7 +412,7 @@ export default function EntidadeFormPage() {
                     <FileText className="w-4 h-4" /> Documentos
                   </button>
                   <button type="button" onClick={() => navigate(`/entidades/${id}/dirigentes`)} className="inline-flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white font-medium rounded-lg transition">
-                    <Users className="w-4 h-4" /> Cadastrar Dirigentes
+                    <Users className="w-4 h-4" /> Dirigentes
                   </button>
                 </>
               )}
