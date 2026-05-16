@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection, Timestamp } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject, getBlob } from 'firebase/storage';
 import { getDocs, deleteDoc } from 'firebase/firestore';
-import { ArrowLeft, Save, Edit3, FileText, Plus, Eye, Trash2, ArrowUp, ArrowDown, Download } from 'lucide-react';
+import { ArrowLeft, Save, Edit3, FileText, Plus, Eye, Trash2, ArrowUp, ArrowDown, Download, Loader2 } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { fetchCep } from '../lib/cep';
 import type { Dirigente, Entidade } from '../types';
@@ -75,6 +75,7 @@ export default function DirigenteFormPage() {
   const [isDocFormOpen, setIsDocFormOpen] = useState(false);
   const [savingDoc, setSavingDoc] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [baixandoId, setBaixandoId] = useState<string | null>(null);
   const [editDocId, setEditDocId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -177,6 +178,40 @@ export default function DirigenteFormPage() {
     const d = ts.toDate ? ts.toDate() : new Date(ts as any);
     if (d.getTime() < Date.now()) return { text: 'Vencido', color: 'bg-red-100 text-red-800' };
     return { text: 'Ativo', color: 'bg-green-100 text-green-800' };
+  };
+
+  const handleDownloadFile = async (e: React.MouseEvent, url: string, fileName: string, docId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (baixandoId) return;
+
+    try {
+      setBaixandoId(docId);
+      const match = url.match(/\/o\/([^?]+)/);
+      const path = match ? decodeURIComponent(match[1]) : null;
+      
+      let blob: Blob;
+      if (path) {
+        blob = await getBlob(ref(storage, path));
+      } else {
+        const resp = await fetch(url);
+        blob = await resp.blob();
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao baixar arquivo.');
+    } finally {
+      setBaixandoId(null);
+    }
   };
 
   const openNewDoc = () => {
@@ -466,9 +501,18 @@ export default function DirigenteFormPage() {
                                 <a href={d.arquivoUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar">
                                   <Eye className="w-4 h-4" />
                                 </a>
-                                <a href={d.arquivoUrl} download={d.nome} target="_blank" rel="noopener noreferrer" className="p-1.5 text-lie-green hover:bg-green-50 rounded" title="Baixar">
-                                  <Download className="w-4 h-4" />
-                                </a>
+                                <button 
+                                  onClick={(e) => handleDownloadFile(e, d.arquivoUrl, d.nome, d.id)}
+                                  disabled={!!baixandoId}
+                                  className="p-1.5 text-lie-green hover:bg-green-50 rounded disabled:opacity-50" 
+                                  title="Baixar Direto"
+                                >
+                                  {baixandoId === d.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Download className="w-4 h-4" />
+                                  )}
+                                </button>
                               </>
                             )}
                             <button onClick={() => openEditDoc(d)} className="p-1.5 text-gray-600 hover:bg-gray-100 rounded" title="Editar"><FileText className="w-4 h-4" /></button>
