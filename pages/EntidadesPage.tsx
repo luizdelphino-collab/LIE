@@ -17,7 +17,7 @@ export default function EntidadesPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [consolidando, setConsolidando] = useState<string | null>(null);
-  const [baixandoDocs, setBaixandoDocs] = useState<string | null>(null);
+  const [baixandoDocs, setBaixandoDocs] = useState<{ id: string; current: number; total: number } | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -67,11 +67,12 @@ export default function EntidadesPage() {
   const handleDownloadDocs = async (e: React.MouseEvent, entId: string) => {
     e.stopPropagation();
     if (baixandoDocs) return;
-    setBaixandoDocs(entId);
     
     try {
       const ent = entidades.find(item => item.id === entId);
       if (!ent) return;
+
+      setBaixandoDocs({ id: entId, current: 0, total: 0 });
 
       const zip = new JSZip();
       const rootFolder = zip.folder(`${ent.sigla || 'Entidade'}_Documentos`);
@@ -80,22 +81,10 @@ export default function EntidadesPage() {
       const entidadeFolder = rootFolder.folder('1. Entidade');
       const dirigentesFolder = rootFolder.folder('2. Dirigentes');
 
-      // Helper para baixar do Storage e adicionar ao zip
-      const addFileToZip = async (folder: JSZip, url: string, fileName: string) => {
-        try {
-          // Extrai o path do Storage da URL
-          const match = url.match(/\/o\/([^?]+)/);
-          const path = match ? decodeURIComponent(match[1]) : null;
-          if (path) {
-            const blob = await getBlob(ref(storage, path));
-            folder.file(fileName, blob);
-          }
-        } catch (err) {
-          console.warn(`Erro ao baixar arquivo ${fileName}:`, err);
-        }
-      };
+      // 1. Coletar todas as tarefas de download
+      const downloadTasks: { folder: JSZip; url: string; fileName: string }[] = [];
 
-      // 1. Documentos da entidade
+      // Documentos da entidade
       const entDocsSnap = await getDocs(collection(db, `entities/${entId}/documentos`));
       const entDocs = entDocsSnap.docs
         .map(d => d.data())
@@ -105,12 +94,15 @@ export default function EntidadesPage() {
         const d = entDocs[i];
         if (d.arquivoUrl && entidadeFolder) {
           const ext = d.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : '';
-          const name = `${i + 1}. ${d.nome || 'Documento'}${ext}`;
-          await addFileToZip(entidadeFolder, d.arquivoUrl, name);
+          downloadTasks.push({
+            folder: entidadeFolder,
+            url: d.arquivoUrl,
+            fileName: `${i + 1}. ${d.nome || 'Documento'}${ext}`
+          });
         }
       }
 
-      // 2. Dirigentes
+      // Dirigentes
       const dirsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes`));
       const dirigentes = dirsSnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -129,24 +121,72 @@ export default function EntidadesPage() {
               const dd = dirDocs[j];
               if (dd.arquivoUrl) {
                 const ext = dd.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : '';
-                const name = `${j + 1}. ${dd.nome || 'Documento'}${ext}`;
-                await addFileToZip(dirFolder, dd.arquivoUrl, name);
+                downloadTasks.push({
+                  folder: dirFolder,
+                  url: dd.arquivoUrl,
+                  fileName: `${j + 1}. ${dd.nome || 'Documento'}${ext}`
+                });
               }
             }
           }
         }
       }
 
-      // 3. Gerar e disparar download
-      const content = await zip.generateAsync({ type: 'blob' });
-      const url = URL.createObjectURL(content);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${ent.sigla || 'Entidade'}_Documentos.zip`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      setBaixandoDocs(prev => prev ? { ...prev, total: downloadTasks.length } : null);
+
+      if (downloadTasks.length === 0) {
+        alert('Nenhum documento encontrado para baixar.');
+        setBaixandoDocs(null);
+        return;
+      }
+
+      // 2. Executar downloads em paralelo com limite de concorrência (5 por vez)
+      const CONCURRENCY = 5;
+      const failedFiles: string[] = [];
+      let completedCount = 0;
+
+      const runTask = async (task: typeof downloadTasks[0]) => {
+        try {
+          const match = task.url.match(/\/o\/([^?]+)/);
+          const path = match ? decodeURIComponent(match[1]) : null;
+          if (path) {
+            // Timeout de 30s por arquivo
+            const blobPromise = getBlob(ref(storage, path));
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000));
+            const blob = await Promise.race([blobPromise, timeoutPromise]) as Blob;
+            task.folder.file(task.fileName, blob);
+          }
+        } catch (err) {
+          console.error(`Erro ao baixar ${task.fileName}:`, err);
+          failedFiles.push(task.fileName);
+        } finally {
+          completedCount++;
+          setBaixandoDocs(prev => prev ? { ...prev, current: completedCount } : null);
+        }
+      };
+
+      // Processar em lotes
+      for (let i = 0; i < downloadTasks.length; i += CONCURRENCY) {
+        const batch = downloadTasks.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(task => runTask(task)));
+      }
+
+      // 3. Gerar ZIP
+      if (downloadTasks.length > failedFiles.length) {
+        const content = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(content);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${ent.sigla || 'Entidade'}_Documentos.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+
+      if (failedFiles.length > 0) {
+        alert(`Atenção: ${failedFiles.length} arquivos não puderam ser baixados e foram pulados.`);
+      }
 
     } catch (err) {
       console.error(err);
@@ -261,8 +301,8 @@ export default function EntidadesPage() {
                         title="Baixar todos os anexos PDF"
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {baixandoDocs === e.id ? (
-                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Baixando...</>
+                        {baixandoDocs?.id === e.id ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {baixandoDocs.total > 0 ? `${baixandoDocs.current}/${baixandoDocs.total}` : 'Lendo...'}</>
                         ) : (
                           <><Files className="w-3.5 h-3.5" /> Documentos</>
                         )}
