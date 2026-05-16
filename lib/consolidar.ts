@@ -119,22 +119,35 @@ function extractStoragePath(url: string): string | null {
   }
 }
 
+// Wrapper com timeout para evitar que getBlob() fique preso para sempre
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout após ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 async function fetchImageAsBase64(url: string): Promise<string | null> {
   try {
-    // Tenta via SDK (sem CORS)
+    // Logo salvo como base64 inline no Firestore
+    if (url.startsWith('data:')) return url;
+
+    // Logo salvo no Firebase Storage
     const path = extractStoragePath(url);
     if (path) {
-      const blob = await getBlob(ref(storage, path));
+      const blob = await withTimeout(getBlob(ref(storage, path)), 10000);
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(null);
         reader.readAsDataURL(blob);
       });
     }
-    // Fallback: base64 embutido (imagens salvas como data URI)
-    if (url.startsWith('data:')) return url;
     return null;
-  } catch {
+  } catch (e) {
+    console.warn('Não foi possível carregar a imagem do logo:', e);
     return null;
   }
 }
@@ -143,14 +156,14 @@ async function fetchPdfBytes(url: string): Promise<Uint8Array | null> {
   try {
     const path = extractStoragePath(url);
     if (!path) {
-      console.warn('Não foi possível extrair o caminho do Storage:', url);
+      console.warn('URL inválida para PDF (sem path de storage):', url);
       return null;
     }
-    const blob = await getBlob(ref(storage, path));
+    const blob = await withTimeout(getBlob(ref(storage, path)), 30000);
     const buf = await blob.arrayBuffer();
     return new Uint8Array(buf);
   } catch (e) {
-    console.error('Erro ao baixar PDF do Storage:', e);
+    console.error('Erro ao baixar PDF do Storage (pulando):', e);
     return null;
   }
 }
