@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileDown, Loader2 } from 'lucide-react';
+import { Plus, Search, FileDown, Loader2, Files } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { consolidarEntidade } from '../lib/consolidar';
 import type { Entidade, Projeto } from '../types';
@@ -15,6 +15,7 @@ export default function EntidadesPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [consolidando, setConsolidando] = useState<string | null>(null);
+  const [baixandoDocs, setBaixandoDocs] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -58,6 +59,62 @@ export default function EntidadesPage() {
       alert(`Erro ao gerar o dossiê: ${err?.message || err}`);
     } finally {
       setConsolidando(null);
+    }
+  };
+
+  const handleDownloadDocs = async (e: React.MouseEvent, entId: string) => {
+    e.stopPropagation();
+    if (baixandoDocs) return;
+    setBaixandoDocs(entId);
+    
+    try {
+      // 1. Coletar todos os links de documentos
+      const docsUrls: { nome: string; url: string }[] = [];
+      
+      // Documentos da entidade
+      const entDocsSnap = await getDocs(collection(db, `entities/${entId}/documentos`));
+      entDocsSnap.docs.forEach(d => {
+        const data = d.data();
+        if (data.arquivoUrl) docsUrls.push({ nome: data.nome || 'Documento_Entidade', url: data.arquivoUrl });
+      });
+
+      // Dirigentes
+      const dirsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes`));
+      for (const dirDoc of dirsSnap.docs) {
+        const dirData = dirDoc.data();
+        const dirDocsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes/${dirDoc.id}/documentos`));
+        dirDocsSnap.docs.forEach(dd => {
+          const dData = dd.data();
+          if (dData.arquivoUrl) docsUrls.push({ nome: `${dirData.nome}_${dData.nome || 'Documento'}`, url: dData.arquivoUrl });
+        });
+      }
+
+      if (docsUrls.length === 0) {
+        alert('Nenhum documento encontrado para baixar.');
+        return;
+      }
+
+      // 2. Baixar um por um
+      // Nota: O navegador pode bloquear múltiplos downloads automáticos. 
+      // O ideal seria um ZIP, mas como fallback vamos abrindo ou tentando disparar o download.
+      for (let i = 0; i < docsUrls.length; i++) {
+        const doc = docsUrls[i];
+        const link = document.createElement('a');
+        link.href = doc.url;
+        link.target = '_blank'; // Abre em nova aba se o download automático falhar
+        link.download = doc.nome;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        // Pequeno delay para não travar o browser
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao carregar documentos.');
+    } finally {
+      setBaixandoDocs(null);
     }
   };
 
@@ -146,18 +203,33 @@ export default function EntidadesPage() {
                     {e.projectCount}
                   </td>
                   <td className="px-4 py-3 text-center" onClick={(ev) => ev.stopPropagation()}>
-                    <button
-                      onClick={(ev) => handleConsolidar(ev, e.id)}
-                      disabled={!!consolidando}
-                      title="Gerar Dossiê PDF (Consolidar)"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {consolidando === e.id ? (
-                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
-                      ) : (
-                        <><FileDown className="w-3.5 h-3.5" /> Consolidar</>
-                      )}
-                    </button>
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={(ev) => handleConsolidar(ev, e.id)}
+                        disabled={!!consolidando || !!baixandoDocs}
+                        title="Gerar Dossiê PDF (Consolidar)"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {consolidando === e.id ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
+                        ) : (
+                          <><FileDown className="w-3.5 h-3.5" /> Consolidar</>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={(ev) => handleDownloadDocs(ev, e.id)}
+                        disabled={!!consolidando || !!baixandoDocs}
+                        title="Baixar todos os anexos PDF"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {baixandoDocs === e.id ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Baixando...</>
+                        ) : (
+                          <><Files className="w-3.5 h-3.5" /> Documentos</>
+                        )}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
