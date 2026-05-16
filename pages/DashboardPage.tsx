@@ -39,8 +39,10 @@ export default function DashboardPage() {
     })();
   }, []);
 
-  const fmt = (v: number) =>
-    v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const fmt = (v?: number) => {
+    if (v === undefined || v === null) return 'R$ 0,00';
+    return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
 
   if (loading) {
     return <div className="p-8 text-lie-gray">Carregando…</div>;

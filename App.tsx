@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ProjetosPage from './pages/ProjetosPage';
 import ProjetoFormPage from './pages/ProjetoFormPage';
+import ProjetoDocumentosPage from './pages/ProjetoDocumentosPage';
 
 import EntidadesPage from './pages/EntidadesPage';
 import EntidadeFormPage from './pages/EntidadeFormPage';
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/projetos" element={<ProjetosPage />} />
           <Route path="/projetos/novo" element={<ProjetoFormPage />} />
           <Route path="/projetos/:id" element={<ProjetoFormPage />} />
+          <Route path="/projetos/:id/documentos" element={<ProjetoDocumentosPage />} />
           <Route path="/relatorios" element={<div className="p-8 text-lie-gray">Relatórios — em construção</div>} />
           <Route path="/usuarios" element={<div className="p-8 text-lie-gray">Usuários — em construção</div>} />
           

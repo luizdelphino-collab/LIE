@@ -122,6 +122,14 @@ export interface Projeto {
   // Estado atual
   status: StatusProjeto;
   
+  // Financeiro (Dashboard)
+  valorAprovado?: number;
+  valorCaptado?: number;
+  valorExecutado?: number;
+  esfera?: string;
+  exercicio?: string;
+  nome?: string; // Algumas telas usam nome em vez de titulo
+
   // Metadados
   criadoEm: Timestamp;
   atualizadoEm?: Timestamp;
@@ -244,28 +252,26 @@ export interface Beneficiario {
 
 // ---------- Documentos do projeto ----------
 
-export type TipoDocumento =
-  | 'plano_trabalho'
-  | 'parecer_aprovacao'
-  | 'oficio'
-  | 'contrato'
-  | 'termo'
-  | 'relatorio'
-  | 'comprovante'
-  | 'outro';
+export type TipoDocumentoProjeto =
+  | 'Edital'
+  | 'Termo de Referência'
+  | 'Chamamento Público'
+  | 'Portaria'
+  | 'Declaração'
+  | 'Orçamento'
+  | 'Pesquisa de Preço'
+  | 'Outro';
 
 export interface DocumentoProjeto {
   id: string;
   projectId: string;
-  tipo: TipoDocumento;
-  titulo: string;
-  descricao?: string;
-  arquivoUrl: string;            // Storage path
-  arquivoNome: string;
-  arquivoTamanho?: number;
-  dataDocumento?: Timestamp;
+  nome: string;
+  tipo: TipoDocumentoProjeto | string;
+  dataAssinatura?: Timestamp;
+  observacao?: string;
+  arquivoUrl: string;
+  ordem?: number;
   criadoEm: Timestamp;
-  criadoPor: string;
 }
 
 // ---------- Relatórios ----------

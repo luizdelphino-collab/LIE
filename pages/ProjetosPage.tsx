@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query, deleteDoc, doc } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileDown, Loader2, Trash2, Calendar, Building2 } from 'lucide-react';
+import { Plus, Search, FileDown, Loader2, Trash2, Calendar, Building2, FileText } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { consolidarProjeto } from '../lib/consolidarProjeto';
 import RubricaModal from '../components/RubricaModal';
@@ -192,6 +192,13 @@ export default function ProjetosPage() {
                   </td>
                   <td className="px-4 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
                     <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={(ev) => { ev.stopPropagation(); navigate(`/projetos/${p.id}/documentos`); }}
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition"
+                        title="Documentos do Projeto"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={(ev) => handleConsolidar(ev, p.id)}
                         disabled={!!consolidando}
