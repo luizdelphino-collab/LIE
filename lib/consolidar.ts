@@ -217,9 +217,12 @@ export async function consolidarEntidade(entidadeId: string): Promise<void> {
     pdf.text(titulo, MARGIN + 10, y);
     pdf.text(pag, PAGE_W - MARGIN, y, { align: 'right' });
     pdf.setDrawColor(200, 200, 200);
-    pdf.setDash([1, 1]);
-    pdf.line(MARGIN + 10 + pdf.getTextWidth(titulo) + 2, y - 1, PAGE_W - MARGIN - 6, y - 1);
-    pdf.setDash([]);
+    pdf.setLineWidth(0.3);
+    const lineStart = MARGIN + 10 + pdf.getTextWidth(titulo) + 2;
+    const lineEnd = PAGE_W - MARGIN - 6;
+    if (lineEnd > lineStart) {
+      pdf.line(lineStart, y - 1, lineEnd, y - 1);
+    }
     y += 10;
   }
 
