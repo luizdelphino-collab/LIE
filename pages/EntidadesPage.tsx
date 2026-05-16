@@ -91,6 +91,52 @@ export default function EntidadesPage() {
     }
   };
 
+  const handleDownloadPartialZip = async (zipName: string, tasks: { url: string; fileName: string }[]) => {
+    if (baixandoDocs) return;
+    setBaixandoDocs({ id: 'partial', current: 0, total: tasks.length });
+    
+    try {
+      const zip = new JSZip();
+      let count = 0;
+      const failed = [];
+
+      for (const t of tasks) {
+        try {
+          const match = t.url.match(/\/o\/([^?]+)/);
+          const path = match ? decodeURIComponent(match[1]) : null;
+          if (path) {
+            const blob = await getBlob(ref(storage, path));
+            zip.file(t.fileName, blob);
+          } else {
+            const resp = await fetch(t.url);
+            const blob = await resp.blob();
+            zip.file(t.fileName, blob);
+          }
+        } catch (err) {
+          console.error(err);
+          failed.push(t.fileName);
+        } finally {
+          count++;
+          setBaixandoDocs(prev => prev ? { ...prev, current: count } : null);
+        }
+      }
+
+      if (tasks.length > failed.length) {
+        const content = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${zipName}.zip`;
+        a.click();
+      }
+      if (failed.length > 0) alert(`${failed.length} arquivos falharam e foram pulados.`);
+    } catch (err) {
+      alert('Erro ao gerar ZIP parcial.');
+    } finally {
+      setBaixandoDocs(null);
+    }
+  };
+
   const handleDownloadZipFromModal = async () => {
     if (!modalDocs || !modalDocs.data || baixandoDocs) return;
     const { entId, sigla, data } = modalDocs;
@@ -311,8 +357,22 @@ export default function EntidadesPage() {
                 <>
                   {/* Seção Entidade */}
                   <section>
-                    <div className="flex items-center gap-2 mb-3 text-lie-green font-bold text-sm uppercase tracking-wider">
-                      <Folder className="w-4 h-4" /> 1. Entidade
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2 text-lie-green font-bold text-sm uppercase tracking-wider">
+                        <Folder className="w-4 h-4" /> 1. Entidade
+                      </div>
+                      {modalDocs.data.entDocs.length > 0 && (
+                        <button 
+                          onClick={() => handleDownloadPartialZip(`${modalDocs.sigla}_Documentos_Entidade`, modalDocs.data.entDocs.map((d: any, i: number) => ({
+                            url: d.arquivoUrl,
+                            fileName: `${i + 1}. ${d.nome || 'Doc'}${d.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : ''}`
+                          })))}
+                          disabled={!!baixandoDocs}
+                          className="text-[10px] bg-lie-green/10 text-lie-green px-2 py-1 rounded-md hover:bg-lie-green hover:text-white transition font-bold flex items-center gap-1"
+                        >
+                          <FileDown className="w-3 h-3" /> ZIP DA ENTIDADE
+                        </button>
+                      )}
                     </div>
                     <div className="space-y-2">
                       {modalDocs.data.entDocs.map((doc: any, i: number) => (
@@ -338,8 +398,22 @@ export default function EntidadesPage() {
                     <div className="space-y-6 ml-4 border-l-2 border-gray-100 pl-4">
                       {modalDocs.data.dirigentes.map((dir: any, i: number) => (
                         <div key={i} className="space-y-2">
-                          <div className="flex items-center gap-2 text-sm font-bold text-gray-600">
-                            <User className="w-4 h-4" /> {dir.nome}
+                          <div className="flex items-center justify-between text-sm font-bold text-gray-600">
+                            <div className="flex items-center gap-2">
+                              <User className="w-4 h-4" /> {dir.nome}
+                            </div>
+                            {dir.documentos.length > 0 && (
+                              <button 
+                                onClick={() => handleDownloadPartialZip(`${dir.nome.replace(/\s/g, '_')}_Documentos`, dir.documentos.map((d: any, j: number) => ({
+                                  url: d.arquivoUrl,
+                                  fileName: `${j + 1}. ${d.nome || 'Doc'}${d.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : ''}`
+                                })))}
+                                disabled={!!baixandoDocs}
+                                className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-md hover:bg-blue-600 hover:text-white transition font-bold flex items-center gap-1"
+                              >
+                                <FileDown className="w-3 h-3" /> ZIP DIRIGENTE
+                              </button>
+                            )}
                           </div>
                           <div className="space-y-1">
                             {dir.documentos.map((doc: any, j: number) => (
