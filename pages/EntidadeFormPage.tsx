@@ -48,6 +48,7 @@ export default function EntidadeFormPage() {
     sigla: '',
     cnpj: '',
     logoUrl: '',
+    corPredominante: '#16A34A',
     cep: '',
     logradouro: '',
     numero: '',
@@ -264,6 +265,27 @@ export default function EntidadeFormPage() {
                 </div>
               </div>
             )}
+
+            {/* Cor Predominante — sempre visível, mas editável só no modo edição */}
+            <div className="md:col-span-2 flex flex-col gap-2">
+              <label className="block text-sm font-medium text-gray-700">Cor Predominante da Entidade</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  name="corPredominante"
+                  value={formData.corPredominante || '#16A34A'}
+                  onChange={handleChange}
+                  disabled={!isEditing}
+                  className="w-12 h-10 rounded-lg border border-gray-300 cursor-pointer disabled:cursor-not-allowed p-0.5"
+                />
+                <div
+                  className="flex-1 h-10 rounded-lg border border-gray-200 shadow-inner"
+                  style={{ background: `linear-gradient(90deg, ${formData.corPredominante || '#16A34A'}22, ${formData.corPredominante || '#16A34A'})` }}
+                />
+                <span className="text-sm font-mono text-gray-600 w-20">{formData.corPredominante || '#16A34A'}</span>
+              </div>
+              <p className="text-xs text-gray-400">Esta cor será usada na capa e tabelas do Dossiê PDF.</p>
+            </div>
 
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Nome Completo / Razão Social *</label>

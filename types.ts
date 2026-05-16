@@ -296,6 +296,7 @@ export interface Entidade {
   sigla?: string;
   cnpj: string;
   logoUrl?: string;
+  corPredominante?: string; // hex, ex: "#16A34A"
 
   // Endereço
   cep?: string;
