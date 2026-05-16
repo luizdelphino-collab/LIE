@@ -41,6 +41,33 @@ export type StatusProjeto =
   | 'arquivado'           // arquivado/encerrado
   | 'cancelado';          // cancelado
 
+export type InstrumentoOrigem = 
+  | 'LPIE' | 'LIE' | 'CONDECA' | 'Emenda Federal' | 'Emenda Estadual' | 'Emenda Municipal' 
+  | 'Chamamento Público' | 'Licitação' | 'DL' | 'Contratação Direta';
+
+export type AmbitoAplicacao = 'Nacional' | 'Estadual' | 'Municipal';
+
+export interface LocalExecucao {
+  uf: string;
+  municipios: string[];
+}
+
+export interface AcaoCronograma {
+  id: string;
+  acao: string;
+  descricao: string;
+  mesInicio: string; // YYYY-MM
+  mesTermino: string; // YYYY-MM
+}
+
+export interface MetaProjeto {
+  id: string;
+  meta: string;
+  indicador: string;
+  formula: string;
+  verificacao: string;
+}
+
 export type EsferaIncentivo = 'federal' | 'estadual' | 'municipal';
 
 export interface Patrocinador {
@@ -56,56 +83,48 @@ export interface Patrocinador {
 
 export interface Projeto {
   id: string;
-  // Identificação
-  nome: string;
-  numeroProcesso?: string;     // nº do processo no órgão (PRONAS, Estadual, etc.)
-  esfera: EsferaIncentivo;     // federal/estadual/municipal
-  orgao?: string;              // ex: "Ministério do Esporte" / "SELT-SP"
-  modalidades: string[];       // ex: ["Voleibol", "Basquete"]
-  manifestacao?: 'desporto_educacional' | 'rendimento' | 'participacao';
+  entidadeId: string;
+  titulo: string;
+  instrumentoOrigem: InstrumentoOrigem | string;
+  orgao: string;
+  orgaoOutro?: string;
+  logoUrl?: string;
 
-  // Proponente
-  proponente: {
-    razaoSocial: string;
-    cnpj: string;
-    responsavel: string;
-    email: string;
-    telefone?: string;
+  // Plano de Trabalho
+  resumo?: string;
+  mesInicio?: string; // YYYY-MM
+  mesTermino?: string; // YYYY-MM
+  ambitoAplicacao?: AmbitoAplicacao;
+  locais?: LocalExecucao[];
+  modalidades?: string[];
+  pracaEsportiva?: {
+    nome?: string;
+    endereco?: string;
   };
-
-  // Valores
-  valorAprovado: number;       // R$ aprovado pelo órgão
-  valorCaptado: number;        // R$ captado até o momento (denormalizado)
-  valorExecutado: number;      // R$ executado até o momento (denormalizado)
-
-  // Datas-chave
-  exercicio: number;           // ano de exercício (ex: 2026)
-  dataAprovacao?: Timestamp;
-  dataInicioExecucao?: Timestamp;
-  dataFimExecucao?: Timestamp;
-  prazoCaptacao?: Timestamp;
-  prazoPrestacaoContas?: Timestamp;
-
-  // Local de execução
-  cidade?: string;
-  uf?: string;
+  objetivoGeral?: string;
+  objetivosEspecificos?: string[];
+  justificativa?: string;
+  caracterizacaoSocioeconomica?: string;
+  metodologia?: string;
+  
+  // Cronograma
+  cronograma?: AcaoCronograma[];
+  
+  // Público e Metas
+  publicoAlvo?: {
+    direto: string;
+    faixaEtaria: string;
+    indireto: string;
+  };
+  metasQualitativas?: MetaProjeto[];
+  metasQuantitativas?: MetaProjeto[];
 
   // Estado atual
   status: StatusProjeto;
-  observacoes?: string;
-
-  // Equipe
-  coordenadorId?: string;      // UID do coordenador responsável
-  equipeIds?: string[];        // UIDs com acesso ao projeto
-
-  // Patrocinadores resumo (lista detalhada em subcoleção funding)
-  patrocinadoresResumo?: Patrocinador[];
-
+  
   // Metadados
   criadoEm: Timestamp;
-  criadoPor: string;
   atualizadoEm?: Timestamp;
-  atualizadoPor?: string;
 }
 
 // ---------- Cronograma físico-financeiro ----------

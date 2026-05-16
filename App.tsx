@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ProjetosPage from './pages/ProjetosPage';
+import ProjetoFormPage from './pages/ProjetoFormPage';
 
 import EntidadesPage from './pages/EntidadesPage';
 import EntidadeFormPage from './pages/EntidadeFormPage';
@@ -39,8 +40,8 @@ export default function App() {
         <Route element={<ProtectedRoutes />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/projetos" element={<ProjetosPage />} />
-          <Route path="/projetos/novo" element={<div className="p-8 text-lie-gray">Tela de novo projeto — em construção</div>} />
-          <Route path="/projetos/:id" element={<div className="p-8 text-lie-gray">Detalhe do projeto — em construção</div>} />
+          <Route path="/projetos/novo" element={<ProjetoFormPage />} />
+          <Route path="/projetos/:id" element={<ProjetoFormPage />} />
           <Route path="/relatorios" element={<div className="p-8 text-lie-gray">Relatórios — em construção</div>} />
           <Route path="/usuarios" element={<div className="p-8 text-lie-gray">Usuários — em construção</div>} />
           
