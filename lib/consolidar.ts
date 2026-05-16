@@ -2,7 +2,8 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { PDFDocument } from 'pdf-lib';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref, getBlob } from 'firebase/storage';
+import { db, storage } from './firebase';
 import type { Entidade } from '../types';
 
 interface DocItem {
@@ -108,15 +109,31 @@ function addField(pdf: jsPDF, label: string, value: string, x: number, y: number
   return y + (lines.length * LINE_H);
 }
 
+// Extrai o path de storage a partir da URL de download do Firebase
+function extractStoragePath(url: string): string | null {
+  try {
+    const match = url.match(/\/o\/([^?]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchImageAsBase64(url: string): Promise<string | null> {
   try {
-    const resp = await fetch(url);
-    const blob = await resp.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(blob);
-    });
+    // Tenta via SDK (sem CORS)
+    const path = extractStoragePath(url);
+    if (path) {
+      const blob = await getBlob(ref(storage, path));
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+    }
+    // Fallback: base64 embutido (imagens salvas como data URI)
+    if (url.startsWith('data:')) return url;
+    return null;
   } catch {
     return null;
   }
@@ -124,11 +141,16 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
 
 async function fetchPdfBytes(url: string): Promise<Uint8Array | null> {
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const buf = await resp.arrayBuffer();
+    const path = extractStoragePath(url);
+    if (!path) {
+      console.warn('Não foi possível extrair o caminho do Storage:', url);
+      return null;
+    }
+    const blob = await getBlob(ref(storage, path));
+    const buf = await blob.arrayBuffer();
     return new Uint8Array(buf);
-  } catch {
+  } catch (e) {
+    console.error('Erro ao baixar PDF do Storage:', e);
     return null;
   }
 }
