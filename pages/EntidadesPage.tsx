@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, FileDown, Loader2, Files } from 'lucide-react';
-import { db } from '../lib/firebase';
+import { ref, getBlob } from 'firebase/storage';
+import JSZip from 'jszip';
+import { db, storage } from '../lib/firebase';
 import { consolidarEntidade } from '../lib/consolidar';
 import type { Entidade, Projeto } from '../types';
 
@@ -68,51 +70,87 @@ export default function EntidadesPage() {
     setBaixandoDocs(entId);
     
     try {
-      // 1. Coletar todos os links de documentos
-      const docsUrls: { nome: string; url: string }[] = [];
+      const ent = entidades.find(item => item.id === entId);
+      if (!ent) return;
+
+      const zip = new JSZip();
+      const rootFolder = zip.folder(`${ent.sigla || 'Entidade'}_Documentos`);
+      if (!rootFolder) return;
       
-      // Documentos da entidade
+      const entidadeFolder = rootFolder.folder('1. Entidade');
+      const dirigentesFolder = rootFolder.folder('2. Dirigentes');
+
+      // Helper para baixar do Storage e adicionar ao zip
+      const addFileToZip = async (folder: JSZip, url: string, fileName: string) => {
+        try {
+          // Extrai o path do Storage da URL
+          const match = url.match(/\/o\/([^?]+)/);
+          const path = match ? decodeURIComponent(match[1]) : null;
+          if (path) {
+            const blob = await getBlob(ref(storage, path));
+            folder.file(fileName, blob);
+          }
+        } catch (err) {
+          console.warn(`Erro ao baixar arquivo ${fileName}:`, err);
+        }
+      };
+
+      // 1. Documentos da entidade
       const entDocsSnap = await getDocs(collection(db, `entities/${entId}/documentos`));
-      entDocsSnap.docs.forEach(d => {
-        const data = d.data();
-        if (data.arquivoUrl) docsUrls.push({ nome: data.nome || 'Documento_Entidade', url: data.arquivoUrl });
-      });
+      const entDocs = entDocsSnap.docs
+        .map(d => d.data())
+        .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // Dirigentes
+      for (let i = 0; i < entDocs.length; i++) {
+        const d = entDocs[i];
+        if (d.arquivoUrl && entidadeFolder) {
+          const ext = d.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : '';
+          const name = `${i + 1}. ${d.nome || 'Documento'}${ext}`;
+          await addFileToZip(entidadeFolder, d.arquivoUrl, name);
+        }
+      }
+
+      // 2. Dirigentes
       const dirsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes`));
-      for (const dirDoc of dirsSnap.docs) {
-        const dirData = dirDoc.data();
-        const dirDocsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes/${dirDoc.id}/documentos`));
-        dirDocsSnap.docs.forEach(dd => {
-          const dData = dd.data();
-          if (dData.arquivoUrl) docsUrls.push({ nome: `${dirData.nome}_${dData.nome || 'Documento'}`, url: dData.arquivoUrl });
-        });
+      const dirigentes = dirsSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a: any, b: any) => (a.ordem || 0) - (b.ordem || 0));
+
+      for (const dir of dirigentes) {
+        if (dirigentesFolder) {
+          const dirFolder = dirigentesFolder.folder(dir.nome || 'Sem Nome');
+          if (dirFolder) {
+            const dirDocsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes/${dir.id}/documentos`));
+            const dirDocs = dirDocsSnap.docs
+              .map(d => d.data())
+              .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+            
+            for (let j = 0; j < dirDocs.length; j++) {
+              const dd = dirDocs[j];
+              if (dd.arquivoUrl) {
+                const ext = dd.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : '';
+                const name = `${j + 1}. ${dd.nome || 'Documento'}${ext}`;
+                await addFileToZip(dirFolder, dd.arquivoUrl, name);
+              }
+            }
+          }
+        }
       }
 
-      if (docsUrls.length === 0) {
-        alert('Nenhum documento encontrado para baixar.');
-        return;
-      }
-
-      // 2. Baixar um por um
-      // Nota: O navegador pode bloquear múltiplos downloads automáticos. 
-      // O ideal seria um ZIP, mas como fallback vamos abrindo ou tentando disparar o download.
-      for (let i = 0; i < docsUrls.length; i++) {
-        const doc = docsUrls[i];
-        const link = document.createElement('a');
-        link.href = doc.url;
-        link.target = '_blank'; // Abre em nova aba se o download automático falhar
-        link.download = doc.nome;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        // Pequeno delay para não travar o browser
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+      // 3. Gerar e disparar download
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${ent.sigla || 'Entidade'}_Documentos.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
 
     } catch (err) {
       console.error(err);
-      alert('Erro ao carregar documentos.');
+      alert('Erro ao gerar o pacote de documentos.');
     } finally {
       setBaixandoDocs(null);
     }
