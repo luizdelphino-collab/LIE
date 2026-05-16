@@ -5,6 +5,7 @@ import { Plus, Search, FileDown, Loader2, Trash2 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { consolidarEntidade } from '../lib/consolidar';
+import RubricaModal from '../components/RubricaModal';
 import type { Entidade, Projeto } from '../types';
 
 interface EntidadeWithCount extends Entidade {
@@ -48,17 +49,27 @@ export default function EntidadesPage() {
     );
   });
 
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedEntId, setSelectedEntId] = useState<string | null>(null);
+
   const handleConsolidar = async (e: React.MouseEvent, entId: string) => {
     e.stopPropagation();
-    if (consolidando) return;
-    setConsolidando(entId);
+    setSelectedEntId(entId);
+    setModalOpen(true);
+  };
+
+  const confirmConsolidar = async (rubricaUrl?: string) => {
+    if (!selectedEntId) return;
+    setModalOpen(false);
+    setConsolidando(selectedEntId);
     try {
-      await consolidarEntidade(entId);
+      await consolidarEntidade(selectedEntId, rubricaUrl);
     } catch (err: any) {
       console.error(err);
       alert(`Erro ao gerar o dossiê: ${err?.message || err}`);
     } finally {
       setConsolidando(null);
+      setSelectedEntId(null);
     }
   };
 
@@ -165,12 +176,12 @@ export default function EntidadesPage() {
                         onClick={(ev) => handleConsolidar(ev, e.id)}
                         disabled={!!consolidando}
                         title="Gerar Dossiê PDF (Consolidar)"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="p-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {consolidando === e.id ? (
-                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
+                          <Loader2 className="w-4 h-4 animate-spin" />
                         ) : (
-                          <><FileDown className="w-3.5 h-3.5" /> Consolidar</>
+                          <FileDown className="w-4 h-4" />
                         )}
                       </button>
                       <button
@@ -188,6 +199,12 @@ export default function EntidadesPage() {
           </table>
         </div>
       )}
+      <RubricaModal 
+        isOpen={modalOpen} 
+        onClose={() => setModalOpen(false)} 
+        onConfirm={confirmConsolidar}
+        title="Dossiê da Entidade"
+      />
     </div>
   );
 }

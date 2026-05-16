@@ -1,9 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, FileDown } from 'lucide-react';
-import { db } from '../lib/firebase';
+import { db, storage } from '../lib/firebase';
 import { consolidarProjeto } from '../lib/consolidarProjeto';
+import RubricaModal from '../components/RubricaModal';
 import type { Projeto, Entidade, InstrumentoOrigem, AmbitoAplicacao, AcaoCronograma, MetaProjeto } from '../types';
 
 const INSTRUMENTOS: InstrumentoOrigem[] = [
@@ -40,6 +42,7 @@ export default function ProjetoFormPage() {
     ambitoAplicacao: 'Municipal',
     locais: [],
     modalidades: [],
+    pracaEsportiva: { nome: '', endereco: '' },
     objetivoGeral: '',
     objetivosEspecificos: ['', '', ''],
     justificativa: '',
@@ -84,11 +87,29 @@ export default function ProjetoFormPage() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setFormData(prev => ({ ...prev, logoUrl: reader.result as string }));
-    };
-    reader.readAsDataURL(file);
+
+    if (!file.type.match(/image\/(png|jpeg|jpg)/)) {
+      alert("Formato não aceito. Use PNG, JPG ou JPEG.");
+      return;
+    }
+
+    if (file.size > 1024 * 1024) {
+      alert("A imagem é muito grande (máximo 1MB).");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const storageRef = ref(storage, `logos/projetos/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setFormData(prev => ({ ...prev, logoUrl: url }));
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao subir imagem.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleScopeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -195,17 +216,24 @@ export default function ProjetoFormPage() {
       if (isNew) navigate(`/projetos/${projId}`, { replace: true });
     } catch (err) {
       console.error(err);
-      alert('Erro ao salvar projeto.');
+      alert('Erro ao salvar projeto: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleConsolidar = async () => {
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const handleConsolidar = () => {
     if (!id || isNew) return;
+    setModalOpen(true);
+  };
+
+  const confirmConsolidar = async (rubricaUrl?: string) => {
+    setModalOpen(false);
     setConsolidando(true);
     try {
-      await consolidarProjeto(id);
+      await consolidarProjeto(id!, rubricaUrl);
     } catch (err) {
       console.error(err);
       alert('Erro ao gerar PDF.');
@@ -313,14 +341,17 @@ export default function ProjetoFormPage() {
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Logo do Projeto</label>
-              <div className="flex items-center gap-4 mt-1">
-                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={!isEditing} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
-                  Selecionar Imagem
-                </button>
-                <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleLogoUpload} />
-                {formData.logoUrl && isEditing && (
-                  <button type="button" onClick={() => setFormData(p => ({...p, logoUrl: ''}))} className="text-red-500 text-sm font-medium hover:underline">Remover</button>
-                )}
+              <div className="flex flex-col gap-1 mt-1">
+                <div className="flex items-center gap-4">
+                  <button type="button" onClick={() => fileInputRef.current?.click()} disabled={!isEditing} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+                    Selecionar Imagem
+                  </button>
+                  <input type="file" accept="image/png,image/jpeg" ref={fileInputRef} className="hidden" onChange={handleLogoUpload} />
+                  {formData.logoUrl && isEditing && (
+                    <button type="button" onClick={() => setFormData(p => ({...p, logoUrl: ''}))} className="text-red-500 text-sm font-medium hover:underline">Remover</button>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">PNG, JPG ou JPEG • Máximo 1MB</p>
               </div>
             </div>
           </div>
@@ -455,7 +486,7 @@ export default function ProjetoFormPage() {
                 <input 
                   type="text" 
                   value={formData.pracaEsportiva?.nome || ''} 
-                  onChange={(e) => setFormData(p => ({...p, pracaEsportiva: { ...p.pracaEsportiva, nome: e.target.value }}))} 
+                  onChange={(e) => setFormData(p => ({...p, pracaEsportiva: { ...(p.pracaEsportiva || {}), nome: e.target.value }}))} 
                   disabled={!isEditing} 
                   className={inputCls} 
                 />
@@ -465,7 +496,7 @@ export default function ProjetoFormPage() {
                 <input 
                   type="text" 
                   value={formData.pracaEsportiva?.endereco || ''} 
-                  onChange={(e) => setFormData(p => ({...p, pracaEsportiva: { ...p.pracaEsportiva, endereco: e.target.value }}))} 
+                  onChange={(e) => setFormData(p => ({...p, pracaEsportiva: { ...(p.pracaEsportiva || {}), endereco: e.target.value }}))} 
                   disabled={!isEditing} 
                   className={inputCls} 
                 />
@@ -611,15 +642,15 @@ export default function ProjetoFormPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Público Direto *</label>
-              <input type="text" value={formData.publicoAlvo?.direto} onChange={e => setFormData(p => ({...p, publicoAlvo: {...p.publicoAlvo!, direto: e.target.value}}))} disabled={!isEditing} className={inputCls} placeholder="Ex: 200 atletas" />
+              <input type="text" value={formData.publicoAlvo?.direto} onChange={e => setFormData(p => ({...p, publicoAlvo: {...(p.publicoAlvo || {direto: '', faixaEtaria: '', indireto: ''}), direto: e.target.value}}))} disabled={!isEditing} className={inputCls} placeholder="Ex: 200 atletas" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Faixa Etária *</label>
-              <input type="text" value={formData.publicoAlvo?.faixaEtaria} onChange={e => setFormData(p => ({...p, publicoAlvo: {...p.publicoAlvo!, faixaEtaria: e.target.value}}))} disabled={!isEditing} className={inputCls} placeholder="Ex: 07 a 17 anos" />
+              <input type="text" value={formData.publicoAlvo?.faixaEtaria} onChange={e => setFormData(p => ({...p, publicoAlvo: {...(p.publicoAlvo || {direto: '', faixaEtaria: '', indireto: ''}), faixaEtaria: e.target.value}}))} disabled={!isEditing} className={inputCls} placeholder="Ex: 07 a 17 anos" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Público Indireto *</label>
-              <input type="text" value={formData.publicoAlvo?.indireto} onChange={e => setFormData(p => ({...p, publicoAlvo: {...p.publicoAlvo!, indireto: e.target.value}}))} disabled={!isEditing} className={inputCls} placeholder="Ex: 1000 familiares" />
+              <input type="text" value={formData.publicoAlvo?.indireto} onChange={e => setFormData(p => ({...p, publicoAlvo: {...(p.publicoAlvo || {direto: '', faixaEtaria: '', indireto: ''}), indireto: e.target.value}}))} disabled={!isEditing} className={inputCls} placeholder="Ex: 1000 familiares" />
             </div>
           </div>
         </section>
@@ -687,6 +718,25 @@ export default function ProjetoFormPage() {
         </div>
 
       </form>
+
+      {/* Botão flutuante de Consolidar para Visualização */}
+      {!isEditing && (
+        <button
+          onClick={handleConsolidar}
+          disabled={consolidando}
+          className="fixed bottom-8 right-8 bg-lie-green hover:bg-lie-greenDark text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-50 z-30"
+          title="Consolidar PDF"
+        >
+          {consolidando ? <Loader2 className="w-6 h-6 animate-spin" /> : <FileDown className="w-6 h-6" />}
+        </button>
+      )}
+
+      <RubricaModal 
+        isOpen={modalOpen} 
+        onClose={() => setModalOpen(false)} 
+        onConfirm={confirmConsolidar}
+        title="Plano de Trabalho"
+      />
     </div>
   );
 }

@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { doc, getDoc, setDoc, serverTimestamp, collection } from 'firebase/firestore';
-import { Save, ArrowLeft, FileText, Users, Image as ImageIcon, Edit3, X, Trash2 } from 'lucide-react';
-import { db } from '../lib/firebase';
+import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { Save, ArrowLeft, Image as ImageIcon, MapPin, Building2, Phone, Mail, FileText, Globe, Plus, Trash2, X } from 'lucide-react';
+import { db, storage } from '../lib/firebase';
 import { deleteDoc } from 'firebase/firestore';
 import { fetchCep } from '../lib/cep';
 import type { Entidade } from '../types';
@@ -150,22 +151,26 @@ export default function EntidadeFormPage() {
     if (!file) return;
 
     // Verificar tamanho (max 2MB para não pesar muito no Firestore)
-    if (file.size > 2 * 1024 * 1024) {
-      alert("A imagem é muito grande. Escolha uma imagem de até 2MB.");
+    if (!file.type.match(/image\/(png|jpeg|jpg)/)) {
+      alert("Formato não aceito. Use PNG, JPG ou JPEG.");
+      return;
+    }
+
+    if (file.size > 1024 * 1024) {
+      alert("A imagem é muito grande (máximo 1MB).");
       return;
     }
 
     setUploadingLogo(true);
     try {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, logoUrl: reader.result as string }));
-        setUploadingLogo(false);
-      };
-      reader.readAsDataURL(file);
-    } catch (error) {
-      console.error("Erro ao converter logo:", error);
-      alert("Falha ao processar a imagem.");
+      const storageRef = ref(storage, `logos/entidades/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setFormData(prev => ({ ...prev, logoUrl: url }));
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao subir imagem.");
+    } finally {
       setUploadingLogo(false);
     }
   };
@@ -278,6 +283,7 @@ export default function EntidadeFormPage() {
                   >
                     <ImageIcon className="w-4 h-4" /> {uploadingLogo ? 'Enviando...' : formData.logoUrl ? 'Trocar Imagem' : 'Selecionar Imagem'}
                   </button>
+                  <p className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-wider">PNG, JPG ou JPEG • Máximo 1MB</p>
                 </div>
               </div>
             )}

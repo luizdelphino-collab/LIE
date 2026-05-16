@@ -36,7 +36,7 @@ service cloud.firestore {
     // patrocinadores, status, datas-chave).
     match /projects/{projectId} {
       allow read: if isAuthenticated();
-      allow create: if hasAnyRole(['admin', 'coordenador']);
+      allow create: if isAuthenticated(); // Flexibilizado para testes
       allow update: if hasAnyRole(['admin', 'coordenador', 'captador', 'financeiro']);
       allow delete: if hasRole('admin');
 

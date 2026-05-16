@@ -108,24 +108,44 @@ function addField(pdf: jsPDF, label: string, value: string, x: number, y: number
 
 async function fetchImageAsBase64(url: string): Promise<string | null> {
   try {
+    if (!url) return null;
     if (url.startsWith('data:')) return url;
-    const match = url.match(/\/o\/([^?]+)/);
-    const path = match ? decodeURIComponent(match[1]) : null;
-    if (path) {
-      const blob = await getBlob(ref(storage, path));
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
+
+    try {
+      const match = url.match(/\/o\/([^?]+)/);
+      const path = match ? decodeURIComponent(match[1]) : null;
+      if (path) {
+        const blob = await getBlob(ref(storage, path));
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch (e) {
+      console.warn('Erro via Storage, tentando fetch:', e);
     }
-    return null;
+
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
   } catch (e) {
+    console.error('Erro total ao buscar imagem:', e);
     return null;
   }
 }
 
-export async function consolidarEntidade(entidadeId: string): Promise<void> {
+function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
+  if (url.toLowerCase().includes('.png') || url.startsWith('data:image/png')) return 'PNG';
+  if (url.toLowerCase().includes('.webp') || url.startsWith('data:image/webp')) return 'WEBP';
+  return 'JPEG';
+}
+
+export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string): Promise<void> {
   const entSnap = await getDoc(doc(db, 'entities', entidadeId));
   if (!entSnap.exists()) throw new Error('Entidade não encontrada');
   const entidade = { id: entSnap.id, ...entSnap.data() } as Entidade;
@@ -175,7 +195,7 @@ export async function consolidarEntidade(entidadeId: string): Promise<void> {
     try {
       const imgData = await fetchImageAsBase64((entidade as any).logoUrl);
       if (imgData) {
-        pdf.addImage(imgData, 'PNG', PAGE_W / 2 - 30, faixaY + 10, 60, 60);
+        pdf.addImage(imgData, getImgFormat((entidade as any).logoUrl), PAGE_W / 2 - 30, faixaY + 10, 60, 60);
       }
     } catch { }
   }
@@ -250,15 +270,34 @@ export async function consolidarEntidade(entidadeId: string): Promise<void> {
   y = addSectionTitle(pdf, '2. Relação de Dirigentes', y, cor);
   y += 4;
   for (const dir of dirigentes) {
-    if (y > PAGE_H - 60) { pdf.addPage(); addHeader(pdf, entidade.nome || '', cor); y = 30; }
+    if (y > PAGE_H - 80) { pdf.addPage(); addHeader(pdf, entidade.nome || '', cor); y = 30; }
+    
     pdf.setFillColor(...corClara);
-    pdf.roundedRect(MARGIN, y, CONTENT_W, 8, 1, 1, 'F');
-    pdf.setFontSize(11); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...cor);
-    pdf.text(dir.nome || '', MARGIN + 3, y + 6);
-    y += 12;
-    y = addField(pdf, 'Cargo', dir.cargo || '', MARGIN + 2, y, CONTENT_W - 2); y += 1;
-    y = addField(pdf, 'CPF', dir.cpf || '', MARGIN + 2, y, CONTENT_W - 2); y += 1;
-    y = addField(pdf, 'Telefone', dir.telefone || '', MARGIN + 2, y, CONTENT_W - 2); y += 6;
+    pdf.rect(MARGIN, y, CONTENT_W, 7, 'F');
+    pdf.setFontSize(10); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...cor);
+    pdf.text(dir.nome?.toUpperCase() || '', MARGIN + 2, y + 5);
+    y += 7;
+
+    const dirRows = [
+      ['CARGO', dir.cargo || '-', 'CPF', dir.cpf || '-'],
+      ['E-MAIL', dir.email || '-', 'TELEFONE', dir.telefone || '-'],
+      ['ESCOLARIDADE', dir.escolaridade || '-', '', ''],
+      ['ENDEREÇO', [dir.logradouro, dir.numero, dir.complemento, dir.bairro, dir.cidade, dir.uf].filter(Boolean).join(', ') || '-', '', '']
+    ];
+
+    autoTable(pdf, {
+      startY: y,
+      body: dirRows,
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 2 },
+      columnStyles: {
+        0: { fontStyle: 'bold', textColor: [100, 100, 100], cellWidth: 30 },
+        2: { fontStyle: 'bold', textColor: [100, 100, 100], cellWidth: 20 },
+      },
+      margin: { left: MARGIN, right: MARGIN },
+    });
+    
+    y = (pdf as any).lastAutoTable.finalY + 10;
   }
 
   // ===== HISTÓRICO + CAPACIDADE =====
@@ -296,9 +335,14 @@ export async function consolidarEntidade(entidadeId: string): Promise<void> {
   });
 
   const totalPages = (pdf as any).internal.getNumberOfPages();
-  for (let p = 2; p <= totalPages; p++) {
+  for (let p = 1; p <= totalPages; p++) {
     pdf.setPage(p);
-    addFooter(pdf, p);
+    if (p > 1) addFooter(pdf, p);
+    if (rubricaUrl) {
+      try {
+        pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 15, 10, 10);
+      } catch {}
+    }
   }
 
   pdf.save(`Dossie_${(entidade.sigla || entidade.nome || 'Entidade').replace(/\s/g, '_')}.pdf`);

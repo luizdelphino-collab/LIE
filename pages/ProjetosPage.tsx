@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, FileDown, Loader2, Trash2, Calendar, Building2 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { consolidarProjeto } from '../lib/consolidarProjeto';
+import RubricaModal from '../components/RubricaModal';
 import type { Projeto, Entidade } from '../types';
 
 export default function ProjetosPage() {
@@ -54,16 +55,27 @@ export default function ProjetosPage() {
     }
   };
 
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedProjId, setSelectedProjId] = useState<string | null>(null);
+
   const handleConsolidar = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    setConsolidando(id);
+    setSelectedProjId(id);
+    setModalOpen(true);
+  };
+
+  const confirmConsolidar = async (rubricaUrl?: string) => {
+    if (!selectedProjId) return;
+    setModalOpen(false);
+    setConsolidando(selectedProjId);
     try {
-      await consolidarProjeto(id);
+      await consolidarProjeto(selectedProjId, rubricaUrl);
     } catch (err) {
       console.error(err);
       alert('Erro ao gerar PDF do projeto.');
     } finally {
       setConsolidando(null);
+      setSelectedProjId(null);
     }
   };
 
@@ -203,6 +215,12 @@ export default function ProjetosPage() {
           </table>
         </div>
       )}
+      <RubricaModal 
+        isOpen={modalOpen} 
+        onClose={() => setModalOpen(false)} 
+        onConfirm={confirmConsolidar}
+        title="Plano de Trabalho do Projeto"
+      />
     </div>
   );
 }

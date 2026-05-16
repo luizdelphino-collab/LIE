@@ -30,19 +30,43 @@ function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, numb
 
 async function fetchImageAsBase64(url: string): Promise<string | null> {
   try {
+    if (!url) return null;
     if (url.startsWith('data:')) return url;
-    const match = url.match(/\/o\/([^?]+)/);
-    const path = match ? decodeURIComponent(match[1]) : null;
-    if (path) {
-      const blob = await getBlob(ref(storage, path));
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
+
+    // Tenta carregar via Firebase Storage getBlob (mais seguro para CORS)
+    try {
+      const match = url.match(/\/o\/([^?]+)/);
+      const path = match ? decodeURIComponent(match[1]) : null;
+      if (path) {
+        const blob = await getBlob(ref(storage, path));
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar via Storage Blob, tentando fetch direto:', e);
     }
+
+    // Fallback: Fetch direto (requer CORS configurado no bucket)
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.error('Erro total ao buscar imagem:', e);
     return null;
-  } catch (e) { return null; }
+  }
+}
+
+function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
+  if (url.toLowerCase().includes('.png') || url.startsWith('data:image/png')) return 'PNG';
+  if (url.toLowerCase().includes('.webp') || url.startsWith('data:image/webp')) return 'WEBP';
+  return 'JPEG';
 }
 
 function addHeader(pdf: jsPDF, title: string, cor: [number, number, number]) {
@@ -80,7 +104,7 @@ function addField(pdf: jsPDF, label: string, value: string, x: number, y: number
   return y + (lines.length * LINE_H);
 }
 
-export async function consolidarProjeto(projetoId: string): Promise<void> {
+export async function consolidarProjeto(projetoId: string, rubricaUrl?: string): Promise<void> {
   const projSnap = await getDoc(doc(db, 'projects', projetoId));
   if (!projSnap.exists()) throw new Error('Projeto não encontrado');
   const projeto = { id: projSnap.id, ...projSnap.data() } as Projeto;
@@ -100,12 +124,13 @@ export async function consolidarProjeto(projetoId: string): Promise<void> {
   pdf.rect(0, PAGE_H / 2 - 40, PAGE_W, 80, 'F');
   if (entidade.logoUrl) {
     const imgData = await fetchImageAsBase64(entidade.logoUrl);
-    if (imgData) pdf.addImage(imgData, 'PNG', PAGE_W / 2 - 30, PAGE_H / 2 - 30, 60, 60);
+    if (imgData) pdf.addImage(imgData, getImgFormat(entidade.logoUrl), PAGE_W / 2 - 30, PAGE_H / 2 - 30, 60, 60);
   }
   pdf.setTextColor(255, 255, 255);
   pdf.setFontSize(24);
   pdf.setFont('helvetica', 'bold');
-  pdf.text(entidade.nome.toUpperCase(), PAGE_W / 2, PAGE_H / 2 - 50, { align: 'center' });
+  const entNameLines = pdf.splitTextToSize(entidade.nome.toUpperCase(), CONTENT_W);
+  pdf.text(entNameLines, PAGE_W / 2, PAGE_H / 2 - 50, { align: 'center' });
 
   // Pág 2: Dados da Entidade
   pdf.addPage();
@@ -127,7 +152,7 @@ export async function consolidarProjeto(projetoId: string): Promise<void> {
   pdf.rect(20, 60, PAGE_W - 40, PAGE_H - 120, 'F', 5);
   if (projeto.logoUrl) {
     const imgProj = await fetchImageAsBase64(projeto.logoUrl);
-    if (imgProj) pdf.addImage(imgProj, 'PNG', PAGE_W / 2 - 40, 80, 80, 80);
+    if (imgProj) pdf.addImage(imgProj, getImgFormat(projeto.logoUrl), PAGE_W / 2 - 40, 80, 80, 80);
   }
   pdf.setTextColor(255, 255, 255);
   pdf.setFontSize(28);
@@ -202,6 +227,11 @@ export async function consolidarProjeto(projetoId: string): Promise<void> {
     pdf.setPage(i);
     pdf.setFontSize(8); pdf.setTextColor(150, 150, 150);
     pdf.text(`Página ${i} de ${total}`, PAGE_W / 2, PAGE_H - 8, { align: 'center' });
+    if (rubricaUrl) {
+      try {
+        pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 15, 10, 10);
+      } catch {}
+    }
   }
 
   pdf.save(`Projeto_${projeto.titulo.replace(/\s/g, '_')}.pdf`);
