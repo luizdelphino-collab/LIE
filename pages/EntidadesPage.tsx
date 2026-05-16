@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, FileDown, Loader2 } from 'lucide-react';
 import { db } from '../lib/firebase';
+import { consolidarEntidade } from '../lib/consolidar';
 import type { Entidade, Projeto } from '../types';
 
 interface EntidadeWithCount extends Entidade {
@@ -13,6 +14,7 @@ export default function EntidadesPage() {
   const [entidades, setEntidades] = useState<EntidadeWithCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [consolidando, setConsolidando] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -20,21 +22,16 @@ export default function EntidadesPage() {
       try {
         const q = query(collection(db, 'entities'), orderBy('criadoEm', 'desc'));
         const snap = await getDocs(q);
-        
-        // Also fetch projects to count
         const projSnap = await getDocs(collection(db, 'projects'));
         const projetos = projSnap.docs.map(d => d.data() as Projeto);
-
         const data = snap.docs.map(d => {
           const ent = { id: d.id, ...d.data() } as Entidade;
-          // Contagem de projetos vinculados por CNPJ (já que projeto hoje embute o proponente)
           const projectCount = projetos.filter(p => p.proponente?.cnpj === ent.cnpj).length;
           return { ...ent, projectCount };
         });
-        
         setEntidades(data);
       } catch (error) {
-        console.error("Erro ao carregar entidades", error);
+        console.error('Erro ao carregar entidades', error);
       } finally {
         setLoading(false);
       }
@@ -49,6 +46,20 @@ export default function EntidadesPage() {
       e.cnpj.includes(term)
     );
   });
+
+  const handleConsolidar = async (e: React.MouseEvent, entId: string) => {
+    e.stopPropagation(); // Não navega para a entidade
+    if (consolidando) return;
+    setConsolidando(entId);
+    try {
+      await consolidarEntidade(entId);
+    } catch (err: any) {
+      console.error(err);
+      alert(`Erro ao gerar o dossiê: ${err?.message || err}`);
+    } finally {
+      setConsolidando(null);
+    }
+  };
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -97,32 +108,56 @@ export default function EntidadesPage() {
       ) : (
         <div className="bg-white rounded-xl shadow-premium overflow-hidden">
           <table className="w-full">
-            <thead className="bg-gray-50 text-left text-xs uppercase text-lie-gray">
+            <thead className="bg-gray-50 text-left text-xs uppercase text-lie-gray border-b border-gray-200">
               <tr>
                 <th className="px-4 py-3">Entidade</th>
                 <th className="px-4 py-3">Sigla</th>
                 <th className="px-4 py-3">CNPJ</th>
                 <th className="px-4 py-3">UF / Cidade</th>
                 <th className="px-4 py-3 text-center">Projetos</th>
+                <th className="px-4 py-3 text-center">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredEntidades.map((e) => (
-                <tr 
-                  key={e.id} 
+                <tr
+                  key={e.id}
                   className="hover:bg-gray-50 cursor-pointer transition-colors"
                   onClick={() => navigate(`/entidades/${e.id}`)}
                 >
                   <td className="px-4 py-3">
-                    <div className="font-medium text-lie-ink">{e.nome}</div>
+                    <div className="flex items-center gap-3">
+                      {e.logoUrl && (
+                        <img
+                          src={e.logoUrl}
+                          alt={e.nome}
+                          className="w-8 h-8 rounded object-contain bg-white border border-gray-100 shadow-sm flex-shrink-0"
+                        />
+                      )}
+                      <span className="font-medium text-lie-ink">{e.nome}</span>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-sm">{e.sigla || '-'}</td>
-                  <td className="px-4 py-3 text-sm">{e.cnpj}</td>
+                  <td className="px-4 py-3 text-sm font-mono">{e.cnpj}</td>
                   <td className="px-4 py-3 text-sm">
                     {e.uf && e.cidade ? `${e.uf} - ${e.cidade}` : '-'}
                   </td>
                   <td className="px-4 py-3 text-sm text-center font-semibold">
                     {e.projectCount}
+                  </td>
+                  <td className="px-4 py-3 text-center" onClick={(ev) => ev.stopPropagation()}>
+                    <button
+                      onClick={(ev) => handleConsolidar(ev, e.id)}
+                      disabled={!!consolidando}
+                      title="Gerar Dossiê PDF (Consolidar)"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {consolidando === e.id ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
+                      ) : (
+                        <><FileDown className="w-3.5 h-3.5" /> Consolidar</>
+                      )}
+                    </button>
                   </td>
                 </tr>
               ))}
