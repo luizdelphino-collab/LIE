@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL, getBlob } from 'firebase/storage';
-import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown, Download, Loader2 } from 'lucide-react';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import type { DocumentoEntidade, Entidade } from '../types';
 
@@ -16,7 +16,6 @@ export default function EntidadeDocumentosPage() {
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [baixandoId, setBaixandoId] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [editId, setEditId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -208,41 +207,6 @@ export default function EntidadeDocumentosPage() {
     return d.toISOString().split('T')[0];
   };
 
-  const handleDownloadFile = async (e: React.MouseEvent, url: string, fileName: string, docId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (baixandoId) return;
-
-    try {
-      setBaixandoId(docId);
-      // Extrair path do storage
-      const match = url.match(/\/o\/([^?]+)/);
-      const path = match ? decodeURIComponent(match[1]) : null;
-      
-      let blob: Blob;
-      if (path) {
-        blob = await getBlob(ref(storage, path));
-      } else {
-        const resp = await fetch(url);
-        blob = await resp.blob();
-      }
-
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-      console.error(err);
-      alert('Erro ao baixar o arquivo. Tente visualizar e salvar manualmente.');
-    } finally {
-      setBaixandoId(null);
-    }
-  };
-
   if (loading) return <div className="p-6 text-lie-gray">Carregando…</div>;
 
   return (
@@ -361,23 +325,9 @@ export default function EntidadeDocumentosPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {doc.arquivoUrl && (
-                          <>
-                            <a href={doc.arquivoUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar">
-                              <Eye className="w-4 h-4" />
-                            </a>
-                            <button 
-                              onClick={(e) => handleDownloadFile(e, doc.arquivoUrl, doc.nome, doc.id)}
-                              disabled={!!baixandoId}
-                              className="p-1.5 text-lie-green hover:bg-green-50 rounded disabled:opacity-50" 
-                              title="Baixar Direto"
-                            >
-                              {baixandoId === doc.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Download className="w-4 h-4" />
-                              )}
-                            </button>
-                          </>
+                          <a href={doc.arquivoUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar">
+                            <Eye className="w-4 h-4" />
+                          </a>
                         )}
                         <button onClick={() => openEditForm(doc)} className="p-1.5 text-gray-600 hover:bg-gray-100 rounded" title="Editar">
                           <Edit3 className="w-4 h-4" />
