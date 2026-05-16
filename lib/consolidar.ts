@@ -176,11 +176,18 @@ export async function consolidarEntidade(entidadeId: string): Promise<void> {
   pdf.setFillColor(...cor);
   pdf.rect(0, 0, PAGE_W, PAGE_H, 'F');
 
-  // Faixa inferior decorativa mais clara
-  pdf.setFillColor(...lightenRgb(cor, 0.3));
-  pdf.rect(0, PAGE_H - 40, PAGE_W, 40, 'F');
+  // Faixa inferior decorativa mais escura
+  const corEscura = cor.map(c => Math.max(0, c - 40)) as [number, number, number];
+  pdf.setFillColor(...corEscura);
+  pdf.rect(0, PAGE_H - 30, PAGE_W, 30, 'F');
 
-  let logoY = 55;
+  // --- Faixa branca central para o logo ---
+  const faixaY = PAGE_H / 2 - 40;
+  const faixaH = 80;
+  pdf.setFillColor(255, 255, 255);
+  pdf.rect(0, faixaY, PAGE_W, faixaH, 'F');
+
+  // Logo centralizado na faixa branca
   if ((entidade as any).logoUrl) {
     try {
       let imgData = (entidade as any).logoUrl as string;
@@ -188,30 +195,26 @@ export async function consolidarEntidade(entidadeId: string): Promise<void> {
         imgData = (await fetchImageAsBase64(imgData)) || '';
       }
       if (imgData) {
-        pdf.addImage(imgData, 'PNG', PAGE_W / 2 - 30, logoY, 60, 60);
-        logoY += 70;
+        const logoSize = 60;
+        pdf.addImage(imgData, 'PNG', PAGE_W / 2 - logoSize / 2, faixaY + (faixaH - logoSize) / 2, logoSize, logoSize);
       }
     } catch { /* sem logo */ }
   }
 
+  // Nome da entidade — acima da faixa branca
   pdf.setTextColor(255, 255, 255);
   pdf.setFontSize(26);
   pdf.setFont('helvetica', 'bold');
   const nomeLines = pdf.splitTextToSize(entidade.nome || '', CONTENT_W);
-  pdf.text(nomeLines, PAGE_W / 2, logoY + 10, { align: 'center' });
+  pdf.text(nomeLines, PAGE_W / 2, faixaY - 20, { align: 'center' });
 
+  // Sigla — abaixo da faixa branca
   if (entidade.sigla) {
-    pdf.setFontSize(15);
+    pdf.setFontSize(16);
     pdf.setFont('helvetica', 'normal');
-    pdf.text(entidade.sigla, PAGE_W / 2, logoY + 10 + (nomeLines.length * 9) + 8, { align: 'center' });
+    pdf.setTextColor(255, 255, 255);
+    pdf.text(entidade.sigla, PAGE_W / 2, faixaY + faixaH + 18, { align: 'center' });
   }
-
-  pdf.setFontSize(10);
-  pdf.setTextColor(255, 255, 255);
-  pdf.text('Dossiê Institucional', PAGE_W / 2, PAGE_H - 24, { align: 'center' });
-  pdf.setFontSize(8);
-  pdf.setTextColor(230, 230, 230);
-  pdf.text(new Date().toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' }), PAGE_W / 2, PAGE_H - 18, { align: 'center' });
 
   // ===== SUMÁRIO =====
   pdf.addPage();
