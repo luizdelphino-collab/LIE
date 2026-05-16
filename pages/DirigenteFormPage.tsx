@@ -150,6 +150,21 @@ export default function DirigenteFormPage() {
     }
   };
 
+  const handleExcluir = async () => {
+    if (!dirId || isNew || !entidadeId) return;
+    if (!confirm("Excluir este dirigente permanentemente?")) return;
+    
+    try {
+      setSaving(true);
+      await deleteDoc(doc(db, `entities/${entidadeId}/dirigentes`, dirId));
+      navigate(`/entidades/${entidadeId}/dirigentes`);
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao excluir dirigente.");
+      setSaving(false);
+    }
+  };
+
   // Documentos handlers
   const handleDocChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -356,9 +371,16 @@ export default function DirigenteFormPage() {
         {/* Rodapé fixo */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-20">
           <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
-            <button type="button" onClick={() => isEditing && !isNew ? setIsEditing(false) : navigate(`/entidades/${entidadeId}/dirigentes`)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 font-medium rounded-lg transition">
-              {isEditing ? 'Cancelar' : 'Voltar'}
-            </button>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => isEditing && !isNew ? setIsEditing(false) : navigate(`/entidades/${entidadeId}/dirigentes`)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 font-medium rounded-lg transition">
+                {isEditing ? 'Cancelar' : 'Voltar'}
+              </button>
+              {!isNew && isEditing && (
+                <button type="button" onClick={handleExcluir} className="px-4 py-2 text-red-600 hover:bg-red-50 font-medium rounded-lg transition flex items-center gap-2">
+                  <Trash2 className="w-4 h-4" /> Excluir Dirigente
+                </button>
+              )}
+            </div>
             <div className="flex gap-3">
               {isEditing && (
                 <button type="submit" disabled={saving} className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white px-6 py-2 font-medium rounded-lg transition">

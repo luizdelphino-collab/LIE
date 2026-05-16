@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection } from 'firebase/firestore';
-import { Save, ArrowLeft, FileText, Users, Image as ImageIcon, Edit3, X } from 'lucide-react';
+import { Save, ArrowLeft, FileText, Users, Image as ImageIcon, Edit3, X, Trash2 } from 'lucide-react';
 import { db } from '../lib/firebase';
+import { deleteDoc } from 'firebase/firestore';
 import { fetchCep } from '../lib/cep';
 import type { Entidade } from '../types';
 
@@ -194,6 +195,21 @@ export default function EntidadeFormPage() {
       console.error("Erro ao salvar", error);
       alert("Ocorreu um erro ao salvar a entidade.");
     } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExcluir = async () => {
+    if (!id || isNew) return;
+    if (!confirm("Tem certeza que deseja excluir esta entidade permanentemente?")) return;
+    
+    try {
+      setSaving(true);
+      await deleteDoc(doc(db, 'entities', id));
+      navigate('/entidades');
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao excluir entidade.");
       setSaving(false);
     }
   };
@@ -425,6 +441,11 @@ export default function EntidadeFormPage() {
               >
                 {isEditing ? 'Cancelar' : 'Voltar'}
               </button>
+              {!isNew && isEditing && (
+                <button type="button" onClick={handleExcluir} className="px-4 py-2 text-red-600 hover:bg-red-50 font-medium rounded-lg transition flex items-center gap-2">
+                  <Trash2 className="w-4 h-4" /> Excluir Entidade
+                </button>
+              )}
             </div>
             
             <div className="flex gap-3">

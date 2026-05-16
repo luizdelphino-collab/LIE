@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileDown, Loader2 } from 'lucide-react';
+import { Plus, Search, FileDown, Loader2, Trash2 } from 'lucide-react';
 import { db } from '../lib/firebase';
+import { deleteDoc, doc } from 'firebase/firestore';
 import { consolidarEntidade } from '../lib/consolidar';
 import type { Entidade, Projeto } from '../types';
 
@@ -58,6 +59,19 @@ export default function EntidadesPage() {
       alert(`Erro ao gerar o dossiê: ${err?.message || err}`);
     } finally {
       setConsolidando(null);
+    }
+  };
+
+  const handleExcluir = async (e: React.MouseEvent, entId: string, nome: string) => {
+    e.stopPropagation();
+    if (!confirm(`Tem certeza que deseja excluir a entidade "${nome}"? Esta ação não pode ser desfeita.`)) return;
+    
+    try {
+      await deleteDoc(doc(db, 'entities', entId));
+      setEntidades(prev => prev.filter(ent => ent.id !== entId));
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao excluir entidade.');
     }
   };
 
@@ -146,18 +160,27 @@ export default function EntidadesPage() {
                     {e.projectCount}
                   </td>
                   <td className="px-4 py-3 text-center" onClick={(ev) => ev.stopPropagation()}>
-                    <button
-                      onClick={(ev) => handleConsolidar(ev, e.id)}
-                      disabled={!!consolidando}
-                      title="Gerar Dossiê PDF (Consolidar)"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {consolidando === e.id ? (
-                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
-                      ) : (
-                        <><FileDown className="w-3.5 h-3.5" /> Consolidar</>
-                      )}
-                    </button>
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={(ev) => handleConsolidar(ev, e.id)}
+                        disabled={!!consolidando}
+                        title="Gerar Dossiê PDF (Consolidar)"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {consolidando === e.id ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
+                        ) : (
+                          <><FileDown className="w-3.5 h-3.5" /> Consolidar</>
+                        )}
+                      </button>
+                      <button
+                        onClick={(ev) => handleExcluir(ev, e.id, e.nome)}
+                        title="Excluir Entidade"
+                        className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
