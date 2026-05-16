@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileDown, Loader2, Files } from 'lucide-react';
+import { Plus, Search, FileDown, Loader2, Files, X, Download, Folder, User } from 'lucide-react';
 import { ref, getBlob } from 'firebase/storage';
 import JSZip from 'jszip';
 import { db, storage } from '../lib/firebase';
@@ -18,6 +18,7 @@ export default function EntidadesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [consolidando, setConsolidando] = useState<string | null>(null);
   const [baixandoDocs, setBaixandoDocs] = useState<{ id: string; current: number; total: number } | null>(null);
+  const [modalDocs, setModalDocs] = useState<{ open: boolean; entId: string; entNome: string; sigla: string; data: any } | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -64,136 +65,111 @@ export default function EntidadesPage() {
     }
   };
 
-  const handleDownloadDocs = async (e: React.MouseEvent, entId: string) => {
+  const openDocsModal = async (e: React.MouseEvent, ent: Entidade) => {
     e.stopPropagation();
-    if (baixandoDocs) return;
+    setModalDocs({ open: true, entId: ent.id, entNome: ent.nome, sigla: ent.sigla || 'Entidade', data: null });
     
     try {
-      const ent = entidades.find(item => item.id === entId);
-      if (!ent) return;
-
-      setBaixandoDocs({ id: entId, current: 0, total: 0 });
-
-      const zip = new JSZip();
-      const rootFolder = zip.folder(`${ent.sigla || 'Entidade'}_Documentos`);
-      if (!rootFolder) return;
-      
-      const entidadeFolder = rootFolder.folder('1. Entidade');
-      const dirigentesFolder = rootFolder.folder('2. Dirigentes');
-
-      // 1. Coletar todas as tarefas de download
-      const downloadTasks: { folder: JSZip; url: string; fileName: string }[] = [];
-
-      // Documentos da entidade
+      const entId = ent.id;
+      // Carregar estrutura completa
       const entDocsSnap = await getDocs(collection(db, `entities/${entId}/documentos`));
-      const entDocs = entDocsSnap.docs
-        .map(d => d.data())
-        .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      const entDocs = entDocsSnap.docs.map(d => d.data()).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      for (let i = 0; i < entDocs.length; i++) {
-        const d = entDocs[i];
-        if (d.arquivoUrl && entidadeFolder) {
-          const ext = d.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : '';
-          downloadTasks.push({
-            folder: entidadeFolder,
-            url: d.arquivoUrl,
-            fileName: `${i + 1}. ${d.nome || 'Documento'}${ext}`
-          });
-        }
-      }
-
-      // Dirigentes
       const dirsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes`));
-      const dirigentes = dirsSnap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a: any, b: any) => (a.ordem || 0) - (b.ordem || 0));
-
-      for (const dir of dirigentes) {
-        if (dirigentesFolder) {
-          const dirFolder = dirigentesFolder.folder(dir.nome || 'Sem Nome');
-          if (dirFolder) {
-            const dirDocsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes/${dir.id}/documentos`));
-            const dirDocs = dirDocsSnap.docs
-              .map(d => d.data())
-              .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
-            
-            for (let j = 0; j < dirDocs.length; j++) {
-              const dd = dirDocs[j];
-              if (dd.arquivoUrl) {
-                const ext = dd.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : '';
-                downloadTasks.push({
-                  folder: dirFolder,
-                  url: dd.arquivoUrl,
-                  fileName: `${j + 1}. ${dd.nome || 'Documento'}${ext}`
-                });
-              }
-            }
-          }
-        }
+      const dirigentes = [];
+      for (const d of dirsSnap.docs) {
+        const dirData = { id: d.id, ...d.data() };
+        const dirDocsSnap = await getDocs(collection(db, `entities/${entId}/dirigentes/${d.id}/documentos`));
+        (dirData as any).documentos = dirDocsSnap.docs.map(dd => dd.data()).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+        dirigentes.push(dirData);
       }
 
-      setBaixandoDocs(prev => prev ? { ...prev, total: downloadTasks.length } : null);
-
-      if (downloadTasks.length === 0) {
-        alert('Nenhum documento encontrado para baixar.');
-        setBaixandoDocs(null);
-        return;
-      }
-
-      // 2. Executar downloads em paralelo com limite de concorrência (5 por vez)
-      const CONCURRENCY = 5;
-      const failedFiles: string[] = [];
-      let completedCount = 0;
-
-      const runTask = async (task: typeof downloadTasks[0]) => {
-        try {
-          const match = task.url.match(/\/o\/([^?]+)/);
-          const path = match ? decodeURIComponent(match[1]) : null;
-          if (path) {
-            // Timeout de 30s por arquivo
-            const blobPromise = getBlob(ref(storage, path));
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000));
-            const blob = await Promise.race([blobPromise, timeoutPromise]) as Blob;
-            task.folder.file(task.fileName, blob);
-          }
-        } catch (err) {
-          console.error(`Erro ao baixar ${task.fileName}:`, err);
-          failedFiles.push(task.fileName);
-        } finally {
-          completedCount++;
-          setBaixandoDocs(prev => prev ? { ...prev, current: completedCount } : null);
-        }
-      };
-
-      // Processar em lotes
-      for (let i = 0; i < downloadTasks.length; i += CONCURRENCY) {
-        const batch = downloadTasks.slice(i, i + CONCURRENCY);
-        await Promise.all(batch.map(task => runTask(task)));
-      }
-
-      // 3. Gerar ZIP
-      if (downloadTasks.length > failedFiles.length) {
-        const content = await zip.generateAsync({ type: 'blob' });
-        const url = URL.createObjectURL(content);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${ent.sigla || 'Entidade'}_Documentos.zip`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      }
-
-      if (failedFiles.length > 0) {
-        alert(`Atenção: ${failedFiles.length} arquivos não puderam ser baixados e foram pulados.`);
-      }
-
+      setModalDocs(prev => prev ? { ...prev, data: { entDocs, dirigentes } } : null);
     } catch (err) {
       console.error(err);
-      alert('Erro ao gerar o pacote de documentos.');
+      alert('Erro ao carregar lista de documentos.');
+    }
+  };
+
+  const handleDownloadZipFromModal = async () => {
+    if (!modalDocs || !modalDocs.data || baixandoDocs) return;
+    const { entId, sigla, data } = modalDocs;
+    
+    setBaixandoDocs({ id: entId, current: 0, total: 0 });
+    
+    try {
+      const zip = new JSZip();
+      const rootFolder = zip.folder(`${sigla}_Documentos`);
+      const entidadeFolder = rootFolder?.folder('1. Entidade');
+      const dirigentesFolder = rootFolder?.folder('2. Dirigentes');
+
+      const tasks: { folder: JSZip; url: string; fileName: string }[] = [];
+
+      data.entDocs.forEach((d: any, i: number) => {
+        if (d.arquivoUrl && entidadeFolder) {
+          const ext = d.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : '';
+          tasks.push({ folder: entidadeFolder, url: d.arquivoUrl, fileName: `${i + 1}. ${d.nome || 'Doc'}${ext}` });
+        }
+      });
+
+      data.dirigentes.forEach((dir: any) => {
+        const dirFolder = dirigentesFolder?.folder(dir.nome || 'Sem Nome');
+        if (dirFolder) {
+          dir.documentos.forEach((dd: any, j: number) => {
+            if (dd.arquivoUrl) {
+              const ext = dd.arquivoUrl.toLowerCase().includes('.pdf') ? '.pdf' : '';
+              tasks.push({ folder: dirFolder, url: dd.arquivoUrl, fileName: `${j + 1}. ${dd.nome || 'Doc'}${ext}` });
+            }
+          });
+        }
+      });
+
+      setBaixandoDocs(prev => prev ? { ...prev, total: tasks.length } : null);
+      let count = 0;
+      const failed = [];
+
+      for (const t of tasks) {
+        try {
+          const match = t.url.match(/\/o\/([^?]+)/);
+          const path = match ? decodeURIComponent(match[1]) : null;
+          if (path) {
+            const blob = await getBlob(ref(storage, path));
+            t.folder.file(t.fileName, blob);
+          } else {
+            // Tentar download direto se não for link do storage
+            const resp = await fetch(t.url);
+            const blob = await resp.blob();
+            t.folder.file(t.fileName, blob);
+          }
+        } catch (err) {
+          console.error(err);
+          failed.push(t.fileName);
+        } finally {
+          count++;
+          setBaixandoDocs(prev => prev ? { ...prev, current: count } : null);
+        }
+      }
+
+      if (tasks.length > failed.length) {
+        const content = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${sigla}_Documentos.zip`;
+        a.click();
+      }
+
+      if (failed.length > 0) alert(`${failed.length} arquivos falharam no ZIP e foram pulados.`);
+    } catch (err) {
+      alert('Erro ao gerar ZIP.');
     } finally {
       setBaixandoDocs(null);
     }
+  };
+
+  const handleDownloadDocs = async (e: React.MouseEvent, entId: string) => {
+    // Agora delegamos para o modal, mas mantemos o nome da função para não quebrar a tipagem se necessário
+    // Mas vamos mudar o onClick no JSX para openDocsModal
   };
 
   return (
@@ -296,16 +272,12 @@ export default function EntidadesPage() {
                       </button>
 
                       <button
-                        onClick={(ev) => handleDownloadDocs(ev, e.id)}
+                        onClick={(ev) => openDocsModal(ev, e)}
                         disabled={!!consolidando || !!baixandoDocs}
-                        title="Baixar todos os anexos PDF"
+                        title="Ver documentos e baixar anexos"
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {baixandoDocs?.id === e.id ? (
-                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {baixandoDocs.total > 0 ? `${baixandoDocs.current}/${baixandoDocs.total}` : 'Lendo...'}</>
-                        ) : (
-                          <><Files className="w-3.5 h-3.5" /> Documentos</>
-                        )}
+                        <Files className="w-3.5 h-3.5" /> Documentos
                       </button>
                     </div>
                   </td>
@@ -313,6 +285,104 @@ export default function EntidadesPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {/* Modal de Documentos */}
+      {modalDocs?.open && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+            <header className="p-4 border-b flex items-center justify-between bg-gray-50">
+              <div>
+                <h2 className="text-xl font-bold text-lie-ink">{modalDocs.sigla} - Documentos</h2>
+                <p className="text-sm text-lie-gray line-clamp-1">{modalDocs.entNome}</p>
+              </div>
+              <button onClick={() => setModalDocs(null)} className="p-2 hover:bg-gray-200 rounded-full transition">
+                <X className="w-6 h-6 text-gray-500" />
+              </button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-8">
+              {!modalDocs.data ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-4">
+                  <Loader2 className="w-10 h-10 text-lie-green animate-spin" />
+                  <p className="text-lie-gray font-medium">Carregando estrutura de pastas...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Seção Entidade */}
+                  <section>
+                    <div className="flex items-center gap-2 mb-3 text-lie-green font-bold text-sm uppercase tracking-wider">
+                      <Folder className="w-4 h-4" /> 1. Entidade
+                    </div>
+                    <div className="space-y-2">
+                      {modalDocs.data.entDocs.map((doc: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition border border-gray-100 group">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-mono text-gray-400 w-4">{i + 1}.</span>
+                            <span className="text-sm font-medium text-gray-700">{doc.nome || 'Documento'}</span>
+                          </div>
+                          <a href={doc.arquivoUrl} target="_blank" rel="noreferrer" className="p-2 text-lie-green hover:bg-lie-green/10 rounded-lg transition" title="Baixar este arquivo">
+                            <Download className="w-4 h-4" />
+                          </a>
+                        </div>
+                      ))}
+                      {modalDocs.data.entDocs.length === 0 && <p className="text-xs text-gray-400 italic ml-6">Nenhum documento na pasta da entidade.</p>}
+                    </div>
+                  </section>
+
+                  {/* Seção Dirigentes */}
+                  <section>
+                    <div className="flex items-center gap-2 mb-3 text-blue-600 font-bold text-sm uppercase tracking-wider">
+                      <Folder className="w-4 h-4" /> 2. Dirigentes
+                    </div>
+                    <div className="space-y-6 ml-4 border-l-2 border-gray-100 pl-4">
+                      {modalDocs.data.dirigentes.map((dir: any, i: number) => (
+                        <div key={i} className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm font-bold text-gray-600">
+                            <User className="w-4 h-4" /> {dir.nome}
+                          </div>
+                          <div className="space-y-1">
+                            {dir.documentos.map((doc: any, j: number) => (
+                              <div key={j} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg transition group pl-2">
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs font-mono text-gray-300 w-4">{j + 1}.</span>
+                                  <span className="text-sm text-gray-600">{doc.nome || 'Documento'}</span>
+                                </div>
+                                <a href={doc.arquivoUrl} target="_blank" rel="noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition opacity-0 group-hover:opacity-100">
+                                  <Download className="w-3.5 h-3.5" />
+                                </a>
+                              </div>
+                            ))}
+                            {dir.documentos.length === 0 && <p className="text-xs text-gray-400 italic ml-7">Sem documentos.</p>}
+                          </div>
+                        </div>
+                      ))}
+                      {modalDocs.data.dirigentes.length === 0 && <p className="text-xs text-gray-400 italic">Nenhum dirigente cadastrado.</p>}
+                    </div>
+                  </section>
+                </>
+              )}
+            </div>
+
+            <footer className="p-4 border-t bg-gray-50 flex items-center justify-end gap-3">
+              <button onClick={() => setModalDocs(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg font-medium transition">
+                Fechar
+              </button>
+              {modalDocs.data && (
+                <button 
+                  onClick={handleDownloadZipFromModal}
+                  disabled={!!baixandoDocs}
+                  className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white px-6 py-2 rounded-lg font-bold transition shadow-lg disabled:opacity-50"
+                >
+                  {baixandoDocs ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Baixando ZIP ({baixandoDocs.current}/{baixandoDocs.total})</>
+                  ) : (
+                    <><FileDown className="w-4 h-4" /> Baixar Tudo em ZIP</>
+                  )}
+                </button>
+              )}
+            </footer>
+          </div>
         </div>
       )}
     </div>
