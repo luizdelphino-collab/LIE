@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileDown, Loader2, Files, X, Download, Folder, User } from 'lucide-react';
-import { ref, getBlob } from 'firebase/storage';
-import JSZip from 'jszip';
-import { db, storage } from '../lib/firebase';
+import { Plus, Search, FileDown, Loader2 } from 'lucide-react';
+import { db } from '../lib/firebase';
 import { consolidarEntidade } from '../lib/consolidar';
 import type { Entidade, Projeto } from '../types';
 
@@ -17,8 +15,6 @@ export default function EntidadesPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [consolidando, setConsolidando] = useState<string | null>(null);
-  const [baixandoDocs, setBaixandoDocs] = useState<{ id: string; current: number; total: number } | null>(null);
-  const [modalDocs, setModalDocs] = useState<{ open: boolean; entId: string; entNome: string; sigla: string; data: any } | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -303,29 +299,18 @@ export default function EntidadesPage() {
                     {e.projectCount}
                   </td>
                   <td className="px-4 py-3 text-center" onClick={(ev) => ev.stopPropagation()}>
-                    <div className="flex items-center justify-center gap-2">
-                      <button
-                        onClick={(ev) => handleConsolidar(ev, e.id)}
-                        disabled={!!consolidando || !!baixandoDocs}
-                        title="Gerar Dossiê PDF (Consolidar)"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {consolidando === e.id ? (
-                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
-                        ) : (
-                          <><FileDown className="w-3.5 h-3.5" /> Consolidar</>
-                        )}
-                      </button>
-
-                      <button
-                        onClick={(ev) => openDocsModal(ev, e)}
-                        disabled={!!consolidando || !!baixandoDocs}
-                        title="Ver documentos e baixar anexos"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <Files className="w-3.5 h-3.5" /> Documentos
-                      </button>
-                    </div>
+                    <button
+                      onClick={(ev) => handleConsolidar(ev, e.id)}
+                      disabled={!!consolidando}
+                      title="Gerar Dossiê PDF (Consolidar)"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {consolidando === e.id ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
+                      ) : (
+                        <><FileDown className="w-3.5 h-3.5" /> Consolidar</>
+                      )}
+                    </button>
                   </td>
                 </tr>
               ))}

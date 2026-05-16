@@ -90,7 +90,7 @@ export default function DirigentesPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {dirigentes.map((d, index) => (
-                <tr key={d.id} className="hover:bg-gray-50">
+                <tr key={d.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/entidades/${id}/dirigentes/${d.id}`)}>
                   <td className="px-4 py-3 text-center">
                     <div className="flex flex-col items-center gap-0.5 text-gray-400">
                       <button onClick={() => mover(index, 'up')} disabled={index === 0} className="hover:text-lie-ink disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
@@ -102,7 +102,7 @@ export default function DirigentesPage() {
                   <td className="px-4 py-3 text-sm">{d.cpf || '-'}</td>
                   <td className="px-4 py-3 text-sm">{d.telefone || '-'}</td>
                   <td className="px-4 py-3 text-sm">{d.email || '-'}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => navigate(`/entidades/${id}/dirigentes/${d.id}`)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar / Editar">
                         <Eye className="w-4 h-4" />

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown, Download } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import type { DocumentoEntidade, Entidade } from '../types';
 
@@ -325,9 +325,14 @@ export default function EntidadeDocumentosPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {doc.arquivoUrl && (
-                          <a href={doc.arquivoUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Ver Arquivo">
-                            <Eye className="w-4 h-4" />
-                          </a>
+                          <>
+                            <a href={doc.arquivoUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar">
+                              <Eye className="w-4 h-4" />
+                            </a>
+                            <a href={doc.arquivoUrl} download={doc.nome} target="_blank" rel="noopener noreferrer" className="p-1.5 text-lie-green hover:bg-green-50 rounded" title="Baixar">
+                              <Download className="w-4 h-4" />
+                            </a>
+                          </>
                         )}
                         <button onClick={() => openEditForm(doc)} className="p-1.5 text-gray-600 hover:bg-gray-100 rounded" title="Editar">
                           <Edit3 className="w-4 h-4" />

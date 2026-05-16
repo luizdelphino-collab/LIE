@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getDocs, deleteDoc } from 'firebase/firestore';
-import { ArrowLeft, Save, Edit3, FileText, Plus, Eye, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowLeft, Save, Edit3, FileText, Plus, Eye, Trash2, ArrowUp, ArrowDown, Download } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { fetchCep } from '../lib/cep';
 import type { Dirigente, Entidade } from '../types';
@@ -462,7 +462,14 @@ export default function DirigenteFormPage() {
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">
                             {d.arquivoUrl && (
-                              <a href={d.arquivoUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Ver PDF"><Eye className="w-4 h-4" /></a>
+                              <>
+                                <a href={d.arquivoUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar">
+                                  <Eye className="w-4 h-4" />
+                                </a>
+                                <a href={d.arquivoUrl} download={d.nome} target="_blank" rel="noopener noreferrer" className="p-1.5 text-lie-green hover:bg-green-50 rounded" title="Baixar">
+                                  <Download className="w-4 h-4" />
+                                </a>
+                              </>
                             )}
                             <button onClick={() => openEditDoc(d)} className="p-1.5 text-gray-600 hover:bg-gray-100 rounded" title="Editar"><FileText className="w-4 h-4" /></button>
                             <button onClick={() => deleteDoc_(d.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
