@@ -71,13 +71,15 @@ function NavItem({
       to={to}
       end={end}
       className={({ isActive }) =>
-        `flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${
-          isActive ? 'bg-lie-green/10 text-lie-green' : 'text-lie-gray hover:bg-gray-100'
+        `group flex items-center p-2 rounded-lg text-sm font-medium transition-all duration-300 overflow-hidden ${
+          isActive ? 'bg-lie-green/10 text-lie-green' : 'text-lie-gray hover:bg-gray-100 hover:text-lie-ink'
         }`
       }
     >
-      {icon}
-      {label}
+      <div className="shrink-0">{icon}</div>
+      <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out">
+        {label}
+      </span>
     </NavLink>
   );
 }
