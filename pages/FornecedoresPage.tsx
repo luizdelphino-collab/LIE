@@ -55,9 +55,12 @@ export default function FornecedoresPage() {
         </div>
         <Link
           to="/fornecedores/novo"
-          className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white font-medium px-4 py-2 rounded-lg shadow-sm transition"
+          className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
         >
-          <Plus className="w-4 h-4" /> Novo Fornecedor
+          <Plus className="w-5 h-5 shrink-0" />
+          <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+            Novo Fornecedor
+          </span>
         </Link>
       </header>
 

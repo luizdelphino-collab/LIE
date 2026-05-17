@@ -280,38 +280,49 @@ export default function ProjetoFormPage() {
           <div className="flex gap-2">
             <button 
               onClick={() => navigate(`/projetos/${id}/itens`)}
-              className="inline-flex items-center gap-2 bg-white border border-gray-300 text-amber-600 px-4 py-2 rounded-lg hover:bg-amber-50 transition font-medium"
+              className="group flex items-center bg-white border border-gray-300 text-amber-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-amber-50 shadow-sm"
             >
-              <Package className="w-4 h-4" />
-              Itens
+              <Package className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Itens
+              </span>
             </button>
             <button 
               onClick={() => navigate(`/projetos/${id}/cronograma`)}
-              className="inline-flex items-center gap-2 bg-white border border-gray-300 text-emerald-600 px-4 py-2 rounded-lg hover:bg-emerald-50 transition font-medium"
+              className="group flex items-center bg-white border border-gray-300 text-emerald-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-emerald-50 shadow-sm"
             >
-              <Calendar className="w-4 h-4" />
-              Cronograma Financeiro
+              <Calendar className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Cronograma Financeiro
+              </span>
             </button>
             <button 
               onClick={() => navigate(`/projetos/${id}/documentos`)}
-              className="inline-flex items-center gap-2 bg-white border border-gray-300 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 transition font-medium"
+              className="group flex items-center bg-white border border-gray-300 text-blue-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-blue-50 shadow-sm"
             >
-              <FileText className="w-4 h-4" />
-              Documentos
+              <FileText className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Documentos
+              </span>
             </button>
             <button 
               onClick={handleConsolidar} 
               disabled={consolidando}
-              className="inline-flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition font-medium"
+              className="group flex items-center bg-white border border-gray-300 text-gray-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-50 shadow-sm"
             >
-              {consolidando ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
-              Consolidar PDF
+              {consolidando ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : <FileDown className="w-5 h-5 shrink-0" />}
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Consolidar PDF
+              </span>
             </button>
             <button 
               onClick={() => setIsEditing(true)} 
-              className="inline-flex items-center gap-2 bg-lie-green text-white px-4 py-2 rounded-lg hover:bg-lie-greenDark transition font-medium"
+              className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
             >
-              <Edit3 className="w-4 h-4" /> Editar Projeto
+              <Edit3 className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Editar Projeto
+              </span>
             </button>
           </div>
         )}

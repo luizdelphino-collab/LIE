@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Save, ArrowLeft, Image as ImageIcon, MapPin, Building2, Phone, Mail, FileText, Globe, Plus, Trash2, X } from 'lucide-react';
+import { Save, ArrowLeft, Image as ImageIcon, MapPin, Building2, Phone, Mail, FileText, Globe, Plus, Trash2, X, Users, Edit3 } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { deleteDoc } from 'firebase/firestore';
 import { fetchCep } from '../lib/cep';
