@@ -6,6 +6,15 @@ import DashboardPage from './pages/DashboardPage';
 import ProjetosPage from './pages/ProjetosPage';
 import ProjetoFormPage from './pages/ProjetoFormPage';
 import ProjetoDocumentosPage from './pages/ProjetoDocumentosPage';
+import ProjetoCronogramaPage from './pages/ProjetoCronogramaPage';
+import ItensMasterPage from './pages/ItensMasterPage';
+import ProjetoItensPage from './pages/ProjetoItensPage';
+import FornecedoresPage from './pages/FornecedoresPage';
+import FornecedorFormPage from './pages/FornecedorFormPage';
+import FornecedorDocumentosPage from './pages/FornecedorDocumentosPage';
+import ExecucaoProjetosPage from './pages/ExecucaoProjetosPage';
+import ExecucaoFornecedoresPage from './pages/ExecucaoFornecedoresPage';
+import ExecucaoMensalPage from './pages/ExecucaoMensalPage';
 
 import EntidadesPage from './pages/EntidadesPage';
 import EntidadeFormPage from './pages/EntidadeFormPage';
@@ -44,6 +53,19 @@ export default function App() {
           <Route path="/projetos/novo" element={<ProjetoFormPage />} />
           <Route path="/projetos/:id" element={<ProjetoFormPage />} />
           <Route path="/projetos/:id/documentos" element={<ProjetoDocumentosPage />} />
+          <Route path="/projetos/:id/itens" element={<ProjetoItensPage />} />
+          <Route path="/projetos/:id/cronograma" element={<ProjetoCronogramaPage />} />
+          <Route path="/itens" element={<ItensMasterPage />} />
+          <Route path="/fornecedores" element={<FornecedoresPage />} />
+          <Route path="/fornecedores/novo" element={<FornecedorFormPage />} />
+          <Route path="/fornecedores/:id" element={<FornecedorFormPage />} />
+          <Route path="/fornecedores/:id/documentos" element={<FornecedorDocumentosPage />} />
+          
+          {/* Execução */}
+          <Route path="/execucao" element={<ExecucaoProjetosPage />} />
+          <Route path="/execucao/:id/fornecedores" element={<ExecucaoFornecedoresPage />} />
+          <Route path="/execucao/:id/mensal" element={<ExecucaoMensalPage />} />
+
           <Route path="/relatorios" element={<div className="p-8 text-lie-gray">Relatórios — em construção</div>} />
           <Route path="/usuarios" element={<div className="p-8 text-lie-gray">Usuários — em construção</div>} />
           

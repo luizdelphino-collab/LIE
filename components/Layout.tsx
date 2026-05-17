@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, LogOut, FileText, Users, Building2 } from 'lucide-react';
+import { LayoutDashboard, Briefcase, LogOut, FileText, Users, Building2, Package, Truck, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Layout() {
@@ -25,6 +25,9 @@ export default function Layout() {
             <NavItem to="/" icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" end />
             <NavItem to="/entidades" icon={<Building2 className="w-4 h-4" />} label="Entidades" />
             <NavItem to="/projetos" icon={<Briefcase className="w-4 h-4" />} label="Projetos" />
+            <NavItem to="/itens" icon={<Package className="w-4 h-4" />} label="Itens" />
+            <NavItem to="/fornecedores" icon={<Truck className="w-4 h-4" />} label="Fornecedores" />
+            <NavItem to="/execucao" icon={<ClipboardCheck className="w-4 h-4" />} label="Execução" />
             <NavItem to="/relatorios" icon={<FileText className="w-4 h-4" />} label="Relatórios" />
             <NavItem to="/usuarios" icon={<Users className="w-4 h-4" />} label="Usuários" />
           </nav>

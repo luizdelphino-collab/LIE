@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, FileDown, FileText } from 'lucide-react';
+import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, FileDown, FileText, Package } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { consolidarProjeto } from '../lib/consolidarProjeto';
 import RubricaModal from '../components/RubricaModal';
@@ -208,6 +208,7 @@ export default function ProjetoFormPage() {
       const projId = isNew ? doc(collection(db, 'projects')).id : id!;
       const payload = {
         ...formData,
+        duracaoMeses: calculateStages(),
         atualizadoEm: serverTimestamp(),
       };
       if (isNew) (payload as any).criadoEm = serverTimestamp();
@@ -277,6 +278,20 @@ export default function ProjetoFormPage() {
         </div>
         {!isNew && !isEditing && (
           <div className="flex gap-2">
+            <button 
+              onClick={() => navigate(`/projetos/${id}/itens`)}
+              className="inline-flex items-center gap-2 bg-white border border-gray-300 text-amber-600 px-4 py-2 rounded-lg hover:bg-amber-50 transition font-medium"
+            >
+              <Package className="w-4 h-4" />
+              Itens
+            </button>
+            <button 
+              onClick={() => navigate(`/projetos/${id}/cronograma`)}
+              className="inline-flex items-center gap-2 bg-white border border-gray-300 text-emerald-600 px-4 py-2 rounded-lg hover:bg-emerald-50 transition font-medium"
+            >
+              <Calendar className="w-4 h-4" />
+              Cronograma Financeiro
+            </button>
             <button 
               onClick={() => navigate(`/projetos/${id}/documentos`)}
               className="inline-flex items-center gap-2 bg-white border border-gray-300 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 transition font-medium"

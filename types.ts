@@ -94,6 +94,7 @@ export interface Projeto {
   resumo?: string;
   mesInicio?: string; // YYYY-MM
   mesTermino?: string; // YYYY-MM
+  duracaoMeses?: number;
   ambitoAplicacao?: AmbitoAplicacao;
   locais?: LocalExecucao[];
   modalidades?: string[];
@@ -274,6 +275,91 @@ export interface DocumentoProjeto {
   criadoEm: Timestamp;
 }
 
+// ---------- Itens (Banco de Dados de Itens) ----------
+
+export type CategoriaItem =
+  | 'Alimento'
+  | 'Transporte'
+  | 'Material Esportivo'
+  | 'Material não Esportivo'
+  | 'Recurso Humano'
+  | 'Outro';
+
+export type UnidadeMedida =
+  | 'diária'
+  | 'metro'
+  | 'metro²'
+  | 'unidade'
+  | 'pacote'
+  | 'caixa'
+  | 'kit'
+  | 'mês'
+  | 'Kg';
+
+export interface ItemMaster {
+  id: string;
+  codigo: number; // Gerado sequencialmente
+  nome: string;
+  descricao?: string;
+  unidade: UnidadeMedida | string;
+  valorUnitario: number;
+  categoria: CategoriaItem | string;
+  criadoEm: Timestamp;
+}
+
+export interface ItemProjeto {
+  id: string;
+  projectId: string;
+  itemId: string; // Referência ao ItemMaster
+  nome: string; // Copiado para histórico
+  descricao?: string;
+  unidade: string;
+  valorUnitario: number;
+  memorialCalculo: string;
+  quantidade: number;
+  valorTotal: number;
+  ordem?: number;
+  fornecedoresIds?: string[]; // IDs dos fornecedores vinculados ao item na execução
+  criadoEm: Timestamp;
+}
+
+export interface CronogramaItem {
+  id: string;
+  projectId: string;
+  itemProjetoId: string;
+  mes: number;
+  quantidade: number;
+  valorTotal: number;
+  criadoEm: Timestamp;
+}
+
+// ---------- Execução Mensal ----------
+
+export type StatusExecucaoMes = 'pendente' | 'consolidado';
+
+export interface ExecucaoMensalItemFornecedor {
+  fornecedorId: string;
+  quantidade: number;
+  notaFiscalUrl?: string;
+  comprovanteUrl?: string;
+  extratoBancarioUrl?: string;
+}
+
+export interface ExecucaoMensalItem {
+  itemProjetoId: string;
+  fornecedoresExecucao: ExecucaoMensalItemFornecedor[];
+}
+
+export interface ExecucaoMensal {
+  id: string;
+  projectId: string;
+  mes: number;
+  status: StatusExecucaoMes;
+  itens: ExecucaoMensalItem[];
+  consolidadoEm?: Timestamp;
+  atualizadoEm?: Timestamp;
+}
+
 // ---------- Relatórios ----------
 
 export type TipoRelatorio = 'mensal' | 'trimestral' | 'semestral' | 'final' | 'parcial';
@@ -433,5 +519,60 @@ export interface DocumentoDirigente {
   validade?: Timestamp;
   observacao?: string;
   arquivoUrl: string;
+  criadoEm: Timestamp;
+}
+
+// ---------- Fornecedores ----------
+
+export interface Fornecedor {
+  id: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  cnpj: string;
+  atuacaoPrimaria: string;
+  atuacoesSecundarias?: string[];
+  logoUrl?: string;
+
+  // Endereço
+  cep?: string;
+  logradouro?: string;
+  numero?: string;
+  complemento?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+
+  // Contato
+  telefoneComercial?: string;
+  celular?: string;
+  email?: string;
+  site?: string;
+  instagram?: string;
+  facebook?: string;
+  outraRede?: string;
+  
+  observacoes?: string;
+  criadoEm: Timestamp;
+  atualizadoEm?: Timestamp;
+}
+
+export type TipoDocumentoFornecedor =
+  | 'CNPJ'
+  | 'Certidão'
+  | 'Estatuto'
+  | 'Contrato Social'
+  | 'Ata'
+  | 'Outro';
+
+export interface DocumentoFornecedor {
+  id: string;
+  fornecedorId: string;
+  nome: string;
+  tipo: TipoDocumentoFornecedor | string;
+  emissao?: Timestamp;
+  validade?: Timestamp;
+  observacao?: string;
+  arquivoUrl: string;
+  ordem?: number;
   criadoEm: Timestamp;
 }
