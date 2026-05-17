@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, writeBatch, orderBy } from 'firebase/firestore';
-import { ArrowLeft, Save, Loader2, FileSpreadsheet, Users, CalendarDays, Check } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, FileSpreadsheet, Users, CalendarDays, Check, Plus } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { ItemMaster, ItemProjeto, Projeto, Fornecedor } from '../types';
