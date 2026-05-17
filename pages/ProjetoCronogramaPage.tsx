@@ -343,17 +343,22 @@ export default function ProjetoCronogramaPage() {
           <button 
             onClick={exportToExcel} 
             disabled={itensProjeto.length === 0}
-            className="inline-flex items-center gap-2 bg-white border border-gray-300 text-green-700 hover:bg-green-50 font-medium px-4 py-2 rounded-lg shadow-sm transition disabled:opacity-50"
+            className="group flex items-center bg-white border border-gray-300 text-green-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-green-50 shadow-sm disabled:opacity-50"
           >
-            <FileSpreadsheet className="w-4 h-4" /> Exportar Planilha Completa
+            <FileSpreadsheet className="w-5 h-5 shrink-0" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+              Exportar Planilha Completa
+            </span>
           </button>
           <button 
             onClick={handleSave} 
             disabled={saving}
-            className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white font-bold px-6 py-2 rounded-lg shadow-sm transition"
+            className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
           >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {saving ? 'Salvando...' : 'Salvar Cronograma'}
+            {saving ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <Save className="w-5 h-5 shrink-0" />}
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+              {saving ? 'Salvando...' : 'Salvar Cronograma'}
+            </span>
           </button>
         </div>
       </header>

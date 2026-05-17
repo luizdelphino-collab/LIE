@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, MapPin, Globe, Instagram, Facebook, Share2, Info, Loader2, FileText } from 'lucide-react';
+import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, MapPin, Globe, Instagram, Facebook, Share2, Info, Loader2, FileText, Edit3, FileDown, X } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { fetchCep } from '../lib/cep';
 import type { Fornecedor } from '../types';
+import { consolidarFornecedor } from '../lib/consolidarFornecedor';
 
 export default function FornecedorFormPage() {
   const { id } = useParams();
@@ -14,6 +15,7 @@ export default function FornecedorFormPage() {
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  const [isEditing, setIsEditing] = useState(isNew);
   const [secundarias, setSecundarias] = useState<string[]>([]);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -138,6 +140,16 @@ export default function FornecedorFormPage() {
 
   if (loading) return <div className="p-8 text-lie-gray">Carregando...</div>;
 
+  const handleGerarPDF = async () => {
+    if (!id) return;
+    try {
+      await consolidarFornecedor(id);
+    } catch (e) {
+      console.error(e);
+      alert('Erro ao gerar PDF');
+    }
+  };
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <header className="flex items-center justify-between mb-8">
@@ -147,20 +159,75 @@ export default function FornecedorFormPage() {
           </button>
           <h1 className="text-2xl font-bold text-lie-ink">{isNew ? 'Novo Fornecedor' : 'Editar Fornecedor'}</h1>
         </div>
-        {!isNew && (
-          <button 
-            onClick={() => navigate(`/fornecedores/${id}/documentos`)}
-            className="group flex items-center bg-white border border-gray-300 text-blue-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-blue-50 shadow-sm"
-          >
-            <FileText className="w-5 h-5 shrink-0" />
-            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
-              Documentos
-            </span>
-          </button>
-        )}
+        <div className="flex gap-2">
+          {!isNew && !isEditing && (
+            <button 
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
+            >
+              <Edit3 className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Editar Cadastro
+              </span>
+            </button>
+          )}
+          {!isNew && !isEditing && (
+            <button 
+              type="button"
+              onClick={handleGerarPDF}
+              className="group flex items-center bg-white border border-gray-300 text-gray-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-50 shadow-sm"
+            >
+              <FileDown className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Gerar PDF
+              </span>
+            </button>
+          )}
+          {!isNew && (
+            <button 
+              type="button"
+              onClick={() => navigate(`/fornecedores/${id}/documentos`)}
+              className="group flex items-center bg-white border border-gray-300 text-blue-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-blue-50 shadow-sm"
+            >
+              <FileText className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Documentos
+              </span>
+            </button>
+          )}
+          {isEditing && (
+            <>
+              {!isNew && (
+                <button 
+                  type="button" 
+                  onClick={() => setIsEditing(false)} 
+                  className="group flex items-center bg-white border border-gray-300 text-gray-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-100 shadow-sm"
+                >
+                  <X className="w-5 h-5 shrink-0" />
+                  <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                    Cancelar
+                  </span>
+                </button>
+              )}
+              <button 
+                type="submit" 
+                form="fornecedor-form"
+                disabled={saving}
+                className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <Save className="w-5 h-5 shrink-0" />}
+                <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                  {saving ? 'Salvando...' : 'Salvar'}
+                </span>
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form id="fornecedor-form" onSubmit={handleSubmit} className="space-y-6">
+        <fieldset disabled={!isEditing} className="space-y-6 group-disabled:opacity-80">
         {/* Seção 1: Identificação */}
         <section className="bg-white rounded-xl shadow-premium p-6 border border-gray-100">
           <h2 className="text-lg font-bold text-lie-ink mb-4 flex items-center gap-2">
@@ -298,14 +365,7 @@ export default function FornecedorFormPage() {
           <label className="block text-sm font-bold text-gray-700 mb-1">Observações Gerais</label>
           <textarea rows={4} value={formData.observacoes} onChange={e => setFormData(p => ({...p, observacoes: e.target.value}))} className="w-full border-gray-300 rounded-lg shadow-sm"></textarea>
         </section>
-
-        <div className="flex justify-end gap-3 pt-6">
-          <button type="button" onClick={() => navigate('/fornecedores')} className="px-6 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition">Cancelar</button>
-          <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-12 py-2 rounded-lg font-bold shadow-lg transition flex items-center gap-2">
-            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-            {saving ? 'Salvando...' : 'Salvar Fornecedor'}
-          </button>
-        </div>
+        </fieldset>
       </form>
     </div>
   );

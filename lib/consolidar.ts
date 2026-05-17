@@ -204,7 +204,7 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   pdf.setFontSize(26);
   pdf.setFont('helvetica', 'bold');
   const nomeLines = pdf.splitTextToSize(entidade.nome || '', CONTENT_W);
-  pdf.text(nomeLines, PAGE_W / 2, faixaY - 20, { align: 'center' });
+  pdf.text(nomeLines, PAGE_W / 2, 40, { align: 'center' });
 
   if (entidade.sigla) {
     pdf.setFontSize(16);
@@ -259,9 +259,12 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   secTitle('ENDEREÇO');
   const endParts = [entidade.logradouro, entidade.numero, entidade.complemento, entidade.bairro, entidade.cidade, entidade.uf, entidade.cep].filter(Boolean).join(', ');
   y = addField(pdf, 'Endereço', endParts, MARGIN, y); y += 8;
-  secTitle('CONTATO');
-  y = addField(pdf, 'E-mail', entidade.email || '', MARGIN, y); y += 2;
-  y = addField(pdf, 'Telefone(s)', (entidade.telefones || []).join(' / '), MARGIN, y); y += 4;
+  secTitle('CONTATO E REDES SOCIAIS');
+  y = addField(pdf, 'E-mail', entidade.email || '', MARGIN, y); y += 4;
+  y = addField(pdf, 'Telefone(s)', (entidade.telefones || []).join(' / ') || '', MARGIN, y); y += 4;
+  if ((entidade as any).instagram) { y = addField(pdf, 'Instagram', (entidade as any).instagram, MARGIN, y); y += 4; }
+  if ((entidade as any).facebook) { y = addField(pdf, 'Facebook', (entidade as any).facebook, MARGIN, y); y += 4; }
+  if ((entidade as any).linkedin) { y = addField(pdf, 'LinkedIn', (entidade as any).linkedin, MARGIN, y); y += 4; }
 
   // ===== DIRIGENTES =====
   pdf.addPage();
@@ -324,11 +327,11 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   y = 30;
   y = addSectionTitle(pdf, '5. Tabela de Anexos', y, cor);
   y += 4;
-  const anexoRows = allDocs.map((d, i) => [toRoman(i + 1), d.nome, d.source]);
+  const anexoRows = allDocs.map((d, i) => [toRoman(i + 1), d.nome]);
   autoTable(pdf, {
     startY: y,
-    head: [['Nº', 'Documento', 'Origem']],
-    body: anexoRows.length > 0 ? anexoRows : [['—', 'Nenhum documento anexado', '']],
+    head: [['Nº', 'Documento']],
+    body: anexoRows.length > 0 ? anexoRows : [['—', 'Nenhum documento anexado']],
     margin: { left: MARGIN, right: MARGIN },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
@@ -338,7 +341,7 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   for (let p = 1; p <= totalPages; p++) {
     pdf.setPage(p);
     if (p > 1) addFooter(pdf, p);
-    if (rubricaUrl) {
+    if (rubricaUrl && p > 1) {
       try {
         pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 15, 10, 10);
       } catch {}

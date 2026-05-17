@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
 import type { Projeto, Entidade } from '../types';
@@ -113,82 +113,140 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   if (!entSnap.exists()) throw new Error('Entidade do projeto não encontrada');
   const entidade = { id: entSnap.id, ...entSnap.data() } as Entidade;
 
-  const cor = hexToRgb(entidade.corPredominante || '#16A34A');
+  const docsSnap = await getDocs(collection(db, `projects/${projetoId}/documentos`));
+  const documentos = docsSnap.docs.map(d => d.data()).sort((a: any, b: any) => (a.ordem || 0) - (b.ordem || 0));
+
+  const cor = hexToRgb((entidade as any).corPredominante || '#16A34A');
   const corClara = lightenRgb(cor, 0.88);
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
 
-  // Pág 1: Capa (Entidade)
+  // Pág 1: Capa (Projeto/Entidade)
   pdf.setFillColor(...cor);
   pdf.rect(0, 0, PAGE_W, PAGE_H, 'F');
+  const corEscura = cor.map(c => Math.max(0, c - 40)) as [number, number, number];
+  pdf.setFillColor(...corEscura);
+  pdf.rect(0, PAGE_H - 30, PAGE_W, 30, 'F');
+
+  const faixaY = PAGE_H / 2 - 40;
+  const faixaH = 80;
   pdf.setFillColor(255, 255, 255);
-  pdf.rect(0, PAGE_H / 2 - 40, PAGE_W, 80, 'F');
-  if (entidade.logoUrl) {
-    const imgData = await fetchImageAsBase64(entidade.logoUrl);
-    if (imgData) pdf.addImage(imgData, getImgFormat(entidade.logoUrl), PAGE_W / 2 - 30, PAGE_H / 2 - 30, 60, 60);
+  pdf.rect(0, faixaY, PAGE_W, faixaH, 'F');
+
+  const logoUsar = projeto.logoUrl || (entidade as any).logoUrl;
+  if (logoUsar) {
+    const imgData = await fetchImageAsBase64(logoUsar);
+    if (imgData) pdf.addImage(imgData, getImgFormat(logoUsar), PAGE_W / 2 - 30, faixaY + 10, 60, 60);
   }
+
   pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(24);
+  pdf.setFontSize(26);
   pdf.setFont('helvetica', 'bold');
   const entNameLines = pdf.splitTextToSize(entidade.nome.toUpperCase(), CONTENT_W);
-  pdf.text(entNameLines, PAGE_W / 2, PAGE_H / 2 - 50, { align: 'center' });
-
-  // Pág 2: Dados da Entidade
-  pdf.addPage();
-  addHeader(pdf, entidade.nome, cor);
-  let y = 30;
-  y = addSectionTitle(pdf, 'DADOS DA ENTIDADE PROPONENTE', y, cor);
-  y = addField(pdf, 'Razão Social', entidade.nome, MARGIN, y); y += 2;
-  y = addField(pdf, 'CNPJ', entidade.cnpj, MARGIN, y); y += 2;
-  y = addField(pdf, 'Sigla', entidade.sigla || '-', MARGIN, y); y += 2;
-  y = addField(pdf, 'Endereço', `${entidade.logradouro}, ${entidade.numero} - ${entidade.cidade}/${entidade.uf}`, MARGIN, y); y += 2;
-  y = addField(pdf, 'E-mail', entidade.email || '-', MARGIN, y); y += 2;
-  y = addField(pdf, 'Responsável', entidade.responsavelLegal?.nome || '-', MARGIN, y);
-
-  // Pág 3: Contracapa (Projeto)
-  pdf.addPage();
-  pdf.setFillColor(...cor);
-  pdf.rect(0, 0, PAGE_W, PAGE_H, 'F');
-  pdf.setFillColor(255, 255, 255);
-  pdf.rect(20, 60, PAGE_W - 40, PAGE_H - 120, 'F', 5);
-  if (projeto.logoUrl) {
-    const imgProj = await fetchImageAsBase64(projeto.logoUrl);
-    if (imgProj) pdf.addImage(imgProj, getImgFormat(projeto.logoUrl), PAGE_W / 2 - 40, 80, 80, 80);
-  }
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(28);
-  pdf.setFont('helvetica', 'bold');
-  pdf.text(projeto.titulo.toUpperCase(), PAGE_W / 2, 45, { align: 'center' });
-  pdf.setFontSize(14);
+  pdf.text(entNameLines, PAGE_W / 2, 40, { align: 'center' });
+  pdf.setFontSize(20);
   pdf.text('PLANO DE TRABALHO', PAGE_W / 2, PAGE_H - 40, { align: 'center' });
 
-  // Pág 4+: Dados do Projeto
+  let y = 30;
+
+  const chkPage = (needed = 40) => {
+    if (y > PAGE_H - needed) {
+      pdf.addPage();
+      addHeader(pdf, projeto.titulo, cor);
+      y = 30;
+    }
+  };
+
+  // Pág 2: Identificação do Projeto & Entidade
   pdf.addPage();
   addHeader(pdf, projeto.titulo, cor);
-  y = 30;
+  
   y = addSectionTitle(pdf, '1. IDENTIFICAÇÃO DO PROJETO', y, cor);
   y = addField(pdf, 'Título', projeto.titulo, MARGIN, y); y += 2;
   y = addField(pdf, 'Instrumento', projeto.instrumentoOrigem, MARGIN, y); y += 2;
-  y = addField(pdf, 'Órgão', projeto.orgao === 'outro' ? projeto.orgaoOutro || '' : projeto.orgao, MARGIN, y); y += 2;
-  y = addField(pdf, 'Período', `${projeto.mesInicio} até ${projeto.mesTermino}`, MARGIN, y); y += 2;
-  y = addField(pdf, 'Âmbito', projeto.ambitoAplicacao || '-', MARGIN, y); y += 8;
-
-  y = addSectionTitle(pdf, '2. PLANO DE TRABALHO', y, cor);
-  y = addField(pdf, 'Resumo', projeto.resumo || '-', MARGIN, y); y += 4;
-  y = addField(pdf, 'Objetivo Geral', projeto.objetivoGeral || '-', MARGIN, y); y += 4;
+  y = addField(pdf, 'Órgão', projeto.orgao === 'outro' ? projeto.orgaoOutro || '' : projeto.orgao, MARGIN, y); y += 6;
   
-  pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.text('Objetivos Específicos:', MARGIN, y); y += 5;
-  pdf.setFont('helvetica', 'normal');
-  projeto.objetivosEspecificos?.forEach((obj, i) => {
-    if (obj.trim()) {
-      const lines = pdf.splitTextToSize(`${i+1}. ${obj}`, CONTENT_W - 5);
-      pdf.text(lines, MARGIN + 5, y);
-      y += lines.length * 6;
-    }
-  });
+  y = addSectionTitle(pdf, '2. DADOS DA ENTIDADE PROPONENTE', y, cor);
+  y = addField(pdf, 'Razão Social', entidade.nome, MARGIN, y); y += 2;
+  y = addField(pdf, 'Sigla', entidade.sigla || '-', MARGIN, y); y += 2;
+  y = addField(pdf, 'CNPJ', entidade.cnpj, MARGIN, y); y += 2;
+  const endParts = [entidade.logradouro, entidade.numero, entidade.complemento, entidade.bairro, entidade.cidade, entidade.uf, entidade.cep].filter(Boolean).join(', ');
+  y = addField(pdf, 'Endereço', endParts || '-', MARGIN, y); y += 2;
+  y = addField(pdf, 'E-mail', entidade.email || '-', MARGIN, y); y += 2;
+  y = addField(pdf, 'Telefone(s)', (entidade.telefones || []).join(' / ') || '-', MARGIN, y); y += 2;
+  
+  if ((entidade as any).instagram) { y = addField(pdf, 'Instagram', (entidade as any).instagram, MARGIN, y); y += 2; }
+  if ((entidade as any).facebook) { y = addField(pdf, 'Facebook', (entidade as any).facebook, MARGIN, y); y += 2; }
+  if ((entidade as any).linkedin) { y = addField(pdf, 'LinkedIn', (entidade as any).linkedin, MARGIN, y); y += 2; }
   y += 6;
 
-  if (y > PAGE_H - 60) { pdf.addPage(); addHeader(pdf, projeto.titulo, cor); y = 30; }
-  y = addSectionTitle(pdf, '3. CRONOGRAMA DE EXECUÇÃO', y, cor);
+  // Pág 3: Plano de Trabalho Descritivo
+  pdf.addPage();
+  addHeader(pdf, projeto.titulo, cor);
+  y = 30;
+  y = addSectionTitle(pdf, '3. PLANO DE TRABALHO', y, cor);
+  
+  y = addField(pdf, 'Resumo', projeto.resumo || '-', MARGIN, y); y += 4;
+  chkPage();
+  y = addField(pdf, 'Período', `${projeto.mesInicio} até ${projeto.mesTermino} (${projeto.duracaoMeses || 0} meses)`, MARGIN, y); y += 4;
+  chkPage();
+  y = addField(pdf, 'Âmbito', projeto.ambitoAplicacao || '-', MARGIN, y); y += 4;
+  
+  if (projeto.locais && projeto.locais.length > 0) {
+    chkPage();
+    const locaisStr = projeto.locais.map(l => `${l.uf}: ${l.municipios.join(', ')}`).join(' | ');
+    y = addField(pdf, 'Locais', locaisStr, MARGIN, y); y += 4;
+  }
+  if (projeto.modalidades && projeto.modalidades.length > 0) {
+    chkPage();
+    y = addField(pdf, 'Modalidades', projeto.modalidades.join(', '), MARGIN, y); y += 4;
+  }
+
+  chkPage();
+  y = addField(pdf, 'Objetivo Geral', projeto.objetivoGeral || '-', MARGIN, y); y += 4;
+  
+  if (projeto.objetivosEspecificos && projeto.objetivosEspecificos.length > 0) {
+    chkPage();
+    pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.text('Objetivos Específicos:', MARGIN, y); y += 5;
+    pdf.setFont('helvetica', 'normal');
+    projeto.objetivosEspecificos.forEach((obj, i) => {
+      if (obj.trim()) {
+        chkPage(10);
+        const lines = pdf.splitTextToSize(`${i+1}. ${obj}`, CONTENT_W - 5);
+        pdf.text(lines, MARGIN + 5, y);
+        y += lines.length * 6;
+      }
+    });
+    y += 4;
+  }
+
+  if (projeto.justificativa) {
+    chkPage(30);
+    y = addField(pdf, 'Justificativa', projeto.justificativa, MARGIN, y); y += 4;
+  }
+  if (projeto.caracterizacaoSocioeconomica) {
+    chkPage(30);
+    y = addField(pdf, 'Caracterização Socioeconômica', projeto.caracterizacaoSocioeconomica, MARGIN, y); y += 4;
+  }
+  if (projeto.metodologia) {
+    chkPage(30);
+    y = addField(pdf, 'Metodologia de Aplicação', projeto.metodologia, MARGIN, y); y += 4;
+  }
+
+  if (projeto.publicoAlvo) {
+    chkPage(30);
+    pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.text('Público Alvo:', MARGIN, y); y += 5;
+    pdf.setFont('helvetica', 'normal');
+    const pubStr = `Direto: ${projeto.publicoAlvo.direto}\nIndireto: ${projeto.publicoAlvo.indireto}\nFaixa Etária: ${projeto.publicoAlvo.faixaEtaria}`;
+    const pLines = pdf.splitTextToSize(pubStr, CONTENT_W - 5);
+    pdf.text(pLines, MARGIN + 5, y);
+    y += pLines.length * 5 + 4;
+  }
+
+  // Cronograma
+  pdf.addPage();
+  addHeader(pdf, projeto.titulo, cor);
+  y = 30;
+  y = addSectionTitle(pdf, '4. CRONOGRAMA DE EXECUÇÃO', y, cor);
   autoTable(pdf, {
     startY: y,
     head: [['Ação', 'Descrição', 'Início', 'Término']],
@@ -198,11 +256,10 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     alternateRowStyles: { fillColor: corClara },
   });
 
-  pdf.addPage();
-  addHeader(pdf, projeto.titulo, cor);
-  y = 30;
-  y = addSectionTitle(pdf, '4. METAS DO PROJETO', y, cor);
-  y += 4;
+  // Metas
+  y = (pdf as any).lastAutoTable.finalY + 15;
+  chkPage(60);
+  y = addSectionTitle(pdf, '5. METAS DO PROJETO', y, cor);
   pdf.setFont('helvetica', 'bold'); pdf.text('Metas Qualitativas', MARGIN, y); y += 6;
   autoTable(pdf, {
     startY: y,
@@ -213,6 +270,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   });
   
   y = (pdf as any).lastAutoTable.finalY + 10;
+  chkPage(40);
   pdf.setFont('helvetica', 'bold'); pdf.text('Metas Quantitativas', MARGIN, y); y += 6;
   autoTable(pdf, {
     startY: y,
@@ -222,15 +280,42 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     headStyles: { fillColor: cor },
   });
 
+  // Anexos
+  y = (pdf as any).lastAutoTable.finalY + 15;
+  chkPage(50);
+  y = addSectionTitle(pdf, '6. TABELA DE ANEXOS', y, cor);
+  
+  const toRoman = (n: number) => {
+    const vals = [10,9,5,4,1];
+    const syms = ['X','IX','V','IV','I'];
+    let res = '';
+    for (let i = 0; i < vals.length; i++) {
+      while (n >= vals[i]) { res += syms[i]; n -= vals[i]; }
+    }
+    return res;
+  };
+
+  const anexoRows = documentos.map((d, i) => [toRoman(i + 1), (d as any).nome || (d as any).tipo || 'Documento']);
+  autoTable(pdf, {
+    startY: y,
+    head: [['Nº', 'Documento']],
+    body: anexoRows.length > 0 ? anexoRows : [['—', 'Nenhum documento anexado']],
+    margin: { left: MARGIN, right: MARGIN },
+    headStyles: { fillColor: cor, textColor: [255, 255, 255] },
+    alternateRowStyles: { fillColor: corClara },
+  });
+
   const total = (pdf as any).internal.getNumberOfPages();
   for (let i = 1; i <= total; i++) {
     pdf.setPage(i);
     pdf.setFontSize(8); pdf.setTextColor(150, 150, 150);
-    pdf.text(`Página ${i} de ${total}`, PAGE_W / 2, PAGE_H - 8, { align: 'center' });
-    if (rubricaUrl) {
-      try {
-        pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 15, 10, 10);
-      } catch {}
+    if (i > 1) {
+      pdf.text(`Página ${i} de ${total}`, PAGE_W / 2, PAGE_H - 8, { align: 'center' });
+      if (rubricaUrl) {
+        try {
+          pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 15, 10, 10);
+        } catch {}
+      }
     }
   }
 
