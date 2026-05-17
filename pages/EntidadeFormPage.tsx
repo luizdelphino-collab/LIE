@@ -245,14 +245,44 @@ export default function EntidadeFormPage() {
           </div>
         </div>
 
-        {!isNew && !isEditing && (
-          <button 
-            onClick={() => setIsEditing(true)} 
-            className="inline-flex items-center gap-2 bg-lie-green text-white px-4 py-2 rounded-lg hover:bg-lie-greenDark transition shadow-sm font-medium"
-          >
-            <Edit3 className="w-4 h-4" /> Editar Cadastro
-          </button>
-        )}
+        <div className="flex gap-2">
+          {!isNew && (
+            <>
+              <button 
+                type="button"
+                onClick={() => navigate(`/entidades/${id}/documentos`)}
+                className="group flex items-center bg-white border border-gray-300 text-amber-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-amber-50 shadow-sm"
+              >
+                <FileText className="w-5 h-5 shrink-0" />
+                <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                  Documentos
+                </span>
+              </button>
+              <button 
+                type="button"
+                onClick={() => navigate(`/entidades/${id}/dirigentes`)}
+                className="group flex items-center bg-white border border-gray-300 text-blue-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-blue-50 shadow-sm"
+              >
+                <Users className="w-5 h-5 shrink-0" />
+                <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                  Dirigentes
+                </span>
+              </button>
+            </>
+          )}
+          {!isNew && !isEditing && (
+            <button 
+              type="button"
+              onClick={() => setIsEditing(true)} 
+              className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
+            >
+              <Edit3 className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Editar Cadastro
+              </span>
+            </button>
+          )}
+        </div>
       </header>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -455,16 +485,6 @@ export default function EntidadeFormPage() {
             </div>
             
             <div className="flex gap-3">
-              {!isNew && (
-                <>
-                  <button type="button" onClick={() => navigate(`/entidades/${id}/documentos`)} className="inline-flex items-center gap-2 px-4 py-2 border border-lie-green text-lie-green hover:bg-lie-green hover:text-white font-medium rounded-lg transition">
-                    <FileText className="w-4 h-4" /> Documentos
-                  </button>
-                  <button type="button" onClick={() => navigate(`/entidades/${id}/dirigentes`)} className="inline-flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white font-medium rounded-lg transition">
-                    <Users className="w-4 h-4" /> Dirigentes
-                  </button>
-                </>
-              )}
               {isEditing && (
                 <button type="submit" disabled={saving} className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white px-6 py-2 font-medium rounded-lg transition">
                   <Save className="w-4 h-4" /> {saving ? 'Salvando...' : 'Salvar Entidade'}

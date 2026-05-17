@@ -752,18 +752,6 @@ export default function ProjetoFormPage() {
 
       </form>
 
-      {/* Botão flutuante de Consolidar para Visualização */}
-      {!isEditing && (
-        <button
-          onClick={handleConsolidar}
-          disabled={consolidando}
-          className="fixed bottom-8 right-8 bg-lie-green hover:bg-lie-greenDark text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 disabled:opacity-50 z-30"
-          title="Consolidar PDF"
-        >
-          {consolidando ? <Loader2 className="w-6 h-6 animate-spin" /> : <FileDown className="w-6 h-6" />}
-        </button>
-      )}
-
       <RubricaModal 
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)} 
