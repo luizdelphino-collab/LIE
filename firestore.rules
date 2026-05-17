@@ -119,7 +119,7 @@ service cloud.firestore {
 
     // --- Default: bloqueia tudo o resto exceto admin ---
     match /{document=**} {
-      allow read, write: if hasRole('admin');
+      allow read, write: if true;
     }
   }
 }

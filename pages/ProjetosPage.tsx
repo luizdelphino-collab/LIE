@@ -87,7 +87,7 @@ export default function ProjetosPage() {
     );
   });
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status?: string) => {
     switch (status) {
       case 'aprovado': return 'bg-green-100 text-green-800';
       case 'em_elaboracao': return 'bg-blue-100 text-blue-800';
@@ -97,7 +97,8 @@ export default function ProjetosPage() {
     }
   };
 
-  const formatStatus = (status: string) => {
+  const formatStatus = (status?: string) => {
+    if (!status) return 'Em Elaboração';
     return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 

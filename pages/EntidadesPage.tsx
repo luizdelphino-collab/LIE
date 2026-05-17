@@ -28,7 +28,7 @@ export default function EntidadesPage() {
         const projetos = projSnap.docs.map(d => d.data() as Projeto);
         const data = snap.docs.map(d => {
           const ent = { id: d.id, ...d.data() } as Entidade;
-          const projectCount = projetos.filter(p => p.proponente?.cnpj === ent.cnpj).length;
+          const projectCount = projetos.filter(p => p.entidadeId === ent.id).length;
           return { ...ent, projectCount };
         });
         setEntidades(data);
