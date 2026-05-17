@@ -87,11 +87,14 @@ export default function ItensMasterPage() {
   };
 
   const sortedItems = [...items]
-    .filter(it => 
-      it.nome.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      it.codigo.toString().includes(searchTerm) ||
-      it.categoria.toLowerCase().includes(searchTerm.toLowerCase())
-    )
+    .filter(it => {
+      const term = searchTerm.toLowerCase();
+      return (
+        (it.nome || '').toLowerCase().includes(term) || 
+        (it.codigo || '').toString().includes(term) ||
+        (it.categoria || '').toLowerCase().includes(term)
+      );
+    })
     .sort((a, b) => {
       let valA = a[sortField];
       let valB = b[sortField];
