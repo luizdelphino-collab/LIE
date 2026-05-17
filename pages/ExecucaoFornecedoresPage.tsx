@@ -196,17 +196,22 @@ export default function ExecucaoFornecedoresPage() {
           <div className="flex gap-2">
             <button 
               onClick={exportExcel}
-              className="inline-flex items-center gap-2 bg-white border border-gray-300 text-green-700 hover:bg-green-50 font-medium px-4 py-2 rounded-lg shadow-sm transition"
+              className="group flex items-center bg-white border border-gray-300 text-green-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-green-50 shadow-sm"
             >
-              <FileSpreadsheet className="w-4 h-4" /> Planilha de Fornecedores
+              <FileSpreadsheet className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Planilha de Fornecedores
+              </span>
             </button>
             <button 
               onClick={handleSave}
               disabled={saving}
-              className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white font-bold px-6 py-2 rounded-lg shadow-sm transition disabled:opacity-50"
+              className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm disabled:opacity-50"
             >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Salvar Vínculos
+              {saving ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <Save className="w-5 h-5 shrink-0" />}
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                {saving ? 'Salvando...' : 'Salvar Vínculos'}
+              </span>
             </button>
           </div>
         </div>
@@ -274,9 +279,10 @@ export default function ExecucaoFornecedoresPage() {
                         <button 
                           onClick={() => handleAddFornecedor(it.id)}
                           disabled={!pendingAdd[it.id]}
-                          className="bg-blue-600 text-white px-3 py-2 rounded-lg disabled:opacity-50 text-xs font-bold transition hover:bg-blue-700"
+                          title="Adicionar Fornecedor"
+                          className="bg-blue-600 text-white p-2 rounded-lg disabled:opacity-50 transition hover:bg-blue-700 flex items-center justify-center shrink-0"
                         >
-                          Adicionar
+                          <Plus className="w-5 h-5" />
                         </button>
                       </div>
                     </td>

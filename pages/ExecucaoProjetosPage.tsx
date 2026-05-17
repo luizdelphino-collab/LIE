@@ -60,30 +60,42 @@ export default function ExecucaoProjetosPage() {
           Nenhum projeto encontrado.
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map(p => (
-            <div 
-              key={p.id}
-              onClick={() => navigate(`/execucao/${p.id}/fornecedores`)}
-              className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-premium hover:-translate-y-1 transition-all group relative overflow-hidden"
-            >
-              <div className="absolute top-0 left-0 w-1.5 h-full bg-lie-green transform scale-y-0 group-hover:scale-y-100 transition-transform origin-bottom"></div>
-              
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="font-bold text-lie-ink text-lg line-clamp-2 pr-4">{p.titulo || 'Projeto sem título'}</h2>
-                <div className="p-2 bg-gray-50 rounded-full text-gray-400 group-hover:bg-green-50 group-hover:text-lie-green transition-colors flex-shrink-0">
-                  <ChevronRight className="w-5 h-5" />
-                </div>
-              </div>
-              
-              <div className="space-y-2 text-sm text-gray-500">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-gray-400" />
-                  <span>Duração: <strong className="text-gray-700">{p.duracaoMeses || 12} meses</strong></span>
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="bg-white rounded-xl shadow-premium overflow-hidden border border-gray-100">
+          <table className="w-full text-left">
+            <thead className="bg-gray-50 text-xs font-bold text-lie-gray uppercase border-b border-gray-200">
+              <tr>
+                <th className="px-4 py-3">Entidade</th>
+                <th className="px-4 py-3">Projeto</th>
+                <th className="px-4 py-3 text-center">Duração</th>
+                <th className="px-4 py-3 text-right">Valor Aprovado</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filtered.map(p => (
+                <tr 
+                  key={p.id}
+                  onClick={() => navigate(`/execucao/${p.id}/fornecedores`)}
+                  className="hover:bg-gray-50 cursor-pointer transition-colors group"
+                >
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {p.entidadeSigla || 'Não informada'}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-lie-ink">
+                    <div className="flex items-center justify-between">
+                      <span className="line-clamp-2">{p.titulo || 'Projeto sem título'}</span>
+                      <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-lie-green opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-center text-gray-600">
+                    {p.duracaoMeses || 12} meses
+                  </td>
+                  <td className="px-4 py-3 text-sm text-right font-medium text-lie-ink">
+                    {p.valorAprovado ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.valorAprovado) : 'R$ 0,00'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

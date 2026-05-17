@@ -270,22 +270,47 @@ export default function EntidadeFormPage() {
               </button>
             </>
           )}
-          {!isNew && !isEditing && (
+          {isEditing && !isNew && (
             <button 
-              type="button"
-              onClick={() => setIsEditing(true)} 
+              type="button" 
+              onClick={() => setIsEditing(false)} 
+              className="group flex items-center bg-white border border-gray-300 text-gray-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-100 shadow-sm"
+            >
+              <X className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Cancelar
+              </span>
+            </button>
+          )}
+          {isEditing && !isNew && (
+            <button 
+              type="button" 
+              onClick={handleExcluir} 
+              className="group flex items-center bg-white border border-red-200 text-red-500 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-red-50 shadow-sm"
+            >
+              <Trash2 className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Excluir
+              </span>
+            </button>
+          )}
+          {isEditing && (
+            <button 
+              type="submit" 
+              form="entidade-form"
+              disabled={saving} 
               className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
             >
-              <Edit3 className="w-5 h-5 shrink-0" />
+              <Save className="w-5 h-5 shrink-0" />
               <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
-                Editar Cadastro
+                {saving ? 'Salvando...' : 'Salvar'}
               </span>
             </button>
           )}
         </div>
       </header>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form id="entidade-form" onSubmit={handleSubmit} className="space-y-6">
         
         {/* Dados Principais */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
@@ -462,34 +487,6 @@ export default function EntidadeFormPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Capacidade Técnica e Operacional</label>
               <textarea name="capacidadeTecnica" rows={4} value={formData.capacidadeTecnica} onChange={handleChange} disabled={!isEditing} className="w-full border-gray-300 rounded-lg shadow-sm disabled:bg-gray-50 disabled:text-gray-500"></textarea>
-            </div>
-          </div>
-        </div>
-
-        {/* Rodapé fixo com botões */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-20">
-          <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
-            <div className="flex gap-2">
-              <button 
-                type="button" 
-                onClick={() => isEditing && !isNew ? setIsEditing(false) : navigate('/entidades')} 
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 font-medium rounded-lg transition"
-              >
-                {isEditing ? 'Cancelar' : 'Voltar'}
-              </button>
-              {!isNew && isEditing && (
-                <button type="button" onClick={handleExcluir} className="px-4 py-2 text-red-600 hover:bg-red-50 font-medium rounded-lg transition flex items-center gap-2">
-                  <Trash2 className="w-4 h-4" /> Excluir Entidade
-                </button>
-              )}
-            </div>
-            
-            <div className="flex gap-3">
-              {isEditing && (
-                <button type="submit" disabled={saving} className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white px-6 py-2 font-medium rounded-lg transition">
-                  <Save className="w-4 h-4" /> {saving ? 'Salvando...' : 'Salvar Entidade'}
-                </button>
-              )}
             </div>
           </div>
         </div>

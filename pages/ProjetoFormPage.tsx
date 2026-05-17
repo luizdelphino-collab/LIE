@@ -316,6 +316,7 @@ export default function ProjetoFormPage() {
               </span>
             </button>
             <button 
+              type="button"
               onClick={() => setIsEditing(true)} 
               className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
             >
@@ -326,9 +327,36 @@ export default function ProjetoFormPage() {
             </button>
           </div>
         )}
+        {isEditing && (
+          <div className="flex gap-2">
+            {!isNew && (
+              <button 
+                type="button" 
+                onClick={() => setIsEditing(false)} 
+                className="group flex items-center bg-white border border-gray-300 text-gray-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-100 shadow-sm"
+              >
+                <X className="w-5 h-5 shrink-0" />
+                <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                  Cancelar
+                </span>
+              </button>
+            )}
+            <button 
+              type="submit" 
+              form="projeto-form"
+              disabled={saving} 
+              className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
+            >
+              <Save className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                {saving ? 'Salvando...' : 'Salvar Projeto'}
+              </span>
+            </button>
+          </div>
+        )}
       </header>
 
-      <form onSubmit={handleSubmit} className="space-y-8">
+      <form id="projeto-form" onSubmit={handleSubmit} className="space-y-8">
         
         {/* Identificação e Órgão */}
         <section className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
@@ -733,22 +761,6 @@ export default function ProjetoFormPage() {
             </div>
           </section>
         ))}
-
-        {/* Botão Salvar Fixo */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-20">
-          <div className="max-w-5xl mx-auto flex items-center justify-between">
-            <button type="button" onClick={() => navigate('/projetos')} className="px-6 py-2 text-gray-700 hover:bg-gray-100 font-medium rounded-lg transition">
-              Voltar
-            </button>
-            <div className="flex gap-3">
-              {isEditing && (
-                <button type="submit" disabled={saving} className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white px-8 py-2 font-bold rounded-lg shadow-sm transition">
-                  <Save className="w-5 h-5" /> {saving ? 'Salvando...' : 'Salvar Projeto'}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
 
       </form>
 
