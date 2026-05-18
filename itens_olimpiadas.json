@@ -1,0 +1,418 @@
+[
+  {
+    "Item": "ÁGUA (caixa 48 copos)",
+    "Categoria": "Alimento",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 35.8,
+    "Descrição": "Caixa com 48 copos de água de 200ml para hidratação dos participantes dos eventos. Comporta logística de transporte, entrega nos diferentes locais, armazenamento adequado e controle de consumo.",
+    "Memorial de Cálculo": "Calculado 5 copos por pessoa."
+  },
+  {
+    "Item": "CARRINHO DE PIPOCA",
+    "Categoria": "Alimento",
+    "Unidade": "EVENTO",
+    "Valor Unitário": 950,
+    "Descrição": "Carrinho com profissional e insumos necessários para oferta de pipoca salgada aos participantes.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "CARRINHO DE ALGODÃO DOCE",
+    "Categoria": "Alimento",
+    "Unidade": "EVENTO",
+    "Valor Unitário": 950,
+    "Descrição": "Carrinho com profissional e insumos necessários para oferta de algodão doce aos participantes.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "AMBULÂNCIA",
+    "Categoria": "Outro",
+    "Unidade": "EVENTO",
+    "Valor Unitário": 1542.03,
+    "Descrição": "Locação de serviço de Ambulância de remoção, com atendente e motorista para pronto atendimento e rápido encaminhamento.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "AMBULÂNCIA UTI",
+    "Categoria": "Outro",
+    "Unidade": "EVENTO",
+    "Valor Unitário": 2230,
+    "Descrição": "Locação de serviço de Ambulância UTI, com motorista e médico, para o Primeiro Atendimento e remoção rápida.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "ANOTADOR - INTERCEUS",
+    "Categoria": "Recurso Humano",
+    "Unidade": "JOGO",
+    "Valor Unitário": 48.25,
+    "Descrição": "Fornecimento de anotador especializado na respectiva modalidade e em esporte educacional para registrar as partidas das modalidades coletivas. Comporta organização e monitoramento de escala.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "ANOTADOR - OLIMPÍADAS",
+    "Categoria": "Recurso Humano",
+    "Unidade": "JOGO",
+    "Valor Unitário": 43.06,
+    "Descrição": "Fornecimento de anotador especializado na respectiva modalidade e em esporte educacional para registrar as partidas das modalidades coletivas. Comporta organização e monitoramento de escala.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "ARBITRAGEM - COLETIVAS",
+    "Categoria": "Recurso Humano",
+    "Unidade": "JOGO",
+    "Valor Unitário": 85.5,
+    "Descrição": "Fornecimento de dupla de arbitragem especializada na respectiva modalidade e em esporte educacional para as modalidades coletivas. Comporta organização e monitoramento de escala.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "ARBITRAGEM - INTERCEUS",
+    "Categoria": "Recurso Humano",
+    "Unidade": "JOGO",
+    "Valor Unitário": 99.15,
+    "Descrição": "Fornecimento de dupla de arbitragem especializada na respectiva modalidade e em esporte educacional para as modalidades coletivas. Comporta organização e monitoramento de escala.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "BACK DROP",
+    "Categoria": "Material não esportivo",
+    "Unidade": "M²",
+    "Valor Unitário": 75,
+    "Descrição": "Confecção de Backdrop em lona vinílica, colorida, personalizada para o programa/projeto, com acabamento resistente e ilhós para fixação.",
+    "Memorial de Cálculo": "Total de 11 unidades com medidas de 6x2,5m cada (5 para Olimpíadas, 3 para InterCEus, 2 para o Circuito Kids e 1 para abertura)."
+  },
+  {
+    "Item": "BOX TRUSS",
+    "Categoria": "Material não esportivo",
+    "Unidade": "METRO",
+    "Valor Unitário": 78,
+    "Descrição": "Locação de estrutura box-truss para fixação de lona de backdrop ou outro material necessário para divulgação ou design do evento/etapa.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "CAMISETAS",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 42,
+    "Descrição": "Camiseta de professor, personalizada para Olimpíadas Estudantis.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "CERTIFICADOS DE PARTICIPAÇÃO",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 4.75,
+    "Descrição": "Certificado de participação para as escolas participantes dos eventos, personalizado para Olimpíadas ou InterCEUs.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "COBERTURA FOTO E FILMAGEM",
+    "Categoria": "Outro",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 356.66,
+    "Descrição": "Captura de imagens estáticas e filmagem para registro de momentos, eventos ou paisagens, incluindo edição e tratamento de imagens.",
+    "Memorial de Cálculo": "1 profissional por evento, sendo: 1 abertura, 1 encerramento, 54 circuitos kids, 16 atletismo, 9 festivais paralímpicos, 7 GA, 3 GR, 4 Judô, 2 natação, 2 Rugby, 6 Tênis/Badminton e 15 tênis de mesa."
+  },
+  {
+    "Item": "COBERTURA JORNALÍSTICA",
+    "Categoria": "Outro",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 600,
+    "Descrição": "Produção e publicação de conteúdos informativos (reportagens, entrevistas e artigos) por profissionais qualificados para registrar principais momentos e garantir visibilidade em site oficial, redes sociais e impressos.",
+    "Memorial de Cálculo": "Compreende o atendimento em 17 eventos/etapas indicados pela SME."
+  },
+  {
+    "Item": "COORDENADOR ACADÊMICO",
+    "Categoria": "Recurso Humano",
+    "Unidade": "MENSAL",
+    "Valor Unitário": 3000,
+    "Descrição": "Profissional com experiência em gestão acadêmica, responsável por supervisionar e integrar as frentes de coleta de dados, análise acadêmica e monitoramento estatístico para fins de produção acadêmica.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "COORDENADOR GERAL DA MODALIDADE",
+    "Categoria": "Recurso Humano",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 1220,
+    "Descrição": "Profissional especializado para coordenar a equipe de arbitragem, realizar congresso/reunião técnica no local, conduzir todas as etapas, gerenciar publicações de resultados e prestar esclarecimentos.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "COORDENADORES FEDEESP - INTERCEUS",
+    "Categoria": "Recurso Humano",
+    "Unidade": "MÊS",
+    "Valor Unitário": 11014.5,
+    "Descrição": "Fornecimento de profissional para conduzir, orientar, mediar situações e gerenciar o evento desde as reuniões iniciais até a entrega de relatórios finais.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "COORDENADORES FEDEESP - OLIMPÍADAS",
+    "Categoria": "Recurso Humano",
+    "Unidade": "MÊS",
+    "Valor Unitário": 102300,
+    "Descrição": "Fornecimento de profissionais para conduzir, orientar, mediar situações e gerenciar o evento desde as reuniões iniciais até a entrega de relatórios finais.",
+    "Memorial de Cálculo": "São 13 Coordenadores Regionais, sendo 1 para cada DRE."
+  },
+  {
+    "Item": "EQUIPAMENTO DE SOM",
+    "Categoria": "Material não esportivo",
+    "Unidade": "EVENTO",
+    "Valor Unitário": 545.48,
+    "Descrição": "Fornecimento de sistema de som composto por duas caixas de som, amplificador, mesa de som e microfones para comunicação interna. Cabe à idealizadora prover os pontos de energia elétrica.",
+    "Memorial de Cálculo": "Equipamento dimensionado com 1.000 watts de potência por evento/etapa."
+  },
+  {
+    "Item": "EQUIPE DE ARBITRAGEM",
+    "Categoria": "Recurso Humano",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 265,
+    "Descrição": "Arbitragem especializada na respectiva modalidade e em esporte educacional, pautada no Regulamento da Competição e orientações do Coordenador Geral.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "EQUIPE DE MONITORIA",
+    "Categoria": "Recurso Humano",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 280,
+    "Descrição": "Profissionais capacitados para guiar atividades de iniciação esportiva através de métodos pedagógicos (jogos e brincadeiras), promovendo a participação ativa, habilidades motoras e sociais.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "FOTO GIRATÓRIA 360°",
+    "Categoria": "Outro",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 1200,
+    "Descrição": "Plataforma com base rotativa motorizada controlada remotamente para capturar imagens panorâmicas em 360 graus, criando conteúdos interativos e envolventes.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "GERENCIAMENTO DE TRANSPORTE",
+    "Categoria": "Recurso Humano",
+    "Unidade": "MÊS",
+    "Valor Unitário": 9987,
+    "Descrição": "Profissional responsável pelo recebimento, distribuição, mapeamento, controle e acompanhamento da logística das diárias de ônibus contratadas.",
+    "Memorial de Cálculo": "Custo correspondente ao serviço por 7 dias da semana, das 07h às 18h, de forma contínua pelo período de execução."
+  },
+  {
+    "Item": "INTERPRETE DO MASCOTE",
+    "Categoria": "Recurso Humano",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 350,
+    "Descrição": "Profissional de animação para se apresentar com a roupagem do mascote da competição, focado no entretenimento de eventos.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "LOCUÇÃO",
+    "Categoria": "Recurso Humano",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 275.99,
+    "Descrição": "Profissional responsável por conduzir o evento, facilitar a interação com o público, manter informações atualizadas e garantir o ritmo ideal das atividades.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "MEDALHA DE HONRA COM ESTOJO",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 35,
+    "Descrição": "Medalha de honra para homenagem de professores e personalidades, acompanhada de caixa aveludada para armazenamento.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "MEDALHAS",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 14.7,
+    "Descrição": "Confecção de medalhas personalizadas para o evento, confeccionadas em metal fundido ou similar, com acabamento em alto relevo e fita colorida customizada.",
+    "Memorial de Cálculo": "Produzidas em 4 colorações específicas: dourada, prateada, bronzeada e cobreada."
+  },
+  {
+    "Item": "MONTAGEM E DESMONTAGEM DE EVENTOS",
+    "Categoria": "Outro",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 16115.96,
+    "Descrição": "Serviço de montagem, organização estrutural e desmontagem de estruturas, incluindo a locação de materiais como mesas, cadeiras, tendas e itens de apoio técnico.",
+    "Memorial de Cálculo": "Dimensionado conforme o descritivo de materiais e especificidades de cada modalidade esportiva."
+  },
+  {
+    "Item": "ÔNIBUS/VAN",
+    "Categoria": "Transporte",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 2950,
+    "Descrição": "Contratação de serviço de transporte de pessoas por fretamento para atendimento dos deslocamentos previstos nos eventos/etapas.",
+    "Memorial de Cálculo": "Contabilizado por viagem/diária realizada."
+  },
+  {
+    "Item": "PAINEL POLIONDA",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 200,
+    "Descrição": "Estrutura leve e versátil em plástico com acabamento em polipropileno ondulado, ideal para sinalização, comunicação visual e decoração personalizada com alta durabilidade.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "PALCO PRATICÁVEL",
+    "Categoria": "Material não esportivo",
+    "Unidade": "EVENTO",
+    "Valor Unitário": 1050,
+    "Descrição": "Locação de palco tipo praticável em alumínio com piso antiderrapante, estrutura modular de alta resistência, regulagem de altura e fechamento lateral. Inclui transporte, montagem, nivelamento, suporte e desmontagem.",
+    "Memorial de Cálculo": "Área total dimensionada em 20m² (10X2m)."
+  },
+  {
+    "Item": "PLACA DE HOMENAGEM",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 115,
+    "Descrição": "Placas projetadas para reconhecer, homenagear e agradecer personalidades de destaque, parceiros locais e instituições fundamentais na execução do projeto.",
+    "Memorial de Cálculo": "Confeccionadas com dimensões fixas de 15cm x 20cm."
+  },
+  {
+    "Item": "PRODUÇÃO DE FIGURINO MASCOTE IC",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 14625,
+    "Descrição": "Produção de uniforme caracterizado de Mascote (tipo mascote habitável) conforme as diretrizes e características previstas em Edital.",
+    "Memorial de Cálculo": "Modelado em tamanho médio para adulto com 1,70m de altura."
+  },
+  {
+    "Item": "PRODUÇÃO DE FIGURINO MASCOTE OE",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 14625,
+    "Descrição": "Produção de uniforme caracterizado de Mascote (tipo mascote habitável) conforme as diretrizes e características previstas em Edital.",
+    "Memorial de Cálculo": "Modelado em tamanho médio para adulto com 1,70m de altura."
+  },
+  {
+    "Item": "PROFESSOR",
+    "Categoria": "Recurso Humano",
+    "Unidade": "MENSAL",
+    "Valor Unitário": 6000,
+    "Descrição": "Profissional de nível acadêmico responsável por pesquisa científica, monitoramento técnico, levantamento de dados, análises quantitativas de engajamento e elaboração de relatórios de impacto para políticas públicas.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "PROFISSIONAL DE LIMPEZA",
+    "Categoria": "Recurso Humano",
+    "Unidade": "EVENTO",
+    "Valor Unitário": 295,
+    "Descrição": "Profissional encarregado de efetuar a higienização, organização e conservação dos espaços designados antes, durante e após a realização do evento.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "PROFISSIONAL DE SEGURANÇA",
+    "Categoria": "Recurso Humano",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 295,
+    "Descrição": "Profissional responsável por monitorar o acesso, controlar o público, prevenir incidentes, verificar identificações e zelar pelo bem-estar geral do local.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "RECURSO ÁUDIO-VISUAL",
+    "Categoria": "Outro",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 3251.9,
+    "Descrição": "Produção, captação de imagens, edição de vídeos e publicação de conteúdos audiovisuais focados na preparação das equipes.",
+    "Memorial de Cálculo": "Customizado conforme a especificidade da respectiva modalidade esportiva."
+  },
+  {
+    "Item": "REPRESENTANTE",
+    "Categoria": "Recurso Humano",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 200.75,
+    "Descrição": "Profissional responsável pelo suporte geral, incluindo montagem da estrutura de competição, transporte de materiais de premiação (troféus e medalhas), mesas e cadeiras.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "REPRESENTANTES - COLETIVAS",
+    "Categoria": "Recurso Humano",
+    "Unidade": "JOGO",
+    "Valor Unitário": "33.11",
+    "Descrição": "Profissional responsável pelo suporte geral, incluindo montagem da estrutura de competição, transporte de materiais de premiação (troféus e medalhas), mesas e cadeiras nas modalidades coletivas.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "SECRETARIA E ATENDENTES",
+    "Categoria": "Recurso Humano",
+    "Unidade": "EVENTO",
+    "Valor Unitário": 278,
+    "Descrição": "Equipe profissional responsável pela recepção do público e atletas, conferência de documentações, tabulação de dados e publicação dos resultados oficiais.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "SISTEMA DE INSCRIÇÕES ON-LINE",
+    "Categoria": "Outro",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 6608.71,
+    "Descrição": "Plataforma web com login e senha para recebimento e processamento de dados das Unidades Escolares, gerando fichas automáticas por modalidade, categoria e gênero, organizada por etapas de execução.",
+    "Memorial de Cálculo": "Tecnologia estruturada para suportar a demanda de pelo menos 150.000 inscrições e 450 unidades educacionais simultâneas."
+  },
+  {
+    "Item": "SOCORRISTAS",
+    "Categoria": "Recurso Humano",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 370,
+    "Descrição": "Atuação técnica preventiva e emergencial voltada para o primeiro atendimento, visando salvaguardar a vida até o transporte externo. O profissional deve permanecer fixo em seu posto.",
+    "Memorial de Cálculo": "Responsabilidade da SME/DRE providenciar o acompanhamento físico da criança caso haja encaminhamento externo."
+  },
+  {
+    "Item": "SÚMULAS",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": "1.93",
+    "Descrição": "Confecção de documento oficial impresso personalizado para anotação e controle dos resultados, ocorrências e fatos de cada jogo ou prova das modalidades coletivas e individuais.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "TROFÉUS",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 254,
+    "Descrição": "Confecção de troféus personalizados para o programa em material metálico, alumínio, MDF ou acrílico (mediante aprovação prévia), em quantidades solicitadas pela organização.",
+    "Memorial de Cálculo": "Modelos escalonados nas medidas de 45cm, 40cm, 35cm, 30cm e 25cm para premiação de 1º, 2º, 3º e 4º colocados das fases regional e municipal."
+  },
+  {
+    "Item": "VÍDEO INSTITUCIONAL",
+    "Categoria": "Outro",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 650,
+    "Descrição": "Produção de peças audiovisuais estratégicas de alta qualidade com o objetivo de apresentar os acontecimentos das competições, momentos marcantes e entrevistas, fortalecendo a imagem do projeto.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "WEBSITE",
+    "Categoria": "Outro",
+    "Unidade": "GERAL",
+    "Valor Unitário": 16000,
+    "Descrição": "Plataforma digital informativa e interativa contendo cronogramas, locais, resultados, regulamentos, boletins e canais para esclarecimento de dúvidas com atualizações em tempo real.",
+    "Memorial de Cálculo": "Contempla o desenvolvimento, hospedagem em servidor, manutenção e atualização contínua para 2 websites (OE e IC) ao longo do ano de 2026."
+  },
+  {
+    "Item": "WINDBANNER",
+    "Categoria": "Material não esportivo",
+    "Unidade": "UNIDADE",
+    "Valor Unitário": 150,
+    "Descrição": "Bandeira promocional montada em haste flexível e resistente com base firme para uso interno ou externo, personalizada com logotipos ou slogans para alta visibilidade com o vento.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "PAINEL DE LED",
+    "Categoria": "Outro",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 25000,
+    "Descrição": "Locação de sistema de painéis de LED de alta definição. O serviço inclui processadores de vídeo, fiação completa, estruturas de sustentação, logística de transporte, montagem, desmontagem e operação técnica.",
+    "Memorial de Cálculo": "Configurado em uma área total de 64m², dividida em 3 módulos estruturais: 1 painel central de 10X4m e 2 painéis laterais de 3X4m cada."
+  },
+  {
+    "Item": "PLACAR ELETRÔNICO NATAÇÃO",
+    "Categoria": "Material esportivo",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 27000,
+    "Descrição": "Painel eletrônico esportivo integrado para exibição automatizada e instantânea dos tempos e resultados do sistema computadorizado de aferição da prova.",
+    "Memorial de Cálculo": "Não aplicável."
+  },
+  {
+    "Item": "TRANSMISSÃO AO VIVO",
+    "Categoria": "Outro",
+    "Unidade": "DIÁRIA",
+    "Valor Unitário": 3800,
+    "Descrição": "Serviço de captação cinematográfica e transmissão por streaming online das competições esportivas. Fornecimento de câmeras, mesas de corte, cabeamento, microfonia e edição integrada em tempo real.",
+    "Memorial de Cálculo": "Não aplicável."
+  }
+]

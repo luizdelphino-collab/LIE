@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getDocs, deleteDoc } from 'firebase/firestore';
-import { ArrowLeft, Save, Edit3, FileText, Plus, Eye, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowLeft, Save, Edit3, FileText, Plus, Eye, Trash2, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { fetchCep } from '../lib/cep';
 import type { Dirigente, Entidade } from '../types';
@@ -298,11 +298,32 @@ export default function DirigenteFormPage() {
             <p className="text-sm text-lie-gray">{entidade?.nome}</p>
           </div>
         </div>
-        {!isNew && !isEditing && (
-          <button onClick={() => setIsEditing(true)} className="inline-flex items-center gap-2 bg-lie-green text-white px-4 py-2 rounded-lg hover:bg-lie-greenDark transition font-medium">
-            <Edit3 className="w-4 h-4" /> Editar
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {!isNew && !isEditing && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
+              title="Editar"
+            >
+              <Edit3 className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Editar
+              </span>
+            </button>
+          )}
+          {!isNew && !isDocFormOpen && (
+            <button
+              onClick={openNewDoc}
+              className="group flex items-center bg-white border border-gray-300 text-lie-green rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-green-50 shadow-sm"
+              title="Novo Documento"
+            >
+              <Plus className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Novo Documento
+              </span>
+            </button>
+          )}
+        </div>
       </header>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -405,8 +426,15 @@ export default function DirigenteFormPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-lie-ink flex items-center gap-2"><FileText className="w-5 h-5 text-lie-green" /> Documentos do Dirigente</h2>
             {!isDocFormOpen && (
-              <button onClick={openNewDoc} className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white font-medium px-4 py-2 rounded-lg transition">
-                <Plus className="w-4 h-4" /> Novo Documento
+              <button
+                onClick={openNewDoc}
+                className="group flex items-center bg-white border border-gray-300 text-lie-green rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-green-50 shadow-sm"
+                title="Novo Documento"
+              >
+                <Plus className="w-5 h-5 shrink-0" />
+                <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                  Novo Documento
+                </span>
               </button>
             )}
           </div>

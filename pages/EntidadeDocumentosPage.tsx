@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import type { DocumentoEntidade, Entidade } from '../types';
 
@@ -230,6 +230,24 @@ export default function EntidadeDocumentosPage() {
           </button>
         )}
       </header>
+
+      {/* Alerta de documentos vencidos/inativos */}
+      {(() => {
+        const vencidos = documentos.filter(d => {
+          if (!d.validade) return false;
+          const dt = (d.validade as any).toDate ? (d.validade as any).toDate() : new Date(d.validade as any);
+          return dt.getTime() < Date.now();
+        }).length;
+        if (vencidos === 0) return null;
+        return (
+          <div className="mb-4 flex items-center gap-3 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-3">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500" />
+            <span className="text-sm font-medium">
+              Atenção: há <strong>{vencidos}</strong> documento{vencidos > 1 ? 's' : ''} vencido{vencidos > 1 ? 's' : ''}/inativo{vencidos > 1 ? 's' : ''} nesta entidade.
+            </span>
+          </div>
+        );
+      })()}
 
       {isFormOpen ? (
         <div className="bg-white rounded-xl shadow-premium p-6 border border-gray-100 mb-6">

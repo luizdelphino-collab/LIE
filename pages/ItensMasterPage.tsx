@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit } from 'firebase/firestore';
-import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft } from 'lucide-react';
+import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
 
+
 const CATEGORIAS: CategoriaItem[] = ['Alimento', 'Transporte', 'Material Esportivo', 'Material não Esportivo', 'Recurso Humano', 'Outro'];
-const UNIDADES: UnidadeMedida[] = ['diária', 'metro', 'metro²', 'unidade', 'pacote', 'caixa', 'kit', 'mês', 'Kg'];
+const UNIDADES: (UnidadeMedida | string)[] = ['diária', 'metro', 'metro²', 'unidade', 'pacote', 'caixa', 'kit', 'mês', 'Kg', 'evento', 'jogo', 'geral'];
 
 export default function ItensMasterPage() {
   const [items, setItems] = useState<ItemMaster[]>([]);
@@ -15,9 +17,9 @@ export default function ItensMasterPage() {
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
-  // Estados para Ordenação
   const [sortField, setSortField] = useState<keyof ItemMaster>('categoria');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<Partial<ItemMaster>>({
     nome: '',
@@ -34,11 +36,6 @@ export default function ItensMasterPage() {
       const snap = await getDocs(q);
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ItemMaster));
       setItems(list);
-
-      // Seed se estiver vazio
-      if (list.length === 0) {
-        await seedItems();
-      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -72,6 +69,92 @@ export default function ItensMasterPage() {
     }
     carregarItens();
   };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    try {
+      const dataBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(dataBuffer, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(sheet) as any[];
+
+      if (jsonData.length === 0) {
+        alert("A planilha está vazia!");
+        setLoading(false);
+        return;
+      }
+
+
+
+      const mapCategoria = (cat: string): string => {
+        if (!cat) return 'Outro';
+        const c = cat.trim().toLowerCase();
+        if (c.includes('alimento')) return 'Alimento';
+        if (c.includes('transporte')) return 'Transporte';
+        if (c.includes('recurso humano') || c.includes('rh')) return 'Recurso Humano';
+        if (c.includes('material não esportivo')) return 'Material não Esportivo';
+        if (c.includes('material esportivo')) return 'Material Esportivo';
+        return 'Outro';
+      };
+
+      const mapUnidade = (uni: string): string => {
+        if (!uni) return 'unidade';
+        const u = uni.trim().toLowerCase();
+        if (u === 'unidade') return 'unidade';
+        if (u === 'diária' || u === 'diaria') return 'diária';
+        if (u === 'mês' || u === 'mes' || u === 'mensal') return 'mês';
+        if (u === 'metro') return 'metro';
+        if (u === 'm²' || u === 'metro²' || u === 'metro quadrado') return 'metro²';
+        if (u === 'evento') return 'evento';
+        if (u === 'jogo') return 'jogo';
+        if (u === 'geral') return 'geral';
+        if (u === 'pacote') return 'pacote';
+        if (u === 'caixa') return 'caixa';
+        if (u === 'kit') return 'kit';
+        if (u === 'kg') return 'Kg';
+        return u;
+      };
+
+      let count = items.length > 0 ? Math.max(...items.map(it => it.codigo)) : 0;
+      count++;
+
+      for (const row of jsonData) {
+        const nome = row['Item'] || row['Nome'] || row['nome'] || row['item'];
+        if (!nome) continue;
+
+        const categoria = mapCategoria(row['Categoria'] || row['categoria']);
+        const unidade = mapUnidade(row['Unidade'] || row['unidade']);
+        const valorUnitario = parseFloat(row['Valor Unitário'] || row['valorUnitario'] || row['Valor'] || row['valor'] || 0);
+        const descricao = row['Descrição'] || row['descricao'] || '';
+
+        const id = doc(collection(db, 'items')).id;
+        await setDoc(doc(db, 'items', id), {
+          id,
+          codigo: count++,
+          nome,
+          categoria,
+          unidade,
+          valorUnitario,
+          descricao,
+          criadoEm: serverTimestamp()
+        });
+      }
+
+      alert("Importação concluída com sucesso!");
+      carregarItens();
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao importar planilha. Verifique o formato do arquivo.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
 
   useEffect(() => {
     carregarItens();
@@ -150,13 +233,13 @@ export default function ItensMasterPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Excluir este item permanentemente do banco de dados?")) return;
     try {
       await deleteDoc(doc(db, 'items', id));
       setItems(prev => prev.filter(it => it.id !== id));
+      setConfirmDeleteId(null);
     } catch (e) {
       console.error(e);
-      alert("Erro ao excluir");
+      alert("Erro ao excluir. Verifique as permissões do Firestore.");
     }
   };
 
@@ -169,12 +252,43 @@ export default function ItensMasterPage() {
           <h1 className="text-2xl font-bold text-lie-ink">Banco de Dados de Itens</h1>
           <p className="text-sm text-lie-gray">Gerencie os itens base que serão utilizados nos projetos</p>
         </div>
-        <button onClick={openNew} className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm">
-          <Plus className="w-5 h-5 shrink-0" />
-          <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
-            Novo Item Base
-          </span>
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Download Model Button */}
+          <a 
+            href="/modelo_importacao_itens.xlsx" 
+            download="modelo_importacao_itens.xlsx"
+            className="group flex items-center bg-amber-50 border border-amber-200 text-amber-700 rounded-lg p-2 transition-all duration-300 hover:bg-amber-100 shadow-sm"
+          >
+            <Download className="w-5 h-5 shrink-0 text-amber-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Baixar Modelo Excel
+            </span>
+          </a>
+
+          {/* Import Batch Label */}
+          <label className="group flex items-center bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg p-2 cursor-pointer transition-all duration-300 hover:bg-indigo-100 shadow-sm">
+            <FileSpreadsheet className="w-5 h-5 shrink-0 text-indigo-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Importar Lote (Planilha)
+            </span>
+            <input
+              type="file"
+              accept=".xlsx, .xls"
+              onChange={handleImportExcel}
+              className="hidden"
+            />
+          </label>
+
+
+
+          {/* New Item Button */}
+          <button onClick={openNew} className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm">
+            <Plus className="w-5 h-5 shrink-0" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Novo Item Base
+            </span>
+          </button>
+        </div>
       </header>
 
       <div className="mb-6 relative">
@@ -265,12 +379,32 @@ export default function ItensMasterPage() {
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
-                    <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar">
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => handleDelete(it.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition" title="Excluir">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {confirmDeleteId === it.id ? (
+                      <>
+                        <span className="text-xs text-red-600 font-semibold mr-1">Excluir?</span>
+                        <button
+                          onClick={() => handleDelete(it.id)}
+                          className="px-2 py-1 bg-red-500 text-white text-xs font-bold rounded hover:bg-red-600 transition"
+                        >
+                          Sim
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="px-2 py-1 bg-gray-200 text-gray-700 text-xs font-bold rounded hover:bg-gray-300 transition"
+                        >
+                          Não
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar">
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setConfirmDeleteId(it.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition" title="Excluir">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>

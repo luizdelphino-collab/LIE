@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Save, ArrowLeft, Image as ImageIcon, MapPin, Building2, Phone, Mail, FileText, Globe, Plus, Trash2, X, Users, Edit3 } from 'lucide-react';
+import { Save, ArrowLeft, Image as ImageIcon, MapPin, Building2, Phone, Mail, FileText, Globe, Plus, Trash2, X, Users, Edit3, AlertTriangle } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { deleteDoc } from 'firebase/firestore';
 import { fetchCep } from '../lib/cep';
@@ -47,6 +47,7 @@ export default function EntidadeFormPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [isEditing, setIsEditing] = useState(isNew);
+  const [docsVencidos, setDocsVencidos] = useState(0);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -97,6 +98,18 @@ export default function EntidadeFormPage() {
           } else {
             navigate('/entidades');
           }
+          // Conta documentos vencidos/inativos
+          const docsSnap = await getDocs(query(collection(db, `entities/${id}/documentos`)));
+          const now = new Date();
+          let count = 0;
+          docsSnap.forEach(d => {
+            const val = d.data().validade;
+            if (val) {
+              const dt = val.toDate ? val.toDate() : new Date(val);
+              if (dt.getTime() < now.getTime()) count++;
+            }
+          });
+          setDocsVencidos(count);
         } finally {
           setLoading(false);
         }
@@ -245,8 +258,11 @@ export default function EntidadeFormPage() {
             )}
             <div>
               <h1 className="text-2xl font-bold text-lie-ink">
-                {isNew ? 'Nova Entidade' : formData.nome || 'Entidade'}
+                {isNew ? 'Nova Entidade' : (formData.sigla || formData.nome || 'Entidade')}
               </h1>
+              {!isNew && formData.sigla && (
+                <p className="text-sm text-lie-gray">{formData.nome}</p>
+              )}
               {!isNew && <p className="text-sm text-lie-gray">CNPJ: {formData.cnpj}</p>}
             </div>
           </div>
@@ -328,6 +344,23 @@ export default function EntidadeFormPage() {
           )}
         </div>
       </header>
+
+      {/* Alerta de documentos vencidos/inativos */}
+      {!isNew && docsVencidos > 0 && (
+        <div className="mb-4 flex items-center gap-3 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500" />
+          <span className="text-sm font-medium">
+            Atenção: esta entidade possui <strong>{docsVencidos}</strong> documento{docsVencidos > 1 ? 's' : ''} vencido{docsVencidos > 1 ? 's' : ''}/inativo{docsVencidos > 1 ? 's' : ''}.
+          </span>
+          <button
+            type="button"
+            onClick={() => navigate(`/entidades/${id}/documentos`)}
+            className="ml-auto text-xs font-semibold underline hover:text-amber-900 whitespace-nowrap"
+          >
+            Ver documentos
+          </button>
+        </div>
+      )}
 
       <form id="entidade-form" onSubmit={handleSubmit} className="space-y-6">
         
