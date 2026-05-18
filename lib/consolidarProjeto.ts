@@ -310,7 +310,14 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   if (projeto.modalidades && projeto.modalidades.length > 0) {
     chkPage();
     y = addSubTitle(pdf, 'Modalidades Esportivas', y);
-    y = addBodyText(pdf, projeto.modalidades.join(', '), y, chkPage);
+    const modStr = projeto.modalidades
+      .map((m: any) => {
+        const nome = typeof m === 'string' ? m : m.nome;
+        const flag = typeof m === 'object' && m.paralimpica ? ' (Paralímpica)' : '';
+        return nome + flag;
+      })
+      .join(', ');
+    y = addBodyText(pdf, modStr, y, chkPage);
   }
 
   // Objetivo Geral

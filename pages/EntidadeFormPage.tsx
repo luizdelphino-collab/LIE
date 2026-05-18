@@ -252,7 +252,19 @@ export default function EntidadeFormPage() {
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {!isNew && !isEditing && (
+            <button 
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
+            >
+              <Edit3 className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Editar Cadastro
+              </span>
+            </button>
+          )}
           {!isNew && (
             <>
               <button 

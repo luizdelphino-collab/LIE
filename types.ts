@@ -68,6 +68,11 @@ export interface MetaProjeto {
   verificacao: string;
 }
 
+export interface ModalidadeProjeto {
+  nome: string;
+  paralimpica: boolean;
+}
+
 export type EsferaIncentivo = 'federal' | 'estadual' | 'municipal';
 
 export interface Patrocinador {
@@ -97,7 +102,7 @@ export interface Projeto {
   duracaoMeses?: number;
   ambitoAplicacao?: AmbitoAplicacao;
   locais?: LocalExecucao[];
-  modalidades?: string[];
+  modalidades?: ModalidadeProjeto[];
   pracaEsportiva?: {
     nome?: string;
     endereco?: string;

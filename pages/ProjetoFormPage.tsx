@@ -6,7 +6,7 @@ import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Ta
 import { db, storage } from '../lib/firebase';
 import { consolidarProjeto } from '../lib/consolidarProjeto';
 import RubricaModal from '../components/RubricaModal';
-import type { Projeto, Entidade, InstrumentoOrigem, AmbitoAplicacao, AcaoCronograma, MetaProjeto } from '../types';
+import type { Projeto, Entidade, InstrumentoOrigem, AmbitoAplicacao, AcaoCronograma, MetaProjeto, ModalidadeProjeto } from '../types';
 
 const INSTRUMENTOS: InstrumentoOrigem[] = [
   'LPIE', 'LIE', 'CONDECA', 'Emenda Federal', 'Emenda Estadual', 'Emenda Municipal',
@@ -16,6 +16,16 @@ const INSTRUMENTOS: InstrumentoOrigem[] = [
 const ORGAOS = ['Ministério do Esporte', 'SESP', 'SEDUC', 'SME', 'SEME', 'outro'];
 
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
+
+const MODALIDADES_LISTA: string[] = [
+  'Atletismo', 'Badminton', 'Basquete 3x3', 'Basquete em Cadeira', 'Basquetebol',
+  'Beach Tennis', 'Bocha', 'Boxe', 'Ciclismo', 'Damas', 'Esgrima',
+  'Futebol', 'Futsal', 'Gin\u00e1stica Art\u00edstica', 'Gin\u00e1stica R\u00edtmica',
+  'Handebol', 'Jud\u00f4', 'Karat\u00ea', 'Nata\u00e7\u00e3o', 'Paral\u00edmpico Goalball',
+  'Remo Virtual', 'Skate', 'Taekwondo', 'T\u00eanis de Mesa', 'T\u00eanis em Cadeira',
+  'Tiro com Arco', 'Triatlhon', 'V\u00f4lei de Praia', 'Volei Sentado', 'Voleibol',
+  'Wrestling', 'Xadrez'
+];
 
 export default function ProjetoFormPage() {
   const { id } = useParams();
@@ -28,6 +38,7 @@ export default function ProjetoFormPage() {
   const [isEditing, setIsEditing] = useState(isNew);
   const [entidades, setEntidades] = useState<Entidade[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedMod, setSelectedMod] = useState<string>('');
 
   const [formData, setFormData] = useState<Partial<Projeto>>({
     titulo: '',
@@ -42,7 +53,6 @@ export default function ProjetoFormPage() {
     ambitoAplicacao: 'Municipal',
     locais: [],
     modalidades: [],
-    pracaEsportiva: { nome: '', endereco: '' },
     objetivoGeral: '',
     objetivosEspecificos: ['', '', ''],
     justificativa: '',
@@ -159,13 +169,26 @@ export default function ProjetoFormPage() {
   const addObjective = () => setFormData(prev => ({ ...prev, objetivosEspecificos: [...(prev.objetivosEspecificos || []), ''] }));
   const removeObjective = (index: number) => setFormData(prev => ({ ...prev, objetivosEspecificos: prev.objetivosEspecificos?.filter((_, i) => i !== index) }));
 
-  const toggleModalidade = (mod: string) => {
-    const mods = [...(formData.modalidades || [])];
-    if (mods.includes(mod)) {
-      setFormData(prev => ({ ...prev, modalidades: mods.filter(m => m !== mod) }));
-    } else {
-      setFormData(prev => ({ ...prev, modalidades: [...mods, mod] }));
-    }
+  const addModalidade = () => {
+    if (!selectedMod) return;
+    const already = (formData.modalidades || []).find(m => m.nome === selectedMod);
+    if (already) return;
+    const newMod: ModalidadeProjeto = { nome: selectedMod, paralimpica: false };
+    setFormData(prev => ({ ...prev, modalidades: [...(prev.modalidades || []), newMod] }));
+    setSelectedMod('');
+  };
+
+  const removeModalidade = (nome: string) => {
+    setFormData(prev => ({ ...prev, modalidades: (prev.modalidades || []).filter(m => m.nome !== nome) }));
+  };
+
+  const toggleParalimpica = (nome: string) => {
+    setFormData(prev => ({
+      ...prev,
+      modalidades: (prev.modalidades || []).map(m =>
+        m.nome === nome ? { ...m, paralimpica: !m.paralimpica } : m
+      )
+    }));
   };
 
   const addAcao = () => {
@@ -520,54 +543,72 @@ export default function ProjetoFormPage() {
           </div>
         </section>
 
-        {/* Modalidades e Praça */}
+        {/* Modalidades */}
         <section className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <div className="flex items-center gap-2 mb-4 border-b border-gray-50 pb-2">
             <Target className="w-5 h-5 text-lie-green" />
-            <h2 className="text-lg font-bold text-lie-ink">Modalidades e Local</h2>
+            <h2 className="text-lg font-bold text-lie-ink">Modalidades</h2>
           </div>
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Modalidades Esportivas</label>
-              <div className="flex flex-wrap gap-2">
-                {['Futebol', 'Futsal', 'Basquetebol', 'Voleibol', 'Handebol', 'Judô', 'Karatê', 'Natação', 'Atletismo', 'Tênis', 'Outra'].map(mod => (
-                  <button
-                    key={mod}
-                    type="button"
-                    onClick={() => isEditing && toggleModalidade(mod)}
-                    className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${
-                      formData.modalidades?.includes(mod)
-                        ? 'bg-lie-green text-white border-lie-green'
-                        : 'bg-white text-gray-600 border-gray-300 hover:border-lie-green'
-                    } ${!isEditing && 'cursor-default'}`}
-                  >
-                    {mod}
-                  </button>
+          <div className="space-y-4">
+            {/* Selector row */}
+            {isEditing && (
+              <div className="flex gap-2">
+                <select
+                  value={selectedMod}
+                  onChange={e => setSelectedMod(e.target.value)}
+                  className={inputCls + ' flex-1'}
+                >
+                  <option value="">Selecione uma modalidade...</option>
+                  {MODALIDADES_LISTA.filter(m => !(formData.modalidades || []).find(x => x.nome === m)).map(mod => (
+                    <option key={mod} value={mod}>{mod}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={addModalidade}
+                  disabled={!selectedMod}
+                  className="p-2 bg-lie-green text-white rounded-lg hover:bg-lie-greenDark disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  title="Adicionar modalidade"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+
+            {/* Lista de modalidades selecionadas */}
+            {(formData.modalidades || []).length === 0 ? (
+              <p className="text-sm text-gray-400 italic">{isEditing ? 'Nenhuma modalidade adicionada.' : 'Sem modalidades cadastradas.'}</p>
+            ) : (
+              <div className="space-y-2">
+                {(formData.modalidades || []).map(mod => (
+                  <div key={mod.nome} className="flex items-center justify-between gap-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <span className="text-sm font-medium text-lie-ink">{mod.nome}</span>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={mod.paralimpica}
+                          onChange={() => isEditing && toggleParalimpica(mod.nome)}
+                          disabled={!isEditing}
+                          className="rounded border-gray-300 text-lie-green focus:ring-lie-green"
+                        />
+                        Paralímpica
+                      </label>
+                      {isEditing && (
+                        <button
+                          type="button"
+                          onClick={() => removeModalidade(mod.nome)}
+                          className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"
+                          title="Remover"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Praça Esportiva (Nome)</label>
-                <input 
-                  type="text" 
-                  value={formData.pracaEsportiva?.nome || ''} 
-                  onChange={(e) => setFormData(p => ({...p, pracaEsportiva: { ...(p.pracaEsportiva || {}), nome: e.target.value }}))} 
-                  disabled={!isEditing} 
-                  className={inputCls} 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Endereço da Praça</label>
-                <input 
-                  type="text" 
-                  value={formData.pracaEsportiva?.endereco || ''} 
-                  onChange={(e) => setFormData(p => ({...p, pracaEsportiva: { ...(p.pracaEsportiva || {}), endereco: e.target.value }}))} 
-                  disabled={!isEditing} 
-                  className={inputCls} 
-                />
-              </div>
-            </div>
+            )}
           </div>
         </section>
 
