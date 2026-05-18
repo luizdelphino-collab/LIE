@@ -66,9 +66,12 @@ export default function DirigentesPage() {
         </div>
         <button
           onClick={() => navigate(`/entidades/${id}/dirigentes/novo`)}
-          className="inline-flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white font-medium px-4 py-2 rounded-lg transition"
+          className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm"
         >
-          <Plus className="w-4 h-4" /> Novo Dirigente
+          <Plus className="w-5 h-5 shrink-0" />
+          <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+            Novo Dirigente
+          </span>
         </button>
       </header>
 
@@ -91,10 +94,10 @@ export default function DirigentesPage() {
             <tbody className="divide-y divide-gray-100">
               {dirigentes.map((d, index) => (
                 <tr key={d.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/entidades/${id}/dirigentes/${d.id}`)}>
-                  <td className="px-4 py-3 text-center">
+                  <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-col items-center gap-0.5 text-gray-400">
-                      <button onClick={() => mover(index, 'up')} disabled={index === 0} className="hover:text-lie-ink disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
-                      <button onClick={() => mover(index, 'down')} disabled={index === dirigentes.length - 1} className="hover:text-lie-ink disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
+                      <button onClick={(e) => { e.stopPropagation(); mover(index, 'up'); }} disabled={index === 0} className="hover:text-lie-ink disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
+                      <button onClick={(e) => { e.stopPropagation(); mover(index, 'down'); }} disabled={index === dirigentes.length - 1} className="hover:text-lie-ink disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
                     </div>
                   </td>
                   <td className="px-4 py-3 font-medium text-lie-ink">{d.nome}</td>

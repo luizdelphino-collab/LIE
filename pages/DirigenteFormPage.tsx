@@ -16,6 +16,12 @@ const maskCpf = (v: string) => {
   return v.substring(0, 14);
 };
 
+const maskCep = (v: string) => {
+  v = v.replace(/\D/g, '');
+  v = v.replace(/(\d{5})(\d)/, '$1-$2');
+  return v.substring(0, 9);
+};
+
 const maskPhone = (v: string) => {
   v = v.replace(/\D/g, '');
   v = v.replace(/^(\d{2})(\d)/g, '($1) $2');
@@ -111,6 +117,7 @@ export default function DirigenteFormPage() {
     let { name, value } = e.target;
     if (name === 'cpf') value = maskCpf(value);
     if (name === 'telefone') value = maskPhone(value);
+    if (name === 'cep') value = maskCep(value);
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
@@ -430,6 +437,7 @@ export default function DirigenteFormPage() {
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo PDF {editDocId ? '(opcional: substituir)' : '*'}</label>
                     <input type="file" accept="application/pdf" ref={fileInputRef} onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="w-full text-sm" />
+                    <p className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-wider">Somente PDF • Máximo 10MB</p>
                     {docForm.arquivoUrl && !selectedFile && <p className="text-xs text-blue-600 mt-1">Arquivo atual já salvo.</p>}
                   </div>
                 </div>

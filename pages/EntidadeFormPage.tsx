@@ -8,6 +8,12 @@ import { deleteDoc } from 'firebase/firestore';
 import { fetchCep } from '../lib/cep';
 import type { Entidade } from '../types';
 
+const maskCep = (v: string) => {
+  v = v.replace(/\D/g, '');
+  v = v.replace(/(\d{5})(\d)/, '$1-$2');
+  return v.substring(0, 9);
+};
+
 const maskCnpj = (v: string) => {
   v = v.replace(/\D/g, "");
   v = v.replace(/^(\d{2})(\d)/, "$1.$2");
@@ -103,6 +109,7 @@ export default function EntidadeFormPage() {
 
     // Apply masks
     if (name === 'cnpj') value = maskCnpj(value);
+    if (name === 'cep') value = maskCep(value);
     if (name === 'resp_cpf') value = maskCpf(value);
     if (name === 'resp_telefone') value = maskPhone(value);
 
@@ -132,7 +139,7 @@ export default function EntidadeFormPage() {
   };
 
   const handleCepBlur = async () => {
-    if (formData.cep && formData.cep.length >= 8) {
+    if (formData.cep && formData.cep.replace(/\D/g, '').length >= 8) {
       const data = await fetchCep(formData.cep);
       if (data) {
         setFormData(prev => ({

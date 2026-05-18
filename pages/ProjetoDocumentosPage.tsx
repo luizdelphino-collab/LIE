@@ -249,7 +249,8 @@ export default function ProjetoDocumentosPage() {
               </div>
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">Arquivo {editId ? '(Opcional: trocar)' : '*'}</label>
-                <input type="file" ref={fileInputRef} onChange={handleFileChange} className="w-full border-gray-300 rounded-lg shadow-sm text-sm" />
+                <input type="file" accept="application/pdf" ref={fileInputRef} onChange={handleFileChange} className="w-full border-gray-300 rounded-lg shadow-sm text-sm" />
+                <p className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-wider">Somente PDF • Máximo 10MB</p>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-bold text-gray-700 mb-1">Observações</label>

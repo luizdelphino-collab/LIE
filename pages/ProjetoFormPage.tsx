@@ -48,6 +48,7 @@ export default function ProjetoFormPage() {
     justificativa: '',
     caracterizacaoSocioeconomica: '',
     metodologia: '',
+    planoDivulgacao: '',
     cronograma: [],
     publicoAlvo: { direto: '', faixaEtaria: '', indireto: '' },
     metasQualitativas: [
@@ -429,6 +430,10 @@ export default function ProjetoFormPage() {
               <label className="block text-sm font-semibold text-gray-700 mb-1">Resumo do Projeto</label>
               <textarea name="resumo" rows={3} value={formData.resumo} onChange={handleChange} disabled={!isEditing} className={inputCls}></textarea>
             </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Plano de Divulgação</label>
+              <textarea name="planoDivulgacao" rows={3} value={(formData as any).planoDivulgacao || ''} onChange={handleChange} disabled={!isEditing} className={inputCls} placeholder="Descreva como o projeto será divulgado..." ></textarea>
+            </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Mês de Início *</label>
               <input type="month" name="mesInicio" required value={formData.mesInicio} onChange={handleChange} disabled={!isEditing} className={inputCls} />
@@ -632,16 +637,9 @@ export default function ProjetoFormPage() {
 
         {/* Cronograma */}
         <section className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 overflow-hidden">
-          <div className="flex items-center justify-between mb-4 border-b border-gray-50 pb-2">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-lie-green" />
-              <h2 className="text-lg font-bold text-lie-ink">Cronograma Previsto</h2>
-            </div>
-            {isEditing && (
-              <button type="button" onClick={addAcao} className="inline-flex items-center gap-2 bg-lie-green text-white px-3 py-1.5 rounded-lg text-sm font-bold">
-                <Plus className="w-4 h-4" /> Adicionar Ação
-              </button>
-            )}
+          <div className="flex items-center gap-2 mb-4 border-b border-gray-50 pb-2">
+            <Calendar className="w-5 h-5 text-lie-green" />
+            <h2 className="text-lg font-bold text-lie-ink">Cronograma Previsto</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -690,6 +688,13 @@ export default function ProjetoFormPage() {
             </table>
             {(!formData.cronograma || formData.cronograma.length === 0) && (
               <div className="p-8 text-center text-gray-400 italic">Nenhuma ação cadastrada.</div>
+            )}
+            {isEditing && (
+              <div className="p-3 border-t border-gray-100">
+                <button type="button" onClick={addAcao} className="inline-flex items-center gap-2 bg-lie-green text-white px-3 py-1.5 rounded-lg text-sm font-bold">
+                  <Plus className="w-4 h-4" /> Adicionar Ação
+                </button>
+              </div>
             )}
           </div>
         </section>
