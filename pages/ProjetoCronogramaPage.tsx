@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, writeBatch, serverTimestamp, orderBy } from 'firebase/firestore';
-import { ArrowLeft, Save, Loader2, FileSpreadsheet, Calendar as CalendarIcon, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, FileSpreadsheet, Calendar as CalendarIcon, CheckCircle2, Unlock } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { ItemMaster, ItemProjeto, Projeto, CronogramaItem } from '../types';
+
+const round2 = (num: number) => Math.round((num + Number.EPSILON) * 100) / 100;
 
 export default function ProjetoCronogramaPage() {
   const { id } = useParams();
@@ -72,6 +74,7 @@ export default function ProjetoCronogramaPage() {
   const handleQtyChange = (itemProjetoId: string, mes: number, rawValue: string, maxQty: number) => {
     let val = parseFloat(rawValue);
     if (isNaN(val) || val < 0) val = 0;
+    val = round2(val);
 
     // Validate that sum of all other months + this val doesn't exceed maxQty
     const currentAlloc = allocations[itemProjetoId] || {};
@@ -80,9 +83,10 @@ export default function ProjetoCronogramaPage() {
       const m = parseInt(mStr);
       if (m !== mes) sumOtherMonths += currentAlloc[m] || 0;
     });
+    sumOtherMonths = round2(sumOtherMonths);
 
-    if (sumOtherMonths + val > maxQty) {
-      val = maxQty - sumOtherMonths; // Cap it
+    if (round2(sumOtherMonths + val) > maxQty) {
+      val = round2(maxQty - sumOtherMonths); // Cap it
     }
 
     setAllocations(prev => ({
@@ -131,16 +135,6 @@ export default function ProjetoCronogramaPage() {
 
       await batch.commit();
       setCronogramaItems(newCronItems);
-      
-      const newLocked = { ...monthLocked };
-      for (let m = 1; m <= duracaoMeses; m++) {
-        let hasAlloc = false;
-        for (const item of itensProjeto) {
-          if ((allocations[item.id] || {})[m] > 0) hasAlloc = true;
-        }
-        if (hasAlloc) newLocked[m] = true;
-      }
-      setMonthLocked(newLocked);
 
       alert("Cronograma salvo com sucesso!");
     } catch (e) {
@@ -149,6 +143,10 @@ export default function ProjetoCronogramaPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const unlockAllMonths = () => {
+    setMonthLocked({});
   };
 
   const exportToExcel = () => {
@@ -315,7 +313,8 @@ export default function ProjetoCronogramaPage() {
 
   const calculateTotalDistributed = (itemId: string) => {
     const itemAllocs = allocations[itemId] || {};
-    return Object.values(itemAllocs).reduce((acc, val) => acc + (val || 0), 0);
+    const sum = Object.values(itemAllocs).reduce((acc, val) => acc + (val || 0), 0);
+    return round2(sum);
   };
 
   const monthTotalVal = typeof selectedTab === 'number' ? itensProjeto.reduce((acc, it) => {
@@ -340,6 +339,18 @@ export default function ProjetoCronogramaPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          {Object.keys(monthLocked).length > 0 && (
+            <button 
+              onClick={unlockAllMonths} 
+              className="group flex items-center bg-white border border-gray-300 text-blue-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-blue-50 shadow-sm"
+              title="Destravar Edição de Todos os Meses"
+            >
+              <Unlock className="w-5 h-5 shrink-0" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+                Liberar Edição Geral
+              </span>
+            </button>
+          )}
           <button 
             onClick={exportToExcel} 
             disabled={itensProjeto.length === 0}
