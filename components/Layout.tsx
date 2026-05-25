@@ -12,15 +12,17 @@ export default function Layout() {
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-9 h-9 bg-lie-green rounded-lg text-white font-logo text-sm font-bold flex items-center justify-center shrink-0">
-              LIE
+            <div className="flex items-center gap-1.5">
+              <div className="w-9 h-9 bg-lie-green rounded-lg text-white font-logo text-sm font-bold flex items-center justify-center shrink-0">
+                LIE
+              </div>
+              <span className="text-[9px] bg-lie-green/10 text-lie-green px-1.5 py-0.5 rounded font-mono font-semibold tracking-normal normal-case">
+                v1.2.0
+              </span>
             </div>
             <div className="leading-tight hidden xs:block">
-              <div className="font-semibold text-lie-ink text-sm flex items-center gap-1.5">
+              <div className="font-semibold text-lie-ink text-sm">
                 Gestão de Projetos
-                <span className="text-[9px] bg-lie-green/10 text-lie-green px-1.5 py-0.5 rounded font-mono font-semibold tracking-normal normal-case">
-                  v1.2.0
-                </span>
               </div>
               <div className="text-[10px] text-lie-gray uppercase tracking-wider hidden sm:block">
                 Lei de Incentivo ao Esporte
