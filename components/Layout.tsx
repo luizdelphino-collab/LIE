@@ -16,7 +16,12 @@ export default function Layout() {
               LIE
             </div>
             <div className="leading-tight hidden xs:block">
-              <div className="font-semibold text-lie-ink text-sm">Gestão de Projetos</div>
+              <div className="font-semibold text-lie-ink text-sm flex items-center gap-1.5">
+                Gestão de Projetos
+                <span className="text-[9px] bg-lie-green/10 text-lie-green px-1.5 py-0.5 rounded font-mono font-semibold tracking-normal normal-case">
+                  v1.2.0
+                </span>
+              </div>
               <div className="text-[10px] text-lie-gray uppercase tracking-wider hidden sm:block">
                 Lei de Incentivo ao Esporte
               </div>
