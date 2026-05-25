@@ -213,7 +213,7 @@ export default function UsuariosPage() {
           const { signInWithEmailAndPassword, updatePassword } = await import('firebase/auth');
           
           try {
-            const senhaAntiga = selectedUser?.senha || '';
+            const senhaAntiga = (selectedUser as any)?.senha || '';
             if (!senhaAntiga) {
               throw new Error(
                 "Não foi encontrada a senha antiga registrada para este usuário no banco local. " +
