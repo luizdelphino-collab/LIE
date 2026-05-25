@@ -9,7 +9,7 @@ const MARGIN = 20;
 const PAGE_W = 210;
 const PAGE_H = 297;
 const CONTENT_W = PAGE_W - MARGIN * 2;
-const LINE_H = 5.5;
+const LINE_H = 5.2; // Altura de linha compacta e elegante
 
 interface PDFState {
   pdf: jsPDF;
@@ -20,13 +20,24 @@ interface PDFState {
   projetoTitulo: string;
 }
 
+function softenColor(rgb: [number, number, number]): [number, number, number] {
+  const [r, g, b] = rgb;
+  // Se for um vermelho, laranja ou coral agressivo (R alto, G e B moderados ou baixos)
+  if (r > 120 && r > g * 1.3 && r > b * 1.3) {
+    return [141, 23, 44]; // Vinho/Burgundy corporativo e elegante (#8D172C)
+  }
+  return rgb;
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '');
   const r = parseInt(clean.substring(0, 2), 16);
   const g = parseInt(clean.substring(2, 4), 16);
   const b = parseInt(clean.substring(4, 6), 16);
-  if (isNaN(r) || isNaN(g) || isNaN(b)) return [22, 101, 52];
-  return [r, g, b];
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return [141, 23, 44]; // Fallback para vinho elegante
+  
+  const rawRgb: [number, number, number] = [r, g, b];
+  return softenColor(rawRgb);
 }
 
 function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, number, number] {
@@ -57,7 +68,7 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
     console.warn('Erro ao carregar via Storage Blob, tentando fetch direto:', e);
   }
 
-  // 2. Tentar Fetch direto (caso CORS já esteja configurado)
+  // 2. Tentar Fetch direto
   try {
     const resp = await fetch(url);
     if (resp.ok) {
@@ -72,7 +83,7 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
     console.warn('Fetch direto bloqueado por CORS, tentando Proxy 1 (Weserv):', e);
   }
 
-  // 3. Tentar via Proxy Weserv (Rápido e otimizado para imagens com CORS ativo)
+  // 3. Tentar via Proxy Weserv
   try {
     const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png`;
     const resp = await fetch(weservUrl);
@@ -114,7 +125,7 @@ function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
 }
 
 function drawLetterheadHeader(pdf: jsPDF, entidade: Entidade, logoBase64: string | null, cor: [number, number, number]) {
-  // 1. Logotipo no topo esquerdo (X=20, Y=8, tamanho 18x18)
+  // 1. Logotipo no topo esquerdo (X=20, Y=7, tamanho 16x16)
   if (logoBase64) {
     try {
       const format = getImgFormat(entidade.logoUrl || '');
@@ -127,16 +138,16 @@ function drawLetterheadHeader(pdf: jsPDF, entidade: Entidade, logoBase64: string
   // 2. Nome da entidade no centro
   pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(40, 40, 40);
+  pdf.setTextColor(50, 50, 50);
   pdf.text(entidade.nome.toUpperCase(), PAGE_W / 2, 14, { align: 'center' });
 
   // 3. CNPJ abaixo do nome
   pdf.setFontSize(8);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(100, 100, 100);
+  pdf.setTextColor(110, 110, 110);
   pdf.text(`CNPJ: ${entidade.cnpj}`, PAGE_W / 2, 19, { align: 'center' });
 
-  // 4. Linha decorativa na cor da entidade
+  // 4. Linha decorativa fina em Y=26 na cor suavizada
   pdf.setDrawColor(...cor);
   pdf.setLineWidth(0.4);
   pdf.line(MARGIN, 26, PAGE_W - MARGIN, 26);
@@ -207,26 +218,26 @@ function addChapterTitle(state: PDFState, title: string) {
   
   const { pdf, cor } = state;
   const y = state.y;
-  const light = lightenRgb(cor, 0.90);
+  const light = lightenRgb(cor, 0.92);
   
   pdf.setFillColor(...light);
   pdf.rect(MARGIN, y - 4, CONTENT_W, 8, 'F');
   pdf.setDrawColor(...cor);
   pdf.setLineWidth(0.4);
   pdf.line(MARGIN, y + 4, MARGIN + CONTENT_W, y + 4);
-  pdf.setFontSize(11);
+  pdf.setFontSize(10.5);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(...cor);
   pdf.text(title, MARGIN + 2, y + 1.5);
   
-  state.y = y + 11;
+  state.y = y + 10;
 }
 
 function addSubTitle(state: PDFState, title: string) {
   checkPageSpace(state, 12);
   
   const { pdf } = state;
-  pdf.setFontSize(10);
+  pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(60, 60, 60);
   pdf.text(title, MARGIN, state.y);
@@ -238,34 +249,39 @@ function addBodyText(state: PDFState, text: string) {
   const { pdf } = state;
   pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(30, 30, 30);
+  pdf.setTextColor(40, 40, 40);
   
-  const lines: string[] = pdf.splitTextToSize(text, CONTENT_W);
-  let currentLineIndex = 0;
+  const paragraphs = text.split('\n');
+  const lineSpacing = LINE_H + 1.2; // 6.4mm
   
-  while (currentLineIndex < lines.length) {
-    const remainingH = 275 - state.y;
-    const lineSpacing = LINE_H + 1; // ~6.5mm
-    const linesThatFit = Math.floor(remainingH / lineSpacing);
-    
-    if (linesThatFit <= 0) {
-      forceNewPage(state);
+  for (let p = 0; p < paragraphs.length; p++) {
+    const paraText = paragraphs[p];
+    if (paraText.trim() === '') {
+      state.y += lineSpacing * 0.5;
       continue;
     }
     
-    const linesToPrint = lines.slice(currentLineIndex, currentLineIndex + linesThatFit);
-    const textBlock = linesToPrint.join('\n');
+    const lines: string[] = pdf.splitTextToSize(paraText, CONTENT_W);
+    for (let i = 0; i < lines.length; i++) {
+      checkPageSpace(state, 10);
+      
+      const isLastLine = (i === lines.length - 1);
+      if (isLastLine) {
+        // Última linha do parágrafo: estritamente alinhada à esquerda
+        pdf.text(lines[i], MARGIN, state.y);
+      } else {
+        // Linhas intermediárias do parágrafo: justificadas
+        pdf.text(lines[i], MARGIN, state.y, { align: 'justify', maxWidth: CONTENT_W });
+      }
+      
+      state.y += lineSpacing;
+    }
     
-    pdf.text(textBlock, MARGIN, state.y, { align: 'justify', maxWidth: CONTENT_W });
-    
-    state.y += linesToPrint.length * lineSpacing;
-    currentLineIndex += linesToPrint.length;
-    
-    if (currentLineIndex < lines.length) {
-      forceNewPage(state);
+    // Pequeno espaçamento adicional entre parágrafos
+    if (p < paragraphs.length - 1 && paraText.trim() !== '') {
+      state.y += 1.5;
     }
   }
-  state.y += 3;
 }
 
 function addField(state: PDFState, label: string, value: string, x: number, maxW = CONTENT_W) {
@@ -276,7 +292,7 @@ function addField(state: PDFState, label: string, value: string, x: number, maxW
   const lines = pdf.splitTextToSize(value || '-', valMaxW);
   const neededHeight = lines.length * LINE_H;
   
-  checkPageSpace(state, neededHeight + 6);
+  checkPageSpace(state, neededHeight + 4);
   
   const y = state.y;
   pdf.setFontSize(9.5);
@@ -285,7 +301,7 @@ function addField(state: PDFState, label: string, value: string, x: number, maxW
   pdf.text(label + ':', x, y);
   
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(30, 30, 30);
+  pdf.setTextColor(40, 40, 40);
   pdf.text(lines, x + labelWidth, y);
   
   state.y = y + neededHeight;
@@ -306,7 +322,7 @@ function addSubSection(state: PDFState, title: string) {
   pdf.setDrawColor(220, 220, 220);
   pdf.line(MARGIN, lineY, MARGIN + CONTENT_W, lineY);
   
-  state.y = lineY + 4;
+  state.y = lineY + 3.5;
 }
 
 function formatMesAno(ym?: string): string {
@@ -343,7 +359,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   const corClara = lightenRgb(cor, 0.88);
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
 
-  // Pre-carregar logotipo em Base64 usando o fetch robusto resiliente a CORS
+  // Pre-carregar logotipo em Base64 com suporte a desvio de CORS
   const logoUsar = entidade.logoUrl;
   let logoBase64: string | null = null;
   if (logoUsar) {
@@ -354,46 +370,56 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     }
   }
 
-  // ========== CAPA ==========
-  pdf.setFillColor(...cor);
+  // ========== CAPA DE ALTÍSSIMA ELEGÂNCIA (CORPORATIVA OFF-WHITE) ==========
+  pdf.setFillColor(248, 250, 252); // Fundo off-white luxuoso
   pdf.rect(0, 0, PAGE_W, PAGE_H, 'F');
-  const corEscura = cor.map(c => Math.max(0, c - 40)) as [number, number, number];
-  pdf.setFillColor(...corEscura);
-  pdf.rect(0, PAGE_H - 30, PAGE_W, 30, 'F');
 
-  const faixaY = PAGE_H / 2 - 40;
-  const faixaH = 80;
-  pdf.setFillColor(255, 255, 255);
-  pdf.rect(0, faixaY, PAGE_W, faixaH, 'F');
+  // Faixa vertical da marca à esquerda (15mm de largura na cor vinho suavizada)
+  pdf.setFillColor(...cor);
+  pdf.rect(0, 0, 15, PAGE_H, 'F');
 
-  // Logo da capa (projeto ou entidade)
+  // Inserção da Logotipo na Capa (Sem fundo poluído)
   const logoCapa = projeto.logoUrl || entidade.logoUrl;
   if (logoCapa) {
     try {
       const imgData = await fetchImageAsBase64(logoCapa);
       if (imgData) {
-        pdf.addImage(imgData, getImgFormat(logoCapa), PAGE_W / 2 - 30, faixaY + 10, 60, 60);
+        pdf.addImage(imgData, getImgFormat(logoCapa), 50, 50, 45, 45);
       }
     } catch (e) {
       console.error('Erro ao renderizar logo na capa:', e);
     }
   }
 
-  // Título no topo da capa (branco)
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(20);
-  pdf.setFont('helvetica', 'bold');
-  const projTitleLines = pdf.splitTextToSize(projeto.titulo?.toUpperCase() || '', CONTENT_W);
-  pdf.text(projTitleLines, PAGE_W / 2, 25, { align: 'center' });
+  // Linha horizontal decorativa
+  pdf.setDrawColor(...cor);
+  pdf.setLineWidth(0.6);
+  pdf.line(50, 110, 170, 110);
 
-  // Nome da entidade e "PLANO DE TRABALHO" no rodapé da capa
-  pdf.setFontSize(13);
-  pdf.setFont('helvetica', 'normal');
-  const entNameLines = pdf.splitTextToSize(entidade.nome || '', CONTENT_W);
-  pdf.text(entNameLines, PAGE_W / 2, faixaY + faixaH + 15, { align: 'center' });
-  pdf.setFontSize(15);
+  // Textos da Capa
+  pdf.setTextColor(100, 100, 100);
+  pdf.setFontSize(11);
   pdf.setFont('helvetica', 'bold');
-  pdf.text('PLANO DE TRABALHO', PAGE_W / 2, PAGE_H - 15, { align: 'center' });
+  pdf.text('PLANO DE TRABALHO', 50, 120);
+
+  pdf.setTextColor(...cor);
+  pdf.setFontSize(18);
+  pdf.setFont('helvetica', 'bold');
+  const projTitleLines = pdf.splitTextToSize(projeto.titulo?.toUpperCase() || '', 120);
+  pdf.text(projTitleLines, 50, 132);
+
+  pdf.setTextColor(60, 60, 60);
+  pdf.setFontSize(11);
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('PROPONENTE:', 50, 170);
+  pdf.setFont('helvetica', 'normal');
+  const entNameLines = pdf.splitTextToSize(entidade.nome || '', 120);
+  pdf.text(entNameLines, 50, 178);
+
+  pdf.setTextColor(140, 140, 140);
+  pdf.setFontSize(9.5);
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(`${entidade.cidade || 'São Paulo'} / ${entidade.uf || 'SP'}, 2026`, 50, 255);
 
   // Inicializar o estado do PDF para o miolo (inicia na página 2)
   const state: PDFState = {
@@ -408,9 +434,10 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   // ========== CAP 1: IDENTIFICAÇÃO DO PROJETO ==========
   forceNewPage(state);
   addChapterTitle(state, '1. Identificação do Projeto');
-  addField(state, 'Título', projeto.titulo, MARGIN); state.y += 2;
-  addField(state, 'Instrumento', projeto.instrumentoOrigem, MARGIN); state.y += 2;
-  addField(state, 'Órgão', projeto.orgao === 'outro' ? projeto.orgaoOutro || '' : projeto.orgao, MARGIN); state.y += 2;
+  state.y += 2;
+  addField(state, 'Título', projeto.titulo, MARGIN); state.y += 1.5;
+  addField(state, 'Instrumento', projeto.instrumentoOrigem, MARGIN); state.y += 1.5;
+  addField(state, 'Órgão', projeto.orgao === 'outro' ? projeto.orgaoOutro || '' : projeto.orgao, MARGIN); state.y += 1.5;
   addField(state, 'Status', (projeto as any).status?.replace(/_/g, ' ') || '-', MARGIN);
 
   // ========== CAP 2: DADOS DA ENTIDADE ==========
@@ -418,84 +445,103 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   addChapterTitle(state, '2. Dados da Entidade');
 
   addSubSection(state, 'IDENTIFICAÇÃO');
-  addField(state, 'Razão Social', entidade.nome, MARGIN); state.y += 2;
-  addField(state, 'Sigla', entidade.sigla || '-', MARGIN); state.y += 2;
-  addField(state, 'CNPJ', entidade.cnpj, MARGIN); state.y += 6;
+  addField(state, 'Razão Social', entidade.nome, MARGIN); state.y += 1.5;
+  addField(state, 'Sigla', entidade.sigla || '-', MARGIN); state.y += 1.5;
+  addField(state, 'CNPJ', entidade.cnpj, MARGIN); state.y += 4;
 
   addSubSection(state, 'ENDEREÇO');
   const endParts = [entidade.logradouro, entidade.numero, entidade.complemento, entidade.bairro, entidade.cidade, entidade.uf, entidade.cep].filter(Boolean).join(', ');
-  addField(state, 'Endereço', endParts || '-', MARGIN); state.y += 6;
+  addField(state, 'Endereço', endParts || '-', MARGIN); state.y += 4;
 
   addSubSection(state, 'CONTATO E REDES');
-  addField(state, 'E-mail', entidade.email || '-', MARGIN); state.y += 2;
-  addField(state, 'Telefone(s)', (entidade.telefones || []).join(' / ') || '-', MARGIN); state.y += 2;
-  if ((entidade as any).site) { addField(state, 'Site', (entidade as any).site, MARGIN); state.y += 2; }
-  if ((entidade as any).instagram) { addField(state, 'Instagram', (entidade as any).instagram, MARGIN); state.y += 2; }
-  if ((entidade as any).facebook) { addField(state, 'Facebook', (entidade as any).facebook, MARGIN); state.y += 2; }
-  if ((entidade as any).linkedin) { addField(state, 'LinkedIn', (entidade as any).linkedin, MARGIN); state.y += 2; }
-  if ((entidade as any).youtube) { addField(state, 'YouTube', (entidade as any).youtube, MARGIN); state.y += 2; }
-  if ((entidade as any).tiktok) { addField(state, 'TikTok', (entidade as any).tiktok, MARGIN); state.y += 6; }
+  addField(state, 'E-mail', entidade.email || '-', MARGIN); state.y += 1.5;
+  addField(state, 'Telefone(s)', (entidade.telefones || []).join(' / ') || '-', MARGIN); state.y += 1.5;
+  if ((entidade as any).site) { addField(state, 'Site', (entidade as any).site, MARGIN); state.y += 1.5; }
+  if ((entidade as any).instagram) { addField(state, 'Instagram', (entidade as any).instagram, MARGIN); state.y += 1.5; }
+  if ((entidade as any).facebook) { addField(state, 'Facebook', (entidade as any).facebook, MARGIN); state.y += 1.5; }
+  if ((entidade as any).linkedin) { addField(state, 'LinkedIn', (entidade as any).linkedin, MARGIN); state.y += 1.5; }
+  if ((entidade as any).youtube) { addField(state, 'YouTube', (entidade as any).youtube, MARGIN); state.y += 1.5; }
+  if ((entidade as any).tiktok) { addField(state, 'TikTok', (entidade as any).tiktok, MARGIN); state.y += 4; }
 
   // Responsável legal
   const resp = (entidade as any).responsavelLegal;
   if (resp && resp.nome) {
-    checkPageSpace(state, 60);
+    checkPageSpace(state, 50);
     addSubSection(state, 'RESPONSÁVEL LEGAL');
-    addField(state, 'Nome', resp.nome || '-', MARGIN); state.y += 2;
-    addField(state, 'Cargo', resp.cargo || '-', MARGIN); state.y += 2;
-    addField(state, 'CPF', resp.cpf || '-', MARGIN); state.y += 2;
-    addField(state, 'E-mail', resp.email || '-', MARGIN); state.y += 2;
+    addField(state, 'Nome', resp.nome || '-', MARGIN); state.y += 1.5;
+    addField(state, 'Cargo', resp.cargo || '-', MARGIN); state.y += 1.5;
+    addField(state, 'CPF', resp.cpf || '-', MARGIN); state.y += 1.5;
+    addField(state, 'E-mail', resp.email || '-', MARGIN); state.y += 1.5;
     addField(state, 'Telefone', resp.telefone || '-', MARGIN);
   }
 
   // ========== CAP 3: PLANO DE TRABALHO ==========
   forceNewPage(state);
   addChapterTitle(state, '3. Plano de Trabalho');
+  state.y += 2;
+
+  // Caixa de Sumário Compacto dos Metadados (Resolução de Espaços Vazios)
+  checkPageSpace(state, 55);
+  pdf.setDrawColor(225, 229, 233);
+  pdf.setFillColor(248, 250, 252);
+  pdf.setLineWidth(0.3);
+  pdf.rect(MARGIN, state.y, CONTENT_W, 35, 'DF');
+
+  const boxY = state.y + 6;
+  // Coluna 1
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(9.5);
+  pdf.setTextColor(80, 80, 80);
+  pdf.text('Período de Execução:', MARGIN + 4, boxY);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(40, 40, 40);
+  const periodoStr = `${formatMesAno(projeto.mesInicio)} até ${formatMesAno(projeto.mesTermino)} (${projeto.duracaoMeses || 0} meses)`;
+  pdf.text(periodoStr, MARGIN + 48, boxY);
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(80, 80, 80);
+  pdf.text('Âmbito de Aplicação:', MARGIN + 4, boxY + 7.5);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(40, 40, 40);
+  pdf.text(projeto.ambitoAplicacao || '-', MARGIN + 48, boxY + 7.5);
+
+  // Coluna 2
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(80, 80, 80);
+  pdf.text('Locais de Aplicação:', MARGIN + 4, boxY + 15);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(40, 40, 40);
+  const locaisStr = projeto.locais?.map(l => `${l.uf}: ${l.municipios.filter(Boolean).join(', ')}`).join(' | ') || '-';
+  pdf.text(pdf.splitTextToSize(locaisStr, CONTENT_W - 55), MARGIN + 48, boxY + 15);
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(80, 80, 80);
+  pdf.text('Modalidades:', MARGIN + 4, boxY + 22.5);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(40, 40, 40);
+  const modStr = projeto.modalidades?.map((m: any) => typeof m === 'string' ? m : m.nome).join(', ') || '-';
+  pdf.text(pdf.splitTextToSize(modStr, CONTENT_W - 55), MARGIN + 48, boxY + 22.5);
+
+  state.y += 42;
 
   // Resumo
   if (projeto.resumo) {
     addSubTitle(state, 'Resumo');
     addBodyText(state, projeto.resumo);
+    state.y += 4;
   }
 
   // Plano de Divulgação
   if ((projeto as any).planoDivulgacao) {
     addSubTitle(state, 'Plano de Divulgação');
     addBodyText(state, (projeto as any).planoDivulgacao);
-  }
-
-  // Período
-  addSubTitle(state, 'Período de Execução');
-  const periodoStr = `${formatMesAno(projeto.mesInicio)} até ${formatMesAno(projeto.mesTermino)} (${projeto.duracaoMeses || 0} meses)`;
-  addBodyText(state, periodoStr);
-
-  // Âmbito
-  addSubTitle(state, 'Âmbito de Aplicação');
-  addBodyText(state, projeto.ambitoAplicacao || '-');
-
-  // Locais
-  if (projeto.locais && projeto.locais.length > 0) {
-    addSubTitle(state, 'Locais de Aplicação');
-    const locaisStr = projeto.locais.map(l => `${l.uf}: ${l.municipios.filter(Boolean).join(', ')}`).join(' | ');
-    addBodyText(state, locaisStr);
-  }
-
-  // Modalidades
-  if (projeto.modalidades && projeto.modalidades.length > 0) {
-    addSubTitle(state, 'Modalidades Esportivas');
-    const modStr = projeto.modalidades
-      .map((m: any) => {
-        const nome = typeof m === 'string' ? m : m.nome;
-        const flag = typeof m === 'object' && m.paralimpica ? ' (Paralímpica)' : '';
-        return nome + flag;
-      })
-      .join(', ');
-    addBodyText(state, modStr);
+    state.y += 4;
   }
 
   // Objetivo Geral
   addSubTitle(state, 'Objetivo Geral');
   addBodyText(state, projeto.objetivoGeral || '-');
+  state.y += 4;
 
   // Objetivos Específicos
   if (projeto.objetivosEspecificos && projeto.objetivosEspecificos.length > 0) {
@@ -505,18 +551,21 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
       .map((o, i) => `${i + 1}. ${o}`)
       .join('\n');
     addBodyText(state, objTexto);
+    state.y += 4;
   }
 
   // Justificativa
   if (projeto.justificativa) {
     addSubTitle(state, 'Justificativa');
     addBodyText(state, projeto.justificativa);
+    state.y += 4;
   }
 
   // Caracterização
   if (projeto.caracterizacaoSocioeconomica) {
     addSubTitle(state, 'Caracterização Socioeconômica');
     addBodyText(state, projeto.caracterizacaoSocioeconomica);
+    state.y += 4;
   }
 
   // Metodologia
@@ -528,12 +577,15 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   // ========== CAP 4: PÚBLICO ALVO ==========
   forceNewPage(state);
   addChapterTitle(state, '4. Público Alvo');
+  state.y += 2;
 
   if (projeto.publicoAlvo) {
     addSubTitle(state, 'Público Direto');
     addBodyText(state, projeto.publicoAlvo.direto || '-');
+    state.y += 4;
     addSubTitle(state, 'Público Indireto');
     addBodyText(state, projeto.publicoAlvo.indireto || '-');
+    state.y += 4;
     addSubTitle(state, 'Faixa Etária');
     addBodyText(state, projeto.publicoAlvo.faixaEtaria || '-');
   }
@@ -541,6 +593,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   // ========== CAP 5: CRONOGRAMA DE EXECUÇÃO ==========
   forceNewPage(state);
   addChapterTitle(state, '5. Cronograma de Execução');
+  state.y += 2;
 
   const cronBody = projeto.cronograma?.map(a => [
     a.acao || '-',
@@ -576,6 +629,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   // ========== CAP 6: METAS DO PROJETO ==========
   checkPageSpace(state, 40);
   addChapterTitle(state, '6. Metas do Projeto');
+  state.y += 2;
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(9.5);
@@ -629,6 +683,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   // ========== CAP 7: ANEXOS ==========
   forceNewPage(state);
   addChapterTitle(state, '7. Anexos');
+  state.y += 2;
 
   const anexoRows = documentos.map((d, i) => [toRoman(i + 1), (d as any).nome || (d as any).tipo || 'Documento']);
   autoTable(pdf, {
@@ -647,7 +702,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     }
   });
 
-  // Renderizar rodapés e rubricas nas páginas de miolo (página 2 em diante)
+  // Renderizar rodapés, paginação e rubricas nas páginas de miolo (página 2 em diante)
   const total = (pdf as any).internal.getNumberOfPages();
   for (let i = 2; i <= total; i++) {
     pdf.setPage(i);

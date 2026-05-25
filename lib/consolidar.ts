@@ -30,7 +30,7 @@ interface DirigentePdf {
   documentos?: DocItem[];
 }
 
-const LINE_H = 5.5;
+const LINE_H = 5.2;
 const MARGIN = 20;
 const PAGE_W = 210;
 const PAGE_H = 297;
@@ -55,13 +55,23 @@ const toRoman = (n: number): string => {
   return result;
 };
 
+function softenColor(rgb: [number, number, number]): [number, number, number] {
+  const [r, g, b] = rgb;
+  if (r > 120 && r > g * 1.3 && r > b * 1.3) {
+    return [141, 23, 44]; // Vinho corporativo elegante (#8D172C)
+  }
+  return rgb;
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '');
   const r = parseInt(clean.substring(0, 2), 16);
   const g = parseInt(clean.substring(2, 4), 16);
   const b = parseInt(clean.substring(4, 6), 16);
-  if (isNaN(r) || isNaN(g) || isNaN(b)) return [22, 101, 52];
-  return [r, g, b];
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return [141, 23, 44];
+  
+  const rawRgb: [number, number, number] = [r, g, b];
+  return softenColor(rawRgb);
 }
 
 function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, number, number] {
@@ -149,7 +159,7 @@ function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
 }
 
 function drawLetterheadHeader(pdf: jsPDF, entidade: Entidade, logoBase64: string | null, cor: [number, number, number]) {
-  // 1. Logotipo no topo esquerdo (X=20, Y=8, tamanho 18x18)
+  // 1. Logotipo no topo esquerdo (X=20, Y=7, tamanho 16x16)
   if (logoBase64) {
     try {
       const format = getImgFormat(entidade.logoUrl || '');
@@ -162,16 +172,16 @@ function drawLetterheadHeader(pdf: jsPDF, entidade: Entidade, logoBase64: string
   // 2. Nome da entidade no centro
   pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(40, 40, 40);
+  pdf.setTextColor(50, 50, 50);
   pdf.text(entidade.nome.toUpperCase(), PAGE_W / 2, 14, { align: 'center' });
 
   // 3. CNPJ abaixo do nome
   pdf.setFontSize(8);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(100, 100, 100);
+  pdf.setTextColor(110, 110, 110);
   pdf.text(`CNPJ: ${entidade.cnpj}`, PAGE_W / 2, 19, { align: 'center' });
 
-  // 4. Linha decorativa na cor da entidade
+  // 4. Linha decorativa fina em Y=26 na cor suavizada
   pdf.setDrawColor(...cor);
   pdf.setLineWidth(0.4);
   pdf.line(MARGIN, 26, PAGE_W - MARGIN, 26);
@@ -242,14 +252,14 @@ function addSectionTitle(state: PDFState, title: string) {
   
   const { pdf, cor } = state;
   const y = state.y;
-  const light = lightenRgb(cor, 0.90);
+  const light = lightenRgb(cor, 0.92);
   
   pdf.setFillColor(...light);
   pdf.rect(MARGIN, y - 4, CONTENT_W, 8, 'F');
   pdf.setDrawColor(...cor);
   pdf.setLineWidth(0.4);
   pdf.line(MARGIN, y + 4, MARGIN + CONTENT_W, y + 4);
-  pdf.setFontSize(11);
+  pdf.setFontSize(10.5);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(...cor);
   pdf.text(title, MARGIN + 2, y + 1.5);
@@ -272,7 +282,7 @@ function addSubSectionTitle(state: PDFState, title: string) {
   pdf.setDrawColor(220, 220, 220);
   pdf.line(MARGIN, lineY, MARGIN + CONTENT_W, lineY);
   
-  state.y = lineY + 4;
+  state.y = lineY + 3.5;
 }
 
 function addField(state: PDFState, label: string, value: string, x: number, maxW = CONTENT_W) {
@@ -283,7 +293,7 @@ function addField(state: PDFState, label: string, value: string, x: number, maxW
   const lines = pdf.splitTextToSize(value || '-', valMaxW);
   const neededHeight = lines.length * LINE_H;
   
-  checkPageSpace(state, neededHeight + 6);
+  checkPageSpace(state, neededHeight + 4);
   
   const y = state.y;
   pdf.setFontSize(9.5);
@@ -292,7 +302,7 @@ function addField(state: PDFState, label: string, value: string, x: number, maxW
   pdf.text(label + ':', x, y);
   
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(30, 30, 30);
+  pdf.setTextColor(40, 40, 40);
   pdf.text(lines, x + labelWidth, y);
   
   state.y = y + neededHeight;
@@ -303,31 +313,34 @@ function addJustifiedText(state: PDFState, text: string) {
   const { pdf } = state;
   pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(30, 30, 30);
+  pdf.setTextColor(40, 40, 40);
   
-  const lines: string[] = pdf.splitTextToSize(text, CONTENT_W);
-  let currentLineIndex = 0;
+  const paragraphs = text.split('\n');
+  const lineSpacing = LINE_H + 1.2;
   
-  while (currentLineIndex < lines.length) {
-    const remainingH = 275 - state.y;
-    const lineSpacing = LINE_H + 1;
-    const linesThatFit = Math.floor(remainingH / lineSpacing);
-    
-    if (linesThatFit <= 0) {
-      forceNewPage(state);
+  for (let p = 0; p < paragraphs.length; p++) {
+    const paraText = paragraphs[p];
+    if (paraText.trim() === '') {
+      state.y += lineSpacing * 0.5;
       continue;
     }
     
-    const linesToPrint = lines.slice(currentLineIndex, currentLineIndex + linesThatFit);
-    const textBlock = linesToPrint.join('\n');
+    const lines: string[] = pdf.splitTextToSize(paraText, CONTENT_W);
+    for (let i = 0; i < lines.length; i++) {
+      checkPageSpace(state, 10);
+      
+      const isLastLine = (i === lines.length - 1);
+      if (isLastLine) {
+        pdf.text(lines[i], MARGIN, state.y);
+      } else {
+        pdf.text(lines[i], MARGIN, state.y, { align: 'justify', maxWidth: CONTENT_W });
+      }
+      
+      state.y += lineSpacing;
+    }
     
-    pdf.text(textBlock, MARGIN, state.y, { align: 'justify', maxWidth: CONTENT_W });
-    
-    state.y += linesToPrint.length * lineSpacing;
-    currentLineIndex += linesToPrint.length;
-    
-    if (currentLineIndex < lines.length) {
-      forceNewPage(state);
+    if (p < paragraphs.length - 1 && paraText.trim() !== '') {
+      state.y += 1.5;
     }
   }
 }
@@ -377,42 +390,53 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
     }
   }
 
-  // ===== CAPA =====
-  pdf.setFillColor(...cor);
+  // ========== CAPA DE ALTÍSSIMA ELEGÂNCIA (CORPORATIVA OFF-WHITE) ==========
+  pdf.setFillColor(248, 250, 252);
   pdf.rect(0, 0, PAGE_W, PAGE_H, 'F');
-  const corEscura = cor.map(c => Math.max(0, c - 40)) as [number, number, number];
-  pdf.setFillColor(...corEscura);
-  pdf.rect(0, PAGE_H - 30, PAGE_W, 30, 'F');
 
-  const faixaY = PAGE_H / 2 - 40;
-  const faixaH = 80;
-  pdf.setFillColor(255, 255, 255);
-  pdf.rect(0, faixaY, PAGE_W, faixaH, 'F');
+  // Faixa vertical da marca
+  pdf.setFillColor(...cor);
+  pdf.rect(0, 0, 15, PAGE_H, 'F');
 
   if (logoUsar) {
     try {
       const imgData = await fetchImageAsBase64(logoUsar);
       if (imgData) {
-        pdf.addImage(imgData, getImgFormat(logoUsar), PAGE_W / 2 - 30, faixaY + 10, 60, 60);
+        pdf.addImage(imgData, getImgFormat(logoUsar), 50, 50, 45, 45);
       }
     } catch { }
   }
 
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(24);
+  // Linha horizontal decorativa
+  pdf.setDrawColor(...cor);
+  pdf.setLineWidth(0.6);
+  pdf.line(50, 110, 170, 110);
+
+  // Textos da Capa
+  pdf.setTextColor(100, 100, 100);
+  pdf.setFontSize(11);
   pdf.setFont('helvetica', 'bold');
-  const nomeLines = pdf.splitTextToSize(entidade.nome || '', CONTENT_W);
-  pdf.text(nomeLines, PAGE_W / 2, 25, { align: 'center' });
+  pdf.text('DOSSIÊ INSTITUCIONAL', 50, 120);
+
+  pdf.setTextColor(...cor);
+  pdf.setFontSize(18);
+  pdf.setFont('helvetica', 'bold');
+  const nomeLines = pdf.splitTextToSize(entidade.nome || '', 120);
+  pdf.text(nomeLines, 50, 132);
 
   if (entidade.sigla) {
-    pdf.setFontSize(15);
+    pdf.setTextColor(60, 60, 60);
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('SIGLA:', 50, 170);
     pdf.setFont('helvetica', 'normal');
-    pdf.text(entidade.sigla, PAGE_W / 2, faixaY + faixaH + 18, { align: 'center' });
+    pdf.text(entidade.sigla, 50, 178);
   }
 
-  pdf.setFontSize(13);
-  pdf.setFont('helvetica', 'bold');
-  pdf.text('DOSSIÊ INSTITUCIONAL', PAGE_W / 2, PAGE_H - 15, { align: 'center' });
+  pdf.setTextColor(140, 140, 140);
+  pdf.setFontSize(9.5);
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(`${entidade.cidade || 'São Paulo'} / ${entidade.uf || 'SP'}, 2026`, 50, 255);
 
   // Inicializar o estado do PDF para o miolo (inicia na página 2)
   const state: PDFState = {
@@ -427,34 +451,34 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   forceNewPage(state);
   addSectionTitle(state, '1. Dados da Entidade');
   state.y += 2;
-  addField(state, 'Razão Social', entidade.nome || '', MARGIN); state.y += 2;
-  addField(state, 'Sigla', entidade.sigla || '-', MARGIN); state.y += 2;
-  addField(state, 'CNPJ', entidade.cnpj || '-', MARGIN); state.y += 8;
+  addField(state, 'Razão Social', entidade.nome || '', MARGIN); state.y += 1.5;
+  addField(state, 'Sigla', entidade.sigla || '-', MARGIN); state.y += 1.5;
+  addField(state, 'CNPJ', entidade.cnpj || '-', MARGIN); state.y += 4;
 
   addSubSectionTitle(state, 'ENDEREÇO');
   const endParts = [entidade.logradouro, entidade.numero, entidade.complemento, entidade.bairro, entidade.cidade, entidade.uf, entidade.cep].filter(Boolean).join(', ');
-  addField(state, 'Endereço', endParts || '-', MARGIN); state.y += 8;
+  addField(state, 'Endereço', endParts || '-', MARGIN); state.y += 4;
 
   addSubSectionTitle(state, 'CONTATO E REDES SOCIAIS');
-  addField(state, 'E-mail', entidade.email || '-', MARGIN); state.y += 2;
-  addField(state, 'Telefone(s)', (entidade.telefones || []).join(' / ') || '-', MARGIN); state.y += 2;
-  if ((entidade as any).site) { addField(state, 'Site', (entidade as any).site, MARGIN); state.y += 2; }
-  if ((entidade as any).instagram) { addField(state, 'Instagram', (entidade as any).instagram, MARGIN); state.y += 2; }
-  if ((entidade as any).facebook) { addField(state, 'Facebook', (entidade as any).facebook, MARGIN); state.y += 2; }
-  if ((entidade as any).linkedin) { addField(state, 'LinkedIn', (entidade as any).linkedin, MARGIN); state.y += 2; }
-  if ((entidade as any).youtube) { addField(state, 'YouTube', (entidade as any).youtube, MARGIN); state.y += 2; }
-  if ((entidade as any).tiktok) { addField(state, 'TikTok', (entidade as any).tiktok, MARGIN); state.y += 2; }
-  state.y += 6;
+  addField(state, 'E-mail', entidade.email || '-', MARGIN); state.y += 1.5;
+  addField(state, 'Telefone(s)', (entidade.telefones || []).join(' / ') || '-', MARGIN); state.y += 1.5;
+  if ((entidade as any).site) { addField(state, 'Site', (entidade as any).site, MARGIN); state.y += 1.5; }
+  if ((entidade as any).instagram) { addField(state, 'Instagram', (entidade as any).instagram, MARGIN); state.y += 1.5; }
+  if ((entidade as any).facebook) { addField(state, 'Facebook', (entidade as any).facebook, MARGIN); state.y += 1.5; }
+  if ((entidade as any).linkedin) { addField(state, 'LinkedIn', (entidade as any).linkedin, MARGIN); state.y += 1.5; }
+  if ((entidade as any).youtube) { addField(state, 'YouTube', (entidade as any).youtube, MARGIN); state.y += 1.5; }
+  if ((entidade as any).tiktok) { addField(state, 'TikTok', (entidade as any).tiktok, MARGIN); state.y += 1.5; }
+  state.y += 4;
 
   // Responsável Legal na mesma página
   const resp = (entidade as any).responsavelLegal;
   if (resp && resp.nome) {
     checkPageSpace(state, 60);
     addSubSectionTitle(state, 'RESPONSÁVEL LEGAL');
-    addField(state, 'Nome', resp.nome || '-', MARGIN); state.y += 2;
-    addField(state, 'Cargo', resp.cargo || '-', MARGIN); state.y += 2;
-    addField(state, 'CPF', resp.cpf || '-', MARGIN); state.y += 2;
-    addField(state, 'E-mail', resp.email || '-', MARGIN); state.y += 2;
+    addField(state, 'Nome', resp.nome || '-', MARGIN); state.y += 1.5;
+    addField(state, 'Cargo', resp.cargo || '-', MARGIN); state.y += 1.5;
+    addField(state, 'CPF', resp.cpf || '-', MARGIN); state.y += 1.5;
+    addField(state, 'E-mail', resp.email || '-', MARGIN); state.y += 1.5;
     addField(state, 'Telefone', resp.telefone || '-', MARGIN);
   }
 
