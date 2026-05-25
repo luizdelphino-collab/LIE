@@ -30,6 +30,21 @@ interface DirigentePdf {
   documentos?: DocItem[];
 }
 
+const LINE_H = 6;
+const MARGIN = 20;
+const PAGE_W = 210;
+const PAGE_H = 297;
+const CONTENT_W = PAGE_W - MARGIN * 2;
+
+interface PDFState {
+  pdf: jsPDF;
+  y: number;
+  cor: [number, number, number];
+  entidade: Entidade;
+  logoBase64: string | null;
+  projetoTitulo?: string;
+}
+
 const toRoman = (n: number): string => {
   const vals = [1000,900,500,400,100,90,50,40,10,9,5,4,1];
   const syms = ['M','CM','D','CD','C','XC','L','XL','X','IX','V','IV','I'];
@@ -55,78 +70,6 @@ function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, numb
     Math.round(rgb[1] + (255 - rgb[1]) * amount),
     Math.round(rgb[2] + (255 - rgb[2]) * amount),
   ];
-}
-
-const LINE_H = 6;
-const MARGIN = 20;
-const PAGE_W = 210;
-const PAGE_H = 297;
-const CONTENT_W = PAGE_W - MARGIN * 2;
-
-function addHeader(pdf: jsPDF, entNome: string, cor: [number, number, number]) {
-  pdf.setFillColor(...cor);
-  pdf.rect(0, 0, PAGE_W, 12, 'F');
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(9);
-  pdf.setFont('helvetica', 'bold');
-  pdf.text(entNome.toUpperCase(), MARGIN, 8);
-}
-
-function addFooter(pdf: jsPDF, pageNum: number) {
-  const total = (pdf as any).internal.getNumberOfPages();
-  pdf.setFontSize(8);
-  pdf.setTextColor(150, 150, 150);
-  pdf.setFont('helvetica', 'normal');
-  pdf.text(`Página ${pageNum} de ${total}`, PAGE_W / 2, PAGE_H - 8, { align: 'center' });
-}
-
-function addSectionTitle(pdf: jsPDF, title: string, y: number, cor: [number, number, number]): number {
-  const light = lightenRgb(cor, 0.88);
-  pdf.setFillColor(...light);
-  pdf.rect(MARGIN, y - 5, CONTENT_W, 9, 'F');
-  pdf.setDrawColor(...cor);
-  pdf.setLineWidth(0.5);
-  pdf.line(MARGIN, y + 4, MARGIN + CONTENT_W, y + 4);
-  pdf.setFontSize(13);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(...cor);
-  pdf.text(title, MARGIN, y + 1);
-  return y + 12;
-}
-
-function addSubSectionTitle(pdf: jsPDF, title: string, y: number): number {
-  pdf.setFontSize(9);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(80, 80, 80);
-  pdf.text(title, MARGIN, y);
-  y += 3;
-  pdf.setDrawColor(220, 220, 220);
-  pdf.line(MARGIN, y, MARGIN + CONTENT_W, y);
-  return y + 5;
-}
-
-function addField(pdf: jsPDF, label: string, value: string, x: number, y: number, maxW = CONTENT_W): number {
-  pdf.setFontSize(9);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(80, 80, 80);
-  pdf.text(label + ':', x, y);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(20, 20, 20);
-  const lines = pdf.splitTextToSize(value || '-', maxW - 28);
-  pdf.text(lines, x + 28, y);
-  return y + (lines.length * LINE_H);
-}
-
-function addJustifiedText(pdf: jsPDF, text: string, y: number): number {
-  pdf.setFontSize(10);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(20, 20, 20);
-  const lines = pdf.splitTextToSize(text || '', CONTENT_W);
-  lines.forEach((line: string) => {
-    pdf.text(line, MARGIN, y, { align: 'justify', maxWidth: CONTENT_W });
-    y += LINE_H + 1;
-  });
-  return y;
 }
 
 async function fetchImageAsBase64(url: string): Promise<string | null> {
@@ -166,6 +109,170 @@ function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
+function drawLetterheadHeader(pdf: jsPDF, entidade: Entidade, logoBase64: string | null, cor: [number, number, number]) {
+  // 1. Logo image on top left (X=20, Y=8, size 18x18)
+  if (logoBase64) {
+    try {
+      const format = getImgFormat(entidade.logoUrl || '');
+      pdf.addImage(logoBase64, format, MARGIN, 8, 18, 18);
+    } catch (e) {
+      console.warn('Erro ao renderizar logo no cabeçalho:', e);
+    }
+  }
+
+  // 2. Entity Name in the center
+  pdf.setFontSize(10);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(40, 40, 40);
+  pdf.text(entidade.nome.toUpperCase(), PAGE_W / 2, 15, { align: 'center' });
+
+  // 3. CNPJ below the name
+  pdf.setFontSize(8);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(100, 100, 100);
+  pdf.text(`CNPJ: ${entidade.cnpj}`, PAGE_W / 2, 21, { align: 'center' });
+
+  // 4. Horizontal brand-colored line
+  pdf.setDrawColor(...cor);
+  pdf.setLineWidth(0.4);
+  pdf.line(MARGIN, 28, PAGE_W - MARGIN, 28);
+}
+
+function drawLetterheadFooter(
+  pdf: jsPDF,
+  entidade: Entidade,
+  pageNum: number,
+  total: number,
+  rubricaUrl?: string
+) {
+  // 1. Separator line at Y=280
+  pdf.setDrawColor(210, 210, 210);
+  pdf.setLineWidth(0.3);
+  pdf.line(MARGIN, 280, PAGE_W - MARGIN, 280);
+
+  // 2. Address text at Y=284
+  const addressParts = [
+    entidade.logradouro && entidade.numero ? `${entidade.logradouro}, ${entidade.numero}` : entidade.logradouro,
+    entidade.complemento,
+    entidade.bairro,
+    entidade.cidade && entidade.uf ? `${entidade.cidade}/${entidade.uf}` : (entidade.cidade || entidade.uf),
+    entidade.cep ? `CEP ${entidade.cep}` : null
+  ].filter(Boolean);
+  const addressText = addressParts.join(' - ') || 'Endereço não cadastrado';
+
+  pdf.setFontSize(7.5);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(110, 110, 110);
+  pdf.text(addressText, PAGE_W / 2, 284, { align: 'center' });
+
+  // 3. Contact info (Telefone and E-mail) at Y=288
+  const telefonesStr = (entidade.telefones || []).join(' / ') || 'Não informado';
+  const contactsText = `Telefone: ${telefonesStr}  |  E-mail: ${entidade.email || 'Não informado'}`;
+  pdf.text(contactsText, PAGE_W / 2, 288, { align: 'center' });
+
+  // 4. Page number at Y=293
+  pdf.setFontSize(7.5);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(140, 140, 140);
+  pdf.text(`Página ${pageNum} de ${total}`, PAGE_W / 2, 293, { align: 'center' });
+
+  // 5. Rubrica on the left bottom (at X=10, Y=PAGE_H - 15, size 10x10) if present
+  if (rubricaUrl) {
+    try {
+      pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 15, 10, 10);
+    } catch {}
+  }
+}
+
+function checkPageSpace(state: PDFState, neededSpace: number) {
+  if (state.y > 275 - neededSpace) {
+    state.pdf.addPage();
+    state.y = 35;
+    drawLetterheadHeader(state.pdf, state.entidade, state.logoBase64, state.cor);
+  }
+}
+
+function forceNewPage(state: PDFState) {
+  state.pdf.addPage();
+  state.y = 35;
+  drawLetterheadHeader(state.pdf, state.entidade, state.logoBase64, state.cor);
+}
+
+function addSectionTitle(state: PDFState, title: string) {
+  checkPageSpace(state, 20);
+  
+  const { pdf, cor } = state;
+  const y = state.y;
+  const light = lightenRgb(cor, 0.88);
+  
+  pdf.setFillColor(...light);
+  pdf.rect(MARGIN, y - 5, CONTENT_W, 9, 'F');
+  pdf.setDrawColor(...cor);
+  pdf.setLineWidth(0.5);
+  pdf.line(MARGIN, y + 4, MARGIN + CONTENT_W, y + 4);
+  pdf.setFontSize(13);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(...cor);
+  pdf.text(title, MARGIN, y + 1);
+  
+  state.y = y + 12;
+}
+
+function addSubSectionTitle(state: PDFState, title: string) {
+  checkPageSpace(state, 15);
+  
+  const { pdf } = state;
+  const y = state.y;
+  
+  pdf.setFontSize(9);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(80, 80, 80);
+  pdf.text(title, MARGIN, y);
+  
+  const lineY = y + 3;
+  pdf.setDrawColor(220, 220, 220);
+  pdf.line(MARGIN, lineY, MARGIN + CONTENT_W, lineY);
+  
+  state.y = lineY + 5;
+}
+
+function addField(state: PDFState, label: string, value: string, x: number, maxW = CONTENT_W) {
+  const { pdf } = state;
+  
+  const labelWidth = 28;
+  const valMaxW = maxW - labelWidth;
+  const lines = pdf.splitTextToSize(value || '-', valMaxW);
+  const neededHeight = lines.length * LINE_H;
+  
+  checkPageSpace(state, neededHeight + 8);
+  
+  const y = state.y;
+  pdf.setFontSize(9);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(80, 80, 80);
+  pdf.text(label + ':', x, y);
+  
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(20, 20, 20);
+  pdf.text(lines, x + labelWidth, y);
+  
+  state.y = y + neededHeight;
+}
+
+function addJustifiedText(state: PDFState, text: string) {
+  const { pdf } = state;
+  pdf.setFontSize(10);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(20, 20, 20);
+  
+  const lines = pdf.splitTextToSize(text || '', CONTENT_W);
+  for (const line of lines) {
+    checkPageSpace(state, 12);
+    pdf.text(line, MARGIN, state.y, { align: 'justify', maxWidth: CONTENT_W });
+    state.y += LINE_H + 1;
+  }
+}
+
 export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string): Promise<void> {
   const entSnap = await getDoc(doc(db, 'entities', entidadeId));
   if (!entSnap.exists()) throw new Error('Entidade não encontrada');
@@ -199,6 +306,17 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   });
 
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+
+  // Pre-carregar logotipo em Base64
+  const logoUsar = entidade.logoUrl;
+  let logoBase64: string | null = null;
+  if (logoUsar) {
+    try {
+      logoBase64 = await fetchImageAsBase64(logoUsar);
+    } catch (e) {
+      console.warn('Erro ao buscar logo da entidade:', e);
+    }
+  }
 
   // ===== CAPA =====
   pdf.setFillColor(...cor);
@@ -237,57 +355,64 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   pdf.setFont('helvetica', 'bold');
   pdf.text('DOSSIÊ INSTITUCIONAL', PAGE_W / 2, PAGE_H - 15, { align: 'center' });
 
+  // Inicializar o estado do PDF para o miolo (inicia na página 2)
+  const state: PDFState = {
+    pdf,
+    y: 35,
+    cor,
+    entidade,
+    logoBase64
+  };
+
   // ===== DADOS DA ENTIDADE =====
-  pdf.addPage();
-  addHeader(pdf, entidade.nome || '', cor);
-  let y = 22;
-  y = addSectionTitle(pdf, '1. Dados da Entidade', y, cor);
-  y += 4;
-  y = addField(pdf, 'Razão Social', entidade.nome || '', MARGIN, y); y += 2;
-  y = addField(pdf, 'Sigla', entidade.sigla || '-', MARGIN, y); y += 2;
-  y = addField(pdf, 'CNPJ', entidade.cnpj || '-', MARGIN, y); y += 8;
+  forceNewPage(state);
+  addSectionTitle(state, '1. Dados da Entidade');
+  state.y += 4;
+  addField(state, 'Razão Social', entidade.nome || '', MARGIN); state.y += 2;
+  addField(state, 'Sigla', entidade.sigla || '-', MARGIN); state.y += 2;
+  addField(state, 'CNPJ', entidade.cnpj || '-', MARGIN); state.y += 8;
 
-  y = addSubSectionTitle(pdf, 'ENDEREÇO', y);
+  addSubSectionTitle(state, 'ENDEREÇO');
   const endParts = [entidade.logradouro, entidade.numero, entidade.complemento, entidade.bairro, entidade.cidade, entidade.uf, entidade.cep].filter(Boolean).join(', ');
-  y = addField(pdf, 'Endereço', endParts || '-', MARGIN, y); y += 8;
+  addField(state, 'Endereço', endParts || '-', MARGIN); state.y += 8;
 
-  y = addSubSectionTitle(pdf, 'CONTATO E REDES SOCIAIS', y);
-  y = addField(pdf, 'E-mail', entidade.email || '-', MARGIN, y); y += 2;
-  y = addField(pdf, 'Telefone(s)', (entidade.telefones || []).join(' / ') || '-', MARGIN, y); y += 2;
-  if ((entidade as any).site) { y = addField(pdf, 'Site', (entidade as any).site, MARGIN, y); y += 2; }
-  if ((entidade as any).instagram) { y = addField(pdf, 'Instagram', (entidade as any).instagram, MARGIN, y); y += 2; }
-  if ((entidade as any).facebook) { y = addField(pdf, 'Facebook', (entidade as any).facebook, MARGIN, y); y += 2; }
-  if ((entidade as any).linkedin) { y = addField(pdf, 'LinkedIn', (entidade as any).linkedin, MARGIN, y); y += 2; }
-  if ((entidade as any).youtube) { y = addField(pdf, 'YouTube', (entidade as any).youtube, MARGIN, y); y += 2; }
-  if ((entidade as any).tiktok) { y = addField(pdf, 'TikTok', (entidade as any).tiktok, MARGIN, y); y += 2; }
-  y += 6;
+  addSubSectionTitle(state, 'CONTATO E REDES SOCIAIS');
+  addField(state, 'E-mail', entidade.email || '-', MARGIN); state.y += 2;
+  addField(state, 'Telefone(s)', (entidade.telefones || []).join(' / ') || '-', MARGIN); state.y += 2;
+  if ((entidade as any).site) { addField(state, 'Site', (entidade as any).site, MARGIN); state.y += 2; }
+  if ((entidade as any).instagram) { addField(state, 'Instagram', (entidade as any).instagram, MARGIN); state.y += 2; }
+  if ((entidade as any).facebook) { addField(state, 'Facebook', (entidade as any).facebook, MARGIN); state.y += 2; }
+  if ((entidade as any).linkedin) { addField(state, 'LinkedIn', (entidade as any).linkedin, MARGIN); state.y += 2; }
+  if ((entidade as any).youtube) { addField(state, 'YouTube', (entidade as any).youtube, MARGIN); state.y += 2; }
+  if ((entidade as any).tiktok) { addField(state, 'TikTok', (entidade as any).tiktok, MARGIN); state.y += 2; }
+  state.y += 6;
 
   // Responsável Legal na mesma página
   const resp = (entidade as any).responsavelLegal;
   if (resp && resp.nome) {
-    if (y > PAGE_H - 60) { pdf.addPage(); addHeader(pdf, entidade.nome || '', cor); y = 22; }
-    y = addSubSectionTitle(pdf, 'RESPONSÁVEL LEGAL', y);
-    y = addField(pdf, 'Nome', resp.nome || '-', MARGIN, y); y += 2;
-    y = addField(pdf, 'Cargo', resp.cargo || '-', MARGIN, y); y += 2;
-    y = addField(pdf, 'CPF', resp.cpf || '-', MARGIN, y); y += 2;
-    y = addField(pdf, 'E-mail', resp.email || '-', MARGIN, y); y += 2;
-    y = addField(pdf, 'Telefone', resp.telefone || '-', MARGIN, y);
+    checkPageSpace(state, 60);
+    addSubSectionTitle(state, 'RESPONSÁVEL LEGAL');
+    addField(state, 'Nome', resp.nome || '-', MARGIN); state.y += 2;
+    addField(state, 'Cargo', resp.cargo || '-', MARGIN); state.y += 2;
+    addField(state, 'CPF', resp.cpf || '-', MARGIN); state.y += 2;
+    addField(state, 'E-mail', resp.email || '-', MARGIN); state.y += 2;
+    addField(state, 'Telefone', resp.telefone || '-', MARGIN);
   }
 
   // ===== DIRIGENTES =====
-  pdf.addPage();
-  addHeader(pdf, entidade.nome || '', cor);
-  y = 22;
-  y = addSectionTitle(pdf, '2. Relação de Dirigentes', y, cor);
-  y += 4;
+  forceNewPage(state);
+  addSectionTitle(state, '2. Relação de Dirigentes');
+  state.y += 4;
   for (const dir of dirigentes) {
-    if (y > PAGE_H - 80) { pdf.addPage(); addHeader(pdf, entidade.nome || '', cor); y = 22; }
+    checkPageSpace(state, 60);
     
     pdf.setFillColor(...corClara);
-    pdf.rect(MARGIN, y, CONTENT_W, 7, 'F');
-    pdf.setFontSize(10); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...cor);
-    pdf.text(dir.nome?.toUpperCase() || '', MARGIN + 2, y + 5);
-    y += 7;
+    pdf.rect(MARGIN, state.y, CONTENT_W, 7, 'F');
+    pdf.setFontSize(10); 
+    pdf.setFont('helvetica', 'bold'); 
+    pdf.setTextColor(...cor);
+    pdf.text(dir.nome?.toUpperCase() || '', MARGIN + 2, state.y + 5);
+    state.y += 7;
 
     const dirRows = [
       ['CARGO', dir.cargo || '-', 'CPF', dir.cpf || '-'],
@@ -297,7 +422,7 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
     ];
 
     autoTable(pdf, {
-      startY: y,
+      startY: state.y,
       body: dirRows,
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 2 },
@@ -305,56 +430,59 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
         0: { fontStyle: 'bold', textColor: [100, 100, 100], cellWidth: 30 },
         2: { fontStyle: 'bold', textColor: [100, 100, 100], cellWidth: 20 },
       },
-      margin: { left: MARGIN, right: MARGIN },
+      margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+      didDrawPage: (data) => {
+        const pageCount = data.doc.internal.getNumberOfPages();
+        if (pageCount > 1) {
+          drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+        }
+      }
     });
     
-    y = (pdf as any).lastAutoTable.finalY + 10;
+    state.y = (pdf as any).lastAutoTable.finalY + 10;
   }
 
   // ===== HISTÓRICO =====
-  pdf.addPage();
-  addHeader(pdf, entidade.nome || '', cor);
-  y = 22;
-  y = addSectionTitle(pdf, '3. Histórico', y, cor);
-  y += 4;
+  forceNewPage(state);
+  addSectionTitle(state, '3. Histórico');
+  state.y += 4;
   if (entidade.historico) {
-    y = addJustifiedText(pdf, entidade.historico, y);
-    y += 8;
+    addJustifiedText(state, entidade.historico);
+    state.y += 8;
   }
 
   // ===== CAPACIDADE TÉCNICA =====
-  if (y > PAGE_H - 60) { pdf.addPage(); addHeader(pdf, entidade.nome || '', cor); y = 22; }
-  y = addSectionTitle(pdf, '4. Capacidade Técnica e Operacional', y, cor);
-  y += 4;
+  checkPageSpace(state, 40);
+  addSectionTitle(state, '4. Capacidade Técnica e Operacional');
+  state.y += 4;
   if (entidade.capacidadeTecnica) {
-    y = addJustifiedText(pdf, entidade.capacidadeTecnica, y);
+    addJustifiedText(state, entidade.capacidadeTecnica);
   }
 
   // ===== TABELA DE ANEXOS =====
-  pdf.addPage();
-  addHeader(pdf, entidade.nome || '', cor);
-  y = 22;
-  y = addSectionTitle(pdf, '5. Anexos', y, cor);
-  y += 4;
+  forceNewPage(state);
+  addSectionTitle(state, '5. Anexos');
+  state.y += 4;
   const anexoRows = allDocs.map((d, i) => [toRoman(i + 1), d.nome]);
   autoTable(pdf, {
-    startY: y,
+    startY: state.y,
     head: [['Nº', 'Documento']],
     body: anexoRows.length > 0 ? anexoRows : [['—', 'Nenhum documento anexado']],
-    margin: { left: MARGIN, right: MARGIN },
+    margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
+    didDrawPage: (data) => {
+      const pageCount = data.doc.internal.getNumberOfPages();
+      if (pageCount > 1) {
+        drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+      }
+    }
   });
 
   const totalPages = (pdf as any).internal.getNumberOfPages();
-  for (let p = 1; p <= totalPages; p++) {
+  for (let p = 2; p <= totalPages; p++) {
     pdf.setPage(p);
-    if (p > 1) addFooter(pdf, p);
-    if (rubricaUrl && p > 1) {
-      try {
-        pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 15, 10, 10);
-      } catch {}
-    }
+    drawLetterheadFooter(pdf, entidade, p, totalPages, rubricaUrl);
   }
 
   pdf.save(`Dossie_${(entidade.sigla || entidade.nome || 'Entidade').replace(/\s/g, '_')}.pdf`);
