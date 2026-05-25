@@ -131,7 +131,7 @@ export default function ProjetoItensPage() {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Itens do Projeto');
 
     // Auto-ajuste de colunas baseado no tamanho do conteúdo (usando wch padrão do SheetJS)
-    const maxWidths = fileData.reduce((acc, row) => {
+    const maxWidths: number[] = fileData.reduce((acc: number[], row) => {
       row.forEach((val, i) => {
         let strVal = '';
         if (typeof val === 'number') {
@@ -143,11 +143,11 @@ export default function ProjetoItensPage() {
         } else {
           strVal = String(val || '');
         }
-        acc[i] = Math.max(acc[i] || 0, strVal.length);
+        acc[i] = Math.max(Number(acc[i] || 0), strVal.length);
       });
       return acc;
     }, [] as number[]);
-    worksheet['!cols'] = maxWidths.map(w => ({ wch: w + 3 }));
+    worksheet['!cols'] = maxWidths.map((w: any) => ({ wch: Number(w) + 3 }));
 
     // Geração do arquivo e download via Blob nativo usando método clássico s2ab (Garante 100% de integridade)
     try {

@@ -184,8 +184,9 @@ export default function ProjetosPage() {
 
   const filteredProjetos = projetos.filter(p => {
     const term = searchTerm.toLowerCase();
+    const title = (p.titulo || p.nome || 'Projeto Sem Título').toLowerCase();
     return (
-      p.titulo.toLowerCase().includes(term) ||
+      title.includes(term) ||
       (p.entidadeSigla && p.entidadeSigla.toLowerCase().includes(term))
     );
   });
@@ -280,7 +281,7 @@ export default function ProjetosPage() {
                   className="hover:bg-gray-50 cursor-pointer transition-colors"
                   onClick={() => navigate(`/projetos/${p.id}`)}
                 >
-                  <td className="px-4 py-3 font-medium text-lie-ink">{p.titulo}</td>
+                  <td className="px-4 py-3 font-medium text-lie-ink">{p.titulo || p.nome || 'Projeto Sem Título'}</td>
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-1.5 text-gray-600">
                       <Building2 className="w-3.5 h-3.5" />

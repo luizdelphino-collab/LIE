@@ -202,14 +202,14 @@ export default function EntidadeFormPage() {
       const entityId = isNew ? doc(collection(db, 'entities')).id : id!;
       const docRef = doc(db, 'entities', entityId);
       
-      const payload = {
+      const payload: any = {
         ...formData,
         atualizadoEm: serverTimestamp()
       };
 
       if (isNew) payload.criadoEm = serverTimestamp();
 
-      payload.telefones = payload.telefones?.filter(t => t.trim() !== '') || [];
+      payload.telefones = payload.telefones?.filter((t: string) => t.trim() !== '') || [];
 
       await setDoc(docRef, payload, { merge: true });
       setIsEditing(false);

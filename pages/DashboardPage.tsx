@@ -106,7 +106,7 @@ export default function DashboardPage() {
                     to={`/projetos/${p.id}`}
                     className="font-medium text-lie-ink hover:text-lie-green"
                   >
-                    {p.nome}
+                    {p.titulo || p.nome || 'Projeto Sem Título'}
                   </Link>
                   <div className="text-xs text-lie-gray">
                     {p.esfera} · exercício {p.exercicio} · {statusLabel(p.status)}

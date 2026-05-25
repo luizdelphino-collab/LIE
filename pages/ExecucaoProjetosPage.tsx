@@ -43,10 +43,11 @@ export default function ExecucaoProjetosPage() {
     fetchProjetos();
   }, []);
 
-  const filtered = projetos.filter(p => 
-    p.titulo?.toLowerCase().includes(search.toLowerCase()) ||
-    p.id.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = projetos.filter(p => {
+    const term = search.toLowerCase();
+    const title = (p.titulo || p.nome || 'Projeto Sem Título').toLowerCase();
+    return title.includes(term) || p.id.toLowerCase().includes(term);
+  });
 
   return (
     <div className="p-6 max-w-7xl mx-auto pb-32">

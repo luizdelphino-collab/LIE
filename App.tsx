@@ -21,6 +21,7 @@ import EntidadeFormPage from './pages/EntidadeFormPage';
 import EntidadeDocumentosPage from './pages/EntidadeDocumentosPage';
 import DirigentesPage from './pages/DirigentesPage';
 import DirigenteFormPage from './pages/DirigenteFormPage';
+import UsuariosPage from './pages/UsuariosPage';
 
 function ProtectedRoutes() {
   const { fbUser, loading } = useAuth();
@@ -67,7 +68,7 @@ export default function App() {
           <Route path="/execucao/:id/mensal" element={<ExecucaoMensalPage />} />
 
           <Route path="/relatorios" element={<div className="p-8 text-lie-gray">Relatórios — em construção</div>} />
-          <Route path="/usuarios" element={<div className="p-8 text-lie-gray">Usuários — em construção</div>} />
+          <Route path="/usuarios" element={<UsuariosPage />} />
           
           <Route path="/entidades" element={<EntidadesPage />} />
           <Route path="/entidades/nova" element={<EntidadeFormPage />} />
