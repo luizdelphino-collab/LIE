@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query, writeBatch, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, FileDown, FileText, Package } from 'lucide-react';
+import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, FileDown, FileText, Package, Settings } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { consolidarProjeto } from '../lib/consolidarProjeto';
 import RubricaModal from '../components/RubricaModal';
@@ -40,6 +40,10 @@ export default function ProjetoFormPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedMod, setSelectedMod] = useState<string>('');
   const [originalPeriod, setOriginalPeriod] = useState<{ mesInicio?: string; mesTermino?: string }>({});
+  const [modalidadesLista, setModalidadesLista] = useState<string[]>([]);
+  const [isManagingModalidades, setIsManagingModalidades] = useState(false);
+  const [novaModalidadeGlobal, setNovaModalidadeGlobal] = useState('');
+  const [savingModGlobal, setSavingModGlobal] = useState(false);
 
   const [formData, setFormData] = useState<Partial<Projeto>>({
     titulo: '',
@@ -77,6 +81,35 @@ export default function ProjetoFormPage() {
       // Carregar Entidades
       const entSnap = await getDocs(query(collection(db, 'entities'), orderBy('nome')));
       setEntidades(entSnap.docs.map(d => ({ id: d.id, ...d.data() } as Entidade)));
+
+      // Carregar lista de modalidades global
+      try {
+        const snap = await getDocs(collection(db, 'modalidades'));
+        if (snap.empty) {
+          // Coleção vazia, popular com a lista padrão
+          const batch = writeBatch(db);
+          const listaPadrao = [
+            'Atletismo', 'Badminton', 'Basquete 3x3', 'Basquete em Cadeira', 'Basquetebol',
+            'Beach Tennis', 'Bocha', 'Boxe', 'Ciclismo', 'Damas', 'Esgrima',
+            'Futebol', 'Futsal', 'Ginástica Artística', 'Ginástica Rítmica',
+            'Handebol', 'Judô', 'Karatê', 'Natação', 'Paralímpico Goalball',
+            'Remo Virtual', 'Skate', 'Taekwondo', 'Tênis de Mesa', 'Tênis em Cadeira',
+            'Tiro com Arco', 'Triatlhon', 'Vôlei de Praia', 'Volei Sentado', 'Voleibol',
+            'Wrestling', 'Xadrez'
+          ];
+          listaPadrao.forEach(mod => {
+            batch.set(doc(db, 'modalidades', mod), { nome: mod });
+          });
+          await batch.commit();
+          setModalidadesLista(listaPadrao.sort());
+        } else {
+          const list = snap.docs.map(d => d.data().nome as string);
+          list.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+          setModalidadesLista(list);
+        }
+      } catch (e) {
+        console.error("Erro ao carregar lista de modalidades", e);
+      }
 
       if (!isNew && id) {
         try {
@@ -192,6 +225,47 @@ export default function ProjetoFormPage() {
         m.nome === nome ? { ...m, paralimpica: !m.paralimpica } : m
       )
     }));
+  };
+
+  const handleAddModalidadeGlobal = async () => {
+    const nome = novaModalidadeGlobal.trim();
+    if (!nome) return;
+    
+    // Verificar se já existe
+    if (modalidadesLista.some(m => m.toLowerCase() === nome.toLowerCase())) {
+      alert("Esta modalidade já existe na lista.");
+      return;
+    }
+
+    setSavingModGlobal(true);
+    try {
+      await setDoc(doc(db, 'modalidades', nome), { nome });
+      setNovaModalidadeGlobal('');
+      
+      // Atualizar lista
+      const updated = [...modalidadesLista, nome].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      setModalidadesLista(updated);
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao adicionar modalidade.");
+    } finally {
+      setSavingModGlobal(false);
+    }
+  };
+
+  const handleRemoveModalidadeGlobal = async (nome: string) => {
+    if (!confirm(`Tem certeza que deseja excluir a modalidade "${nome}" da lista global? Isso apenas removerá a opção para novos cadastros e não alterará os projetos existentes.`)) return;
+    
+    try {
+      await deleteDoc(doc(db, 'modalidades', nome));
+      
+      // Atualizar lista
+      const updated = modalidadesLista.filter(m => m !== nome);
+      setModalidadesLista(updated);
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao excluir modalidade.");
+    }
   };
 
   const addAcao = () => {
@@ -656,7 +730,7 @@ export default function ProjetoFormPage() {
                   className={inputCls + ' flex-1'}
                 >
                   <option value="">Selecione uma modalidade...</option>
-                  {MODALIDADES_LISTA.filter(m => !(formData.modalidades || []).find(x => x.nome === m)).map(mod => (
+                  {modalidadesLista.filter(m => !(formData.modalidades || []).find(x => x.nome === m)).map(mod => (
                     <option key={mod} value={mod}>{mod}</option>
                   ))}
                 </select>
@@ -665,9 +739,17 @@ export default function ProjetoFormPage() {
                   onClick={addModalidade}
                   disabled={!selectedMod}
                   className="p-2 bg-lie-green text-white rounded-lg hover:bg-lie-greenDark disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  title="Adicionar modalidade"
+                  title="Adicionar modalidade ao projeto"
                 >
                   <Plus className="w-5 h-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsManagingModalidades(true)}
+                  className="p-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition flex items-center justify-center"
+                  title="Gerenciar lista global de modalidades"
+                >
+                  <Settings className="w-5 h-5 shrink-0" />
                 </button>
               </div>
             )}
@@ -913,6 +995,79 @@ export default function ProjetoFormPage() {
         onConfirm={confirmConsolidar}
         title="Plano de Trabalho"
       />
+
+      {isManagingModalidades && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[80vh] flex flex-col overflow-hidden text-left">
+            <header className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-lie-ink">Gerenciar Modalidades</h3>
+                <p className="text-sm text-lie-gray">Adicione ou exclua da lista global do sistema</p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setIsManagingModalidades(false)}
+                className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </header>
+
+            <div className="p-6 flex-1 overflow-y-auto space-y-4">
+              {/* Formulário para adicionar nova */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Nome da modalidade (ex: Caratê)"
+                  value={novaModalidadeGlobal}
+                  onChange={e => setNovaModalidadeGlobal(e.target.value)}
+                  className="flex-1 border-gray-300 rounded-lg shadow-sm focus:ring-lie-green focus:border-lie-green text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddModalidadeGlobal}
+                  disabled={savingModGlobal || !novaModalidadeGlobal.trim()}
+                  className="px-4 py-2 bg-lie-green hover:bg-lie-greenDark text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition"
+                >
+                  Adicionar
+                </button>
+              </div>
+
+              {/* Lista global */}
+              <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                <div className="max-h-[40vh] overflow-y-auto divide-y divide-gray-100">
+                  {modalidadesLista.map(mod => (
+                    <div key={mod} className="flex items-center justify-between p-3 hover:bg-gray-50">
+                      <span className="text-sm font-medium text-lie-ink">{mod}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveModalidadeGlobal(mod)}
+                        className="p-1 text-red-500 hover:bg-red-50 rounded transition"
+                        title="Excluir modalidade da lista global"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {modalidadesLista.length === 0 && (
+                    <div className="p-6 text-center text-gray-400 italic text-sm">Nenhuma modalidade cadastrada.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <footer className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsManagingModalidades(false)}
+                className="px-5 py-2 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-100 transition shadow-sm"
+              >
+                Fechar
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
