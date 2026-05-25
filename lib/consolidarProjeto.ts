@@ -246,11 +246,25 @@ function addBodyText(state: PDFState, text: string) {
     const lines: string[] = pdf.splitTextToSize(paraText, CONTENT_W);
     for (let i = 0; i < lines.length; i++) {
       checkPageSpace(state, 10);
+      
+      const line = lines[i].trim();
       const isLastLine = (i === lines.length - 1);
-      if (isLastLine) {
-        pdf.text(lines[i], MARGIN, state.y);
+      const words = line.split(' ');
+      
+      if (isLastLine || words.length <= 1) {
+        pdf.text(line, MARGIN, state.y);
       } else {
-        pdf.text(lines[i], MARGIN, state.y, { align: 'justify', maxWidth: CONTENT_W });
+        const textWidth = pdf.getTextWidth(line);
+        const extraSpace = CONTENT_W - textWidth;
+        const additionalSpacePerSpace = extraSpace / (words.length - 1);
+        
+        let currentX = MARGIN;
+        const spaceWidth = pdf.getTextWidth(' ');
+        
+        for (let w = 0; w < words.length; w++) {
+          pdf.text(words[w], currentX, state.y);
+          currentX += pdf.getTextWidth(words[w]) + spaceWidth + additionalSpacePerSpace;
+        }
       }
       state.y += lineSpacing;
     }
