@@ -211,10 +211,10 @@ function addChapterTitle(state: PDFState, title: string): number {
   pdf.setDrawColor(...cor);
   pdf.setLineWidth(0.4);
   pdf.line(MARGIN, y + 4, MARGIN + CONTENT_W, y + 4);
-  pdf.setFontSize(10.5);
+  pdf.setFontSize(14);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(...cor);
-  pdf.text(title, MARGIN + 2, y + 1.5);
+  pdf.text(title, MARGIN + 2, y + 2);
   state.y = y + 10;
   return (pdf as any).internal.getCurrentPageInfo().pageNumber;
 }
@@ -222,9 +222,9 @@ function addChapterTitle(state: PDFState, title: string): number {
 function addSubTitle(state: PDFState, title: string) {
   checkPageSpace(state, 12);
   const { pdf } = state;
-  pdf.setFontSize(9.5);
+  pdf.setFontSize(12);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(60, 60, 60);
+  pdf.setTextColor(0, 0, 0);
   pdf.text(title, MARGIN, state.y);
   state.y += LINE_H + 1;
 }
@@ -232,9 +232,9 @@ function addSubTitle(state: PDFState, title: string) {
 function addBodyText(state: PDFState, text: string) {
   if (!text) return;
   const { pdf } = state;
-  pdf.setFontSize(9.5);
+  pdf.setFontSize(10);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(40, 40, 40);
+  pdf.setTextColor(0, 0, 0);
   const paragraphs = text.split('\n');
   const lineSpacing = LINE_H + 1.2;
   for (let p = 0; p < paragraphs.length; p++) {
@@ -268,12 +268,12 @@ function addField(state: PDFState, label: string, value: string, x: number, maxW
   const neededHeight = lines.length * LINE_H;
   checkPageSpace(state, neededHeight + 4);
   const y = state.y;
-  pdf.setFontSize(9.5);
+  pdf.setFontSize(10);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(80, 80, 80);
+  pdf.setTextColor(0, 0, 0);
   pdf.text(label + ':', x, y);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(40, 40, 40);
+  pdf.setTextColor(0, 0, 0);
   pdf.text(lines, x + labelWidth, y);
   state.y = y + neededHeight;
 }
@@ -282,9 +282,9 @@ function addSubSection(state: PDFState, title: string) {
   checkPageSpace(state, 12);
   const { pdf } = state;
   const y = state.y;
-  pdf.setFontSize(9.5);
+  pdf.setFontSize(12);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(80, 80, 80);
+  pdf.setTextColor(0, 0, 0);
   pdf.text(title, MARGIN, y);
   const lineY = y + 2;
   pdf.setDrawColor(220, 220, 220);
@@ -360,9 +360,9 @@ function drawToc(
     const titleX = MARGIN + numW + 2;
     const maxTitleW = CONTENT_W - numW - pageStrW - 8;
 
-    pdf.setFontSize(9.5);
+    pdf.setFontSize(10);
     pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(60, 60, 60);
+    pdf.setTextColor(0, 0, 0);
     pdf.text(entry.num, MARGIN, y);
 
     pdf.setFont('helvetica', 'normal');
@@ -373,7 +373,7 @@ function drawToc(
     const titleEndX = titleX + pdf.getTextWidth(titleLines[0]);
     const dotLineEndX = PAGE_W - MARGIN - pageStrW - 3;
     if (dotLineEndX > titleEndX + 4) {
-      pdf.setTextColor(180, 180, 180);
+      pdf.setTextColor(0, 0, 0);
       let dotX = titleEndX + 2;
       while (dotX < dotLineEndX) {
         pdf.text('.', dotX, y);
@@ -383,7 +383,7 @@ function drawToc(
 
     // Número da página alinhado à direita
     pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(60, 60, 60);
+    pdf.setTextColor(0, 0, 0);
     pdf.text(pageStr, PAGE_W - MARGIN - pageStrW, y);
 
     y += 7;
@@ -453,8 +453,8 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   pdf.setLineWidth(0.6);
   pdf.line(50, 110, 170, 110);
 
-  pdf.setTextColor(100, 100, 100);
-  pdf.setFontSize(11);
+  pdf.setTextColor(0, 0, 0);
+  pdf.setFontSize(12);
   pdf.setFont('helvetica', 'bold');
   pdf.text('PLANO DE TRABALHO', 50, 120);
 
@@ -464,16 +464,16 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   const projTitleLines = pdf.splitTextToSize(projeto.titulo?.toUpperCase() || '', 120);
   pdf.text(projTitleLines, 50, 132);
 
-  pdf.setTextColor(60, 60, 60);
-  pdf.setFontSize(11);
+  pdf.setTextColor(0, 0, 0);
+  pdf.setFontSize(12);
   pdf.setFont('helvetica', 'bold');
   pdf.text('PROPONENTE:', 50, 170);
   pdf.setFont('helvetica', 'normal');
   const entNameLines = pdf.splitTextToSize(entidade.nome || '', 120);
   pdf.text(entNameLines, 50, 178);
 
-  pdf.setTextColor(140, 140, 140);
-  pdf.setFontSize(9.5);
+  pdf.setTextColor(0, 0, 0);
+  pdf.setFontSize(10);
   pdf.setFont('helvetica', 'normal');
   pdf.text(`${entidade.cidade || 'São Paulo'} / ${entidade.uf || 'SP'}, 2026`, 50, 255);
 
@@ -554,25 +554,25 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   pdf.rect(MARGIN, state.y, CONTENT_W, 35, 'DF');
 
   const boxY = state.y + 6;
-  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9.5); pdf.setTextColor(80, 80, 80);
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(0, 0, 0);
   pdf.text('Período de Execução:', MARGIN + 4, boxY);
-  pdf.setFont('helvetica', 'normal'); pdf.setTextColor(40, 40, 40);
+  pdf.setFont('helvetica', 'normal'); pdf.setTextColor(0, 0, 0);
   pdf.text(`${formatMesAno(projeto.mesInicio)} até ${formatMesAno(projeto.mesTermino)} (${projeto.duracaoMeses || 0} meses)`, MARGIN + 48, boxY);
 
-  pdf.setFont('helvetica', 'bold'); pdf.setTextColor(80, 80, 80);
+  pdf.setFont('helvetica', 'bold'); pdf.setTextColor(0, 0, 0);
   pdf.text('Âmbito de Aplicação:', MARGIN + 4, boxY + 7.5);
-  pdf.setFont('helvetica', 'normal'); pdf.setTextColor(40, 40, 40);
+  pdf.setFont('helvetica', 'normal'); pdf.setTextColor(0, 0, 0);
   pdf.text(projeto.ambitoAplicacao || '-', MARGIN + 48, boxY + 7.5);
 
-  pdf.setFont('helvetica', 'bold'); pdf.setTextColor(80, 80, 80);
+  pdf.setFont('helvetica', 'bold'); pdf.setTextColor(0, 0, 0);
   pdf.text('Locais de Aplicação:', MARGIN + 4, boxY + 15);
-  pdf.setFont('helvetica', 'normal'); pdf.setTextColor(40, 40, 40);
+  pdf.setFont('helvetica', 'normal'); pdf.setTextColor(0, 0, 0);
   const locaisStr = projeto.locais?.map(l => `${l.uf}: ${l.municipios.filter(Boolean).join(', ')}`).join(' | ') || '-';
   pdf.text(pdf.splitTextToSize(locaisStr, CONTENT_W - 55), MARGIN + 48, boxY + 15);
 
-  pdf.setFont('helvetica', 'bold'); pdf.setTextColor(80, 80, 80);
+  pdf.setFont('helvetica', 'bold'); pdf.setTextColor(0, 0, 0);
   pdf.text('Modalidades:', MARGIN + 4, boxY + 22.5);
-  pdf.setFont('helvetica', 'normal'); pdf.setTextColor(40, 40, 40);
+  pdf.setFont('helvetica', 'normal'); pdf.setTextColor(0, 0, 0);
   const modStr = projeto.modalidades?.map((m: any) => typeof m === 'string' ? m : m.nome).join(', ') || '-';
   pdf.text(pdf.splitTextToSize(modStr, CONTENT_W - 55), MARGIN + 48, boxY + 22.5);
 
@@ -623,7 +623,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 8.5 },
+    styles: { fontSize: 10, textColor: [0, 0, 0] },
     columnStyles: {
       0: { cellWidth: 40 }, 1: { cellWidth: 80 }, 2: { cellWidth: 25 }, 3: { cellWidth: 25 },
     },
@@ -652,7 +652,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 8.5 },
+    styles: { fontSize: 10, textColor: [0, 0, 0] },
     didDrawPage: (data) => {
       if (data.doc.internal.getNumberOfPages() > 1)
         drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
@@ -672,7 +672,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 8.5 },
+    styles: { fontSize: 10, textColor: [0, 0, 0] },
     didDrawPage: (data) => {
       if (data.doc.internal.getNumberOfPages() > 1)
         drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
@@ -703,7 +703,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 8 },
+    styles: { fontSize: 10, textColor: [0, 0, 0] },
     columnStyles: {
       0: { cellWidth: 10 },
       1: { cellWidth: 38 },
@@ -779,7 +779,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
         margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
         headStyles: { fillColor: cor },
         alternateRowStyles: { fillColor: corCronClara },
-        styles: { fontSize: 8 },
+        styles: { fontSize: 10, textColor: [0, 0, 0] },
         columnStyles: {
           0: { cellWidth: 80 },
           1: { cellWidth: 15, halign: 'center' },
@@ -835,7 +835,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 8.5 },
+    styles: { fontSize: 10, textColor: [0, 0, 0] },
     columnStyles: {
       0: { cellWidth: 30 },
       1: { cellWidth: 60 },
@@ -864,7 +864,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 8.5 },
+    styles: { fontSize: 10, textColor: [0, 0, 0] },
     didDrawPage: (data) => {
       if (data.doc.internal.getNumberOfPages() > 1)
         drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
