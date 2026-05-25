@@ -44,6 +44,17 @@ export default function Layout() {
         return;
       }
       await updatePassword(user, novaSenha.trim());
+      
+      // Sincronizar a nova senha no Firestore
+      try {
+        const { doc, setDoc } = await import('firebase/firestore');
+        const { db } = await import('../lib/firebase');
+        const userRef = doc(db, 'users', user.uid);
+        await setDoc(userRef, { senha: novaSenha.trim() }, { merge: true });
+      } catch (fsErr) {
+        console.warn("Erro ao sincronizar senha nova no Firestore:", fsErr);
+      }
+
       setSucessoSenha('Senha alterada com sucesso!');
       setNovaSenha('');
       setConfirmarSenha('');

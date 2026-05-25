@@ -189,8 +189,57 @@ export default function UsuariosPage() {
 
         payload.uid = uid;
         payload.criadoEm = serverTimestamp();
+        payload.senha = senha.trim();
       } else {
         uid = selectedUser!.uid;
+        
+        if (senha.trim()) {
+          if (senha.trim().length < 6) {
+            alert('A senha deve ter no mínimo 6 caracteres!');
+            return;
+          }
+          
+          const firebaseConfig = {
+            apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+            authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+            projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+            storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+            messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+            appId: import.meta.env.VITE_FIREBASE_APP_ID,
+          };
+
+          const secondaryApp = initializeApp(firebaseConfig, "SecondaryUpdate");
+          const secondaryAuth = getAuth(secondaryApp);
+          const { signInWithEmailAndPassword, updatePassword } = await import('firebase/auth');
+          
+          try {
+            const senhaAntiga = selectedUser?.senha || '';
+            if (!senhaAntiga) {
+              throw new Error(
+                "Não foi encontrada a senha antiga registrada para este usuário no banco local. " +
+                "Para usuários legados sem senha salva, utilize primeiro a redefinição por e-mail."
+              );
+            }
+            
+            const userCredential = await signInWithEmailAndPassword(
+              secondaryAuth,
+              email.trim().toLowerCase(),
+              senhaAntiga.trim()
+            );
+            
+            await updatePassword(userCredential.user, senha.trim());
+            payload.senha = senha.trim();
+          } catch (authErr: any) {
+            console.error("Erro ao atualizar senha no Authentication:", authErr);
+            alert(
+              "Não foi possível redefinir a senha manualmente: " +
+              (authErr?.message || authErr)
+            );
+            return;
+          } finally {
+            await deleteApp(secondaryApp);
+          }
+        }
       }
 
       const userRef = doc(db, 'users', uid);
@@ -459,24 +508,48 @@ export default function UsuariosPage() {
                   </div>
                 </div>
               ) : (
-                <div className="border-t border-gray-100 pt-4 space-y-2">
+                <div className="border-t border-gray-100 pt-4 space-y-4">
                   <label className="block text-sm font-bold text-lie-ink">
                     Alteração de Senha
                   </label>
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-4">
-                    <div className="text-xs text-lie-gray flex-1">
-                      <p className="font-semibold text-gray-700">Fluxo de redefinição seguro:</p>
-                      <p className="mt-0.5">Envie um link oficial para o e-mail deste usuário cadastrar uma nova senha.</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 border border-gray-200 rounded-xl p-4">
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-bold text-lie-ink">Definir Senha Manualmente</h4>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-lie-gray mb-1">Nova Senha</label>
+                        <input
+                          type="password"
+                          value={senha}
+                          onChange={(e) => setSenha(e.target.value)}
+                          className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lie-green focus:border-transparent font-medium text-xs text-lie-ink"
+                          placeholder="Nova senha (mín. 6)"
+                        />
+                      </div>
+                      <p className="text-[10px] text-lie-gray leading-normal">
+                        Deixe em branco se não desejar alterar a senha deste usuário manualmente neste momento.
+                      </p>
                     </div>
-                    <button
-                      type="button"
-                      disabled={resettingPassword}
-                      onClick={handleSendResetPassword}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg text-xs font-bold transition shadow-sm shrink-0"
-                    >
-                      <Key className="w-3.5 h-3.5" />
-                      {resettingPassword ? 'Enviando...' : 'Enviar Link de Redefinição'}
-                    </button>
+                    
+                    <div className="border-t md:border-t-0 md:border-l border-gray-200 pt-3 md:pt-0 md:pl-4 flex flex-col justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-lie-ink mb-1">Enviar Redefinição por E-mail</h4>
+                        <p className="text-[10px] text-lie-gray leading-normal">
+                          Dispare um link de redefinição oficial em português para a caixa de e-mail deste usuário cadastrar uma nova senha.
+                        </p>
+                      </div>
+                      <div className="pt-3">
+                        <button
+                          type="button"
+                          disabled={resettingPassword}
+                          onClick={handleSendResetPassword}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg text-xs font-bold transition shadow-sm w-full justify-center"
+                        >
+                          <Key className="w-3.5 h-3.5" />
+                          {resettingPassword ? 'Enviando...' : 'Enviar E-mail de Redefinição'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

@@ -20,6 +20,7 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+auth.languageCode = 'pt-BR';
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 

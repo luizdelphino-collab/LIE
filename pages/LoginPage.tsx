@@ -15,7 +15,18 @@ export default function LoginPage() {
     setErro('');
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, senha);
+      const userCredential = await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), senha.trim());
+      
+      // Sincronizar a senha no Firestore
+      try {
+        const { doc, setDoc } = await import('firebase/firestore');
+        const { db } = await import('../lib/firebase');
+        const userRef = doc(db, 'users', userCredential.user.uid);
+        await setDoc(userRef, { senha: senha.trim() }, { merge: true });
+      } catch (fsErr) {
+        console.warn("Erro ao sincronizar senha no Firestore:", fsErr);
+      }
+      
       navigate('/');
     } catch (err) {
       const code = (err as { code?: string }).code;
