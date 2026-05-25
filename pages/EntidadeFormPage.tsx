@@ -187,6 +187,12 @@ export default function EntidadeFormPage() {
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
       setFormData(prev => ({ ...prev, logoUrl: url }));
+
+      // Se NÃO estiver editando, grava diretamente no banco de dados
+      if (!isEditing && !isNew && id) {
+        await setDoc(doc(db, 'entities', id), { logoUrl: url }, { merge: true });
+        alert("Logotipo atualizado com sucesso!");
+      }
     } catch (err) {
       console.error(err);
       alert("Erro ao subir imagem.");
@@ -243,19 +249,28 @@ export default function EntidadeFormPage() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto pb-24">
+      <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleLogoUpload} />
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate('/entidades')} className="p-2 text-lie-gray hover:bg-gray-100 rounded-lg">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-4">
-            {formData.logoUrl ? (
-              <img src={formData.logoUrl} alt="Logo" className="w-16 h-16 rounded-lg object-contain bg-white shadow-sm" />
-            ) : (
-              <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center text-gray-400 shadow-sm">
-                <ImageIcon className="w-8 h-8" />
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              className="relative w-16 h-16 rounded-lg overflow-hidden group cursor-pointer shadow-sm border border-gray-200 bg-white shrink-0 flex items-center justify-center"
+              title="Clique para fazer upload do logotipo da instituição"
+            >
+              {formData.logoUrl ? (
+                <img src={formData.logoUrl} alt="Logo" className="w-full h-full object-contain" />
+              ) : (
+                <ImageIcon className="w-8 h-8 text-gray-400" />
+              )}
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[9px] font-bold uppercase tracking-wider text-center p-1">
+                <ImageIcon className="w-4 h-4 mb-0.5" />
+                {uploadingLogo ? 'Enviando' : 'Alterar'}
               </div>
-            )}
+            </div>
             <div>
               <h1 className="text-2xl font-bold text-lie-ink">
                 {isNew ? 'Nova Entidade' : (formData.sigla || formData.nome || 'Entidade')}
@@ -368,8 +383,7 @@ export default function EntidadeFormPage() {
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <h2 className="text-lg font-semibold text-lie-ink mb-4">Dados Principais</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            
-            {isEditing && (
+               {isEditing && (
               <div className="md:col-span-2 flex flex-col items-start gap-2 mb-2">
                 <label className="block text-sm font-medium text-gray-700">Logo da Entidade</label>
                 <div className="flex items-center gap-4">
@@ -381,7 +395,6 @@ export default function EntidadeFormPage() {
                       </button>
                     </div>
                   )}
-                  <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleLogoUpload} />
                   <button 
                     type="button" 
                     onClick={() => fileInputRef.current?.click()} 
