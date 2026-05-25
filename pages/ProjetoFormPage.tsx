@@ -510,13 +510,13 @@ export default function ProjetoFormPage() {
                 <option value="em_execucao">Em Execução</option>
                 <option value="reprovado">Reprovado</option>
                 <option value="diligencias">Diligências</option>
-                {formData.status && !['em_elaboracao', 'em_captacao', 'aprovado', 'em_execucao', 'reprovado', 'diligencias'].includes(formData.status) && (
+                <option value="cancelado">Cancelado</option>
+                {formData.status && !['em_elaboracao', 'em_captacao', 'aprovado', 'em_execucao', 'reprovado', 'diligencias', 'cancelado'].includes(formData.status) && (
                   <option value={formData.status}>
                     {formData.status === 'em_analise' ? 'Em Análise' :
                      formData.status === 'em_prestacao_contas' ? 'Em Prestação de Contas' :
                      formData.status === 'concluido' ? 'Concluído' :
-                     formData.status === 'arquivado' ? 'Arquivado' :
-                     formData.status === 'cancelado' ? 'Cancelado' : formData.status}
+                     formData.status === 'arquivado' ? 'Arquivado' : formData.status}
                   </option>
                 )}
               </select>
