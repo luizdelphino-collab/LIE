@@ -83,6 +83,8 @@ export default function UsuariosPage() {
     setIsModalOpen(true);
   };
 
+  const SENHA_PADRAO = '12345678';
+
   const openEditModal = (user: AppUser) => {
     setModalMode('edit');
     setSelectedUser(user);
@@ -122,16 +124,9 @@ export default function UsuariosPage() {
 
     const isNew = modalMode === 'create';
 
-    if (isNew) {
-      if (!senha.trim()) {
-        alert('A senha é obrigatória para novos usuários!');
-        return;
-      }
-      if (senha !== confirmarSenha) {
-        alert('As senhas não coincidem!');
-        return;
-      }
-      if (senha.length < 6) {
+    // Novos usuários sempre usam senha padrão - sem validação de senha no formulário
+    if (!isNew && senha.trim()) {
+      if (senha.trim().length < 6) {
         alert('A senha deve ter no mínimo 6 caracteres!');
         return;
       }
@@ -153,7 +148,7 @@ export default function UsuariosPage() {
       };
 
       if (isNew) {
-        // Criar conta no Firebase Authentication usando o App secundário
+        // Criar conta no Firebase Authentication usando o App secundário com senha padrão
         const firebaseConfig = {
           apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
           authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -163,14 +158,14 @@ export default function UsuariosPage() {
           appId: import.meta.env.VITE_FIREBASE_APP_ID,
         };
 
-        const secondaryApp = initializeApp(firebaseConfig, "Secondary");
+        const secondaryApp = initializeApp(firebaseConfig, `Secondary_${Date.now()}`);
         const secondaryAuth = getAuth(secondaryApp);
         
         try {
           const userCredential = await createUserWithEmailAndPassword(
             secondaryAuth,
             email.trim().toLowerCase(),
-            senha.trim()
+            SENHA_PADRAO  // Sempre usa senha padrão
           );
           uid = userCredential.user.uid;
         } catch (authErr: any) {
@@ -178,6 +173,10 @@ export default function UsuariosPage() {
           let userMsg = "Erro ao criar credencial de autenticação. ";
           if (authErr?.code === 'auth/email-already-in-use') {
             userMsg += "Este e-mail já está cadastrado no sistema.";
+          } else if (authErr?.code === 'auth/invalid-email') {
+            userMsg += "O e-mail informado é inválido.";
+          } else if (authErr?.code === 'auth/operation-not-allowed') {
+            userMsg += "Cadastro com e-mail/senha não está habilitado no Firebase. Verifique as configurações.";
           } else {
             userMsg += authErr?.message || authErr;
           }
@@ -189,16 +188,12 @@ export default function UsuariosPage() {
 
         payload.uid = uid;
         payload.criadoEm = serverTimestamp();
-        payload.senha = senha.trim();
+        payload.senha = SENHA_PADRAO;  // Guardar senha padrão no Firestore
+        payload.primeiroAcesso = true;  // Flag para forçar troca de senha no primeiro login
       } else {
         uid = selectedUser!.uid;
         
         if (senha.trim()) {
-          if (senha.trim().length < 6) {
-            alert('A senha deve ter no mínimo 6 caracteres!');
-            return;
-          }
-          
           const firebaseConfig = {
             apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
             authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -208,7 +203,7 @@ export default function UsuariosPage() {
             appId: import.meta.env.VITE_FIREBASE_APP_ID,
           };
 
-          const secondaryApp = initializeApp(firebaseConfig, "SecondaryUpdate");
+          const secondaryApp = initializeApp(firebaseConfig, `SecondaryUpdate_${Date.now()}`);
           const secondaryAuth = getAuth(secondaryApp);
           const { signInWithEmailAndPassword, updatePassword } = await import('firebase/auth');
           
@@ -216,8 +211,8 @@ export default function UsuariosPage() {
             const senhaAntiga = (selectedUser as any)?.senha || '';
             if (!senhaAntiga) {
               throw new Error(
-                "Não foi encontrada a senha antiga registrada para este usuário no banco local. " +
-                "Para usuários legados sem senha salva, utilize primeiro a redefinição por e-mail."
+                "Não foi encontrada a senha registrada para este usuário. " +
+                "Utilize 'Enviar E-mail de Redefinição' para que o usuário redefina via link."
               );
             }
             
@@ -229,12 +224,18 @@ export default function UsuariosPage() {
             
             await updatePassword(userCredential.user, senha.trim());
             payload.senha = senha.trim();
+            // Resetar flag de primeiro acesso se admin trocar a senha
+            payload.primeiroAcesso = false;
           } catch (authErr: any) {
             console.error("Erro ao atualizar senha no Authentication:", authErr);
-            alert(
-              "Não foi possível redefinir a senha manualmente: " +
-              (authErr?.message || authErr)
-            );
+            const code = authErr?.code;
+            let msg = "Não foi possível redefinir a senha manualmente. ";
+            if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+              msg += "A senha registrada no sistema está desatualizada. Peça ao usuário para fazer login primeiro, ou use 'Enviar E-mail de Redefinição'.";
+            } else {
+              msg += authErr?.message || authErr;
+            }
+            alert(msg);
             return;
           } finally {
             await deleteApp(secondaryApp);
@@ -483,28 +484,17 @@ export default function UsuariosPage() {
 
               {/* Seção de Senha ou Redefinição */}
               {modalMode === 'create' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-gray-100 pt-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-lie-ink mb-1">Senha Inicial *</label>
-                    <input
-                      type="password"
-                      required
-                      value={senha}
-                      onChange={(e) => setSenha(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lie-green focus:border-transparent font-medium text-lie-ink"
-                      placeholder="Mínimo 6 caracteres"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-lie-ink mb-1">Confirmar Senha *</label>
-                    <input
-                      type="password"
-                      required
-                      value={confirmarSenha}
-                      onChange={(e) => setConfirmarSenha(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lie-green focus:border-transparent font-medium text-lie-ink"
-                      placeholder="Repita a senha"
-                    />
+                <div className="border-t border-gray-100 pt-4">
+                  <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl p-4">
+                    <div className="text-blue-500 mt-0.5">
+                      <Key className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-blue-800">Senha padrão automática</p>
+                      <p className="text-xs text-blue-600 mt-0.5">
+                        O usuário será criado com a senha <strong>12345678</strong>. No primeiro acesso, o sistema exigirá que ele crie uma senha pessoal.
+                      </p>
+                    </div>
                   </div>
                 </div>
               ) : (

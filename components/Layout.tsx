@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, LogOut, FileText, Users, Building2, Package, Truck, ClipboardCheck, Menu, X, Key } from 'lucide-react';
+import { LayoutDashboard, Briefcase, LogOut, FileText, Users, Building2, Package, Truck, ClipboardCheck, Menu, X, Key, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { updatePassword } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 
 export default function Layout() {
-  const { appUser, signOut } = useAuth();
+  const { appUser, signOut, primeiroAcesso, updateAppUser } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   
@@ -18,7 +18,7 @@ export default function Layout() {
   const [erroSenha, setErroSenha] = useState('');
   const [sucessoSenha, setSucessoSenha] = useState('');
 
-  const handleAlterarSenha = async (e: React.FormEvent) => {
+  const handleAlterarSenha = async (e: React.FormEvent, isPrimeiroAcesso = false) => {
     e.preventDefault();
     setErroSenha('');
     setSucessoSenha('');
@@ -35,6 +35,10 @@ export default function Layout() {
       setErroSenha('A senha deve ter no mínimo 6 caracteres!');
       return;
     }
+    if (isPrimeiroAcesso && novaSenha === '12345678') {
+      setErroSenha('Por segurança, você não pode usar a senha padrão. Escolha uma senha pessoal.');
+      return;
+    }
 
     setSavingSenha(true);
     try {
@@ -45,12 +49,19 @@ export default function Layout() {
       }
       await updatePassword(user, novaSenha.trim());
       
-      // Sincronizar a nova senha no Firestore
+      // Sincronizar a nova senha no Firestore e limpar flag de primeiro acesso
       try {
         const { doc, setDoc } = await import('firebase/firestore');
         const { db } = await import('../lib/firebase');
         const userRef = doc(db, 'users', user.uid);
-        await setDoc(userRef, { senha: novaSenha.trim() }, { merge: true });
+        const updateData: any = { senha: novaSenha.trim() };
+        if (isPrimeiroAcesso) {
+          updateData.primeiroAcesso = false;
+        }
+        await setDoc(userRef, updateData, { merge: true });
+        if (isPrimeiroAcesso) {
+          updateAppUser({ primeiroAcesso: false });
+        }
       } catch (fsErr) {
         console.warn("Erro ao sincronizar senha nova no Firestore:", fsErr);
       }
@@ -204,6 +215,81 @@ export default function Layout() {
         <Outlet />
       </main>
 
+      {/* Modal - Primeiro Acesso (obrigatório, não pode ser dispensado) */}
+      {primeiroAcesso && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col animate-fade-in-up">
+            <header className="px-6 py-5 bg-gradient-to-r from-amber-500 to-orange-500 flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-white shrink-0" />
+              <div>
+                <h3 className="font-bold text-lg text-white">Primeiro Acesso — Troca de Senha Obrigatória</h3>
+                <p className="text-xs text-amber-100">Você precisa criar uma senha pessoal antes de continuar</p>
+              </div>
+            </header>
+
+            <form onSubmit={(e) => handleAlterarSenha(e, true)} className="p-6 space-y-4">
+              <p className="text-sm text-lie-gray leading-relaxed">
+                Por segurança, altere a senha padrão <strong className="text-lie-ink font-mono">12345678</strong> antes de acessar o sistema. Escolha uma senha pessoal e guarde-a em local seguro.
+              </p>
+
+              <div>
+                <label className="block text-sm font-semibold text-lie-ink mb-1">Nova Senha *</label>
+                <input
+                  type="password"
+                  required
+                  autoFocus
+                  value={novaSenha}
+                  onChange={(e) => setNovaSenha(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-transparent font-medium text-lie-ink"
+                  placeholder="Mínimo de 6 caracteres"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-lie-ink mb-1">Confirmar Nova Senha *</label>
+                <input
+                  type="password"
+                  required
+                  value={confirmarSenha}
+                  onChange={(e) => setConfirmarSenha(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-transparent font-medium text-lie-ink"
+                  placeholder="Repita a nova senha"
+                />
+              </div>
+
+              {erroSenha && (
+                <div className="text-xs text-red-600 bg-red-50 border border-red-100 p-3 rounded-lg leading-relaxed">
+                  {erroSenha}
+                </div>
+              )}
+
+              {sucessoSenha && (
+                <div className="text-xs text-green-600 bg-green-50 border border-green-100 p-3 rounded-lg font-bold">
+                  {sucessoSenha}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="px-4 py-2 text-sm font-medium text-gray-500 hover:text-red-600 transition"
+                >
+                  Sair do Sistema
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold shadow-sm transition disabled:opacity-50"
+                  disabled={savingSenha}
+                >
+                  {savingSenha ? 'Salvando...' : 'Definir Minha Senha'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Modal - Alteração de Senha */}
       {modalAlterarSenhaOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -226,7 +312,7 @@ export default function Layout() {
               </button>
             </header>
 
-            <form onSubmit={handleAlterarSenha} className="p-6 space-y-4">
+            <form onSubmit={(e) => handleAlterarSenha(e, false)} className="p-6 space-y-4">
               <p className="text-xs text-lie-gray">
                 Escolha uma nova senha forte para acessar a sua conta. A senha deve ter no mínimo 6 caracteres.
               </p>
