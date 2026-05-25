@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, writeBatch, serverTimestamp, orderBy } from 'firebase/firestore';
-import { ArrowLeft, Save, Loader2, FileSpreadsheet, Calendar as CalendarIcon, CheckCircle2, Unlock } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, FileSpreadsheet, Calendar as CalendarIcon, CheckCircle2, Unlock, FileText } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { ItemMaster, ItemProjeto, Projeto, CronogramaItem } from '../types';
@@ -18,6 +18,7 @@ export default function ProjetoCronogramaPage() {
   const [cronogramaItems, setCronogramaItems] = useState<CronogramaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   // allocations[itemId][mes] = quantidade
   const [allocations, setAllocations] = useState<Record<string, Record<number, number>>>({});
@@ -311,6 +312,20 @@ export default function ProjetoCronogramaPage() {
     }
   };
 
+  const handleExportPdf = async () => {
+    if (!id || itensProjeto.length === 0) return;
+    setGeneratingPdf(true);
+    try {
+      const { consolidarCronograma } = await import('../lib/consolidarCronograma');
+      await consolidarCronograma(id, allocations);
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao gerar o PDF do Cronograma: " + (err instanceof Error ? err.message : 'Erro desconhecido'));
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
   const calculateTotalDistributed = (itemId: string) => {
     const itemAllocs = allocations[itemId] || {};
     const sum = Object.values(itemAllocs).reduce((acc, val) => acc + (val || 0), 0);
@@ -359,6 +374,21 @@ export default function ProjetoCronogramaPage() {
             <FileSpreadsheet className="w-5 h-5 shrink-0" />
             <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
               Exportar Planilha Completa
+            </span>
+          </button>
+          <button 
+            onClick={handleExportPdf} 
+            disabled={generatingPdf || itensProjeto.length === 0}
+            className="group flex items-center bg-white border border-gray-300 text-red-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-red-50 shadow-sm disabled:opacity-50"
+            title="Gerar PDF do Cronograma"
+          >
+            {generatingPdf ? (
+              <Loader2 className="w-5 h-5 shrink-0 animate-spin text-red-700" />
+            ) : (
+              <FileText className="w-5 h-5 shrink-0 text-red-700" />
+            )}
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+              {generatingPdf ? 'Gerando PDF...' : 'Gerar PDF do Cronograma'}
             </span>
           </button>
           <button 
