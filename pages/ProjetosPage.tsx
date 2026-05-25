@@ -307,7 +307,8 @@ export default function ProjetosPage() {
                       <option value="em_execucao">Em Execução</option>
                       <option value="reprovado">Reprovado</option>
                       <option value="diligencias">Diligências</option>
-                      {p.status && !['em_elaboracao', 'em_captacao', 'aprovado', 'em_execucao', 'reprovado', 'diligencias'].includes(p.status) && (
+                      <option value="cancelado">Cancelado</option>
+                      {p.status && !['em_elaboracao', 'em_captacao', 'aprovado', 'em_execucao', 'reprovado', 'diligencias', 'cancelado'].includes(p.status) && (
                         <option value={p.status}>{formatStatus(p.status)}</option>
                       )}
                     </select>
