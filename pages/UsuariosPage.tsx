@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, query, orderBy, deleteDoc, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { Plus, Search, Trash2, Edit2, Shield, Mail, CheckCircle2, XCircle, Building, Phone, UserCheck, X } from 'lucide-react';
+import { Plus, Search, Trash2, Edit2, Shield, Mail, CheckCircle2, XCircle, Building, Phone, UserCheck, X, Key } from 'lucide-react';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { db } from '../lib/firebase';
 import type { AppUser, UserRole, Projeto } from '../types';
 
@@ -41,6 +43,9 @@ export default function UsuariosPage() {
   const [role, setRole] = useState<UserRole>('leitor');
   const [ativo, setAtivo] = useState(true);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [senha, setSenha] = useState('');
+  const [confirmarSenha, setConfirmarSenha] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
 
   const carregarDados = async () => {
     try {
@@ -73,6 +78,8 @@ export default function UsuariosPage() {
     setRole('leitor');
     setAtivo(true);
     setSelectedProjectIds([]);
+    setSenha('');
+    setConfirmarSenha('');
     setIsModalOpen(true);
   };
 
@@ -86,7 +93,24 @@ export default function UsuariosPage() {
     setRole(user.role || 'leitor');
     setAtivo(user.ativo !== false);
     setSelectedProjectIds(user.projectIds || []);
+    setSenha('');
+    setConfirmarSenha('');
     setIsModalOpen(true);
+  };
+
+  const handleSendResetPassword = async () => {
+    if (!email) return;
+    setResettingPassword(true);
+    try {
+      const { auth } = await import('../lib/firebase');
+      await sendPasswordResetEmail(auth, email.trim().toLowerCase());
+      alert(`Um e-mail de redefinição de senha foi enviado para ${email} com sucesso!`);
+    } catch (err: any) {
+      console.error(err);
+      alert("Erro ao enviar e-mail de redefinição: " + (err?.message || err));
+    } finally {
+      setResettingPassword(false);
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -96,11 +120,27 @@ export default function UsuariosPage() {
       return;
     }
 
-    try {
-      const isNew = modalMode === 'create';
-      const uid = isNew ? doc(collection(db, 'users')).id : selectedUser!.uid;
-      const userRef = doc(db, 'users', uid);
+    const isNew = modalMode === 'create';
 
+    if (isNew) {
+      if (!senha.trim()) {
+        alert('A senha é obrigatória para novos usuários!');
+        return;
+      }
+      if (senha !== confirmarSenha) {
+        alert('As senhas não coincidem!');
+        return;
+      }
+      if (senha.length < 6) {
+        alert('A senha deve ter no mínimo 6 caracteres!');
+        return;
+      }
+    }
+
+    try {
+      setLoading(true);
+      let uid = '';
+      
       const payload: any = {
         nome: nome.trim(),
         email: email.trim().toLowerCase(),
@@ -113,15 +153,55 @@ export default function UsuariosPage() {
       };
 
       if (isNew) {
+        // Criar conta no Firebase Authentication usando o App secundário
+        const firebaseConfig = {
+          apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+          authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+          projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+          storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+          messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+          appId: import.meta.env.VITE_FIREBASE_APP_ID,
+        };
+
+        const secondaryApp = initializeApp(firebaseConfig, "Secondary");
+        const secondaryAuth = getAuth(secondaryApp);
+        
+        try {
+          const userCredential = await createUserWithEmailAndPassword(
+            secondaryAuth,
+            email.trim().toLowerCase(),
+            senha.trim()
+          );
+          uid = userCredential.user.uid;
+        } catch (authErr: any) {
+          console.error("Erro ao criar credencial de autenticação:", authErr);
+          let userMsg = "Erro ao criar credencial de autenticação. ";
+          if (authErr?.code === 'auth/email-already-in-use') {
+            userMsg += "Este e-mail já está cadastrado no sistema.";
+          } else {
+            userMsg += authErr?.message || authErr;
+          }
+          alert(userMsg);
+          return;
+        } finally {
+          await deleteApp(secondaryApp);
+        }
+
+        payload.uid = uid;
         payload.criadoEm = serverTimestamp();
+      } else {
+        uid = selectedUser!.uid;
       }
 
+      const userRef = doc(db, 'users', uid);
       await setDoc(userRef, payload, { merge: true });
       setIsModalOpen(false);
       await carregarDados();
     } catch (err) {
       console.error('Erro ao salvar usuário:', err);
       alert('Erro ao salvar usuário: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -351,6 +431,55 @@ export default function UsuariosPage() {
                   </label>
                 </div>
               </div>
+
+              {/* Seção de Senha ou Redefinição */}
+              {modalMode === 'create' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-gray-100 pt-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-lie-ink mb-1">Senha Inicial *</label>
+                    <input
+                      type="password"
+                      required
+                      value={senha}
+                      onChange={(e) => setSenha(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lie-green focus:border-transparent font-medium text-lie-ink"
+                      placeholder="Mínimo 6 caracteres"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-lie-ink mb-1">Confirmar Senha *</label>
+                    <input
+                      type="password"
+                      required
+                      value={confirmarSenha}
+                      onChange={(e) => setConfirmarSenha(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lie-green focus:border-transparent font-medium text-lie-ink"
+                      placeholder="Repita a senha"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="border-t border-gray-100 pt-4 space-y-2">
+                  <label className="block text-sm font-bold text-lie-ink">
+                    Alteração de Senha
+                  </label>
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-4">
+                    <div className="text-xs text-lie-gray flex-1">
+                      <p className="font-semibold text-gray-700">Fluxo de redefinição seguro:</p>
+                      <p className="mt-0.5">Envie um link oficial para o e-mail deste usuário cadastrar uma nova senha.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={resettingPassword}
+                      onClick={handleSendResetPassword}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg text-xs font-bold transition shadow-sm shrink-0"
+                    >
+                      <Key className="w-3.5 h-3.5" />
+                      {resettingPassword ? 'Enviando...' : 'Enviar Link de Redefinição'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Atribuição de Projetos (se não for admin) */}
               {role !== 'admin' && (

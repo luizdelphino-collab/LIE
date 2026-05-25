@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../lib/firebase';
 
@@ -31,6 +31,31 @@ export default function LoginPage() {
     }
   };
 
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setErro('Por favor, informe seu e-mail para solicitar a redefinição de senha.');
+      return;
+    }
+    setErro('');
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim().toLowerCase());
+      alert(`Um e-mail com instruções para redefinição de senha foi enviado para ${email}. Verifique sua caixa de entrada.`);
+    } catch (err: any) {
+      console.error(err);
+      const code = err.code;
+      if (code === 'auth/user-not-found') {
+        setErro('Nenhum usuário cadastrado com este e-mail.');
+      } else if (code === 'auth/invalid-email') {
+        setErro('Formato de e-mail inválido.');
+      } else {
+        setErro('Erro ao enviar e-mail de redefinição. Tente novamente.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-lie-green to-lie-greenDark px-4 py-12">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-premium p-8 animate-fade-in-up">
@@ -55,7 +80,16 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-lie-ink mb-1">Senha</label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-sm font-medium text-lie-ink">Senha</label>
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-xs text-lie-green hover:underline font-semibold"
+              >
+                Esqueci minha senha
+              </button>
+            </div>
             <input
               type="password"
               required
