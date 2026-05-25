@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { collection, getDocs, orderBy, query, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, deleteDoc, doc, setDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileDown, Loader2, Trash2, Calendar, Building2, FileText, Package } from 'lucide-react';
+import { Plus, Search, FileDown, Loader2, Trash2, Calendar, Building2, FileText, Package, Copy } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { consolidarProjeto } from '../lib/consolidarProjeto';
 import RubricaModal from '../components/RubricaModal';
-import type { Projeto, Entidade } from '../types';
+import type { Projeto, Entidade, StatusProjeto } from '../types';
 
 export default function ProjetosPage() {
   const [projetos, setProjetos] = useState<(Projeto & { entidadeSigla?: string })[]>([]);
@@ -14,34 +14,105 @@ export default function ProjetosPage() {
   const [consolidando, setConsolidando] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const q = query(collection(db, 'projects'), orderBy('criadoEm', 'desc'));
-        const snap = await getDocs(q);
-        
-        // Carregar entidades para pegar a sigla
-        const entSnap = await getDocs(collection(db, 'entities'));
-        const entidadesMap: Record<string, string> = {};
-        entSnap.forEach(d => {
-          const data = d.data() as Entidade;
-          entidadesMap[d.id] = data.sigla || data.nome;
-        });
+  const loadProjetos = async () => {
+    try {
+      setLoading(true);
+      const q = query(collection(db, 'projects'), orderBy('criadoEm', 'desc'));
+      const snap = await getDocs(q);
+      
+      // Carregar entidades para pegar a sigla
+      const entSnap = await getDocs(collection(db, 'entities'));
+      const entidadesMap: Record<string, string> = {};
+      entSnap.forEach(d => {
+        const data = d.data() as Entidade;
+        entidadesMap[d.id] = data.sigla || data.nome;
+      });
 
-        const data = snap.docs.map(d => ({
-          id: d.id,
-          ...d.data(),
-          entidadeSigla: entidadesMap[(d.data() as any).entidadeId]
-        } as any));
-        
-        setProjetos(data);
-      } catch (error) {
-        console.error('Erro ao carregar projetos', error);
-      } finally {
-        setLoading(false);
-      }
-    })();
+      const data = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+        entidadeSigla: entidadesMap[(d.data() as any).entidadeId]
+      } as any));
+      
+      setProjetos(data);
+    } catch (error) {
+      console.error('Erro ao carregar projetos', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProjetos();
   }, []);
+
+  const handleDuplicar = async (e: React.MouseEvent, projetoOriginal: Projeto) => {
+    e.stopPropagation();
+    if (!confirm(`Deseja duplicar o projeto "${projetoOriginal.titulo || projetoOriginal.nome}"?`)) return;
+    
+    setLoading(true);
+    try {
+      const newProjectId = doc(collection(db, 'projects')).id;
+      
+      // 1. Duplicar documento principal
+      const originalTitle = projetoOriginal.titulo || projetoOriginal.nome || 'Projeto';
+      const payload: Partial<Projeto> = {
+        ...projetoOriginal,
+        id: newProjectId,
+        titulo: `[Cópia] ${originalTitle}`,
+        nome: `[Cópia] ${originalTitle}`,
+        status: 'em_elaboracao',
+        valorExecutado: 0,
+        valorCaptado: 0,
+        criadoEm: serverTimestamp() as any,
+        atualizadoEm: serverTimestamp() as any
+      };
+      
+      await setDoc(doc(db, 'projects', newProjectId), payload);
+      
+      // 2. Duplicar itens do projeto (projects/${id}/items)
+      const itemsSnap = await getDocs(collection(db, `projects/${projetoOriginal.id}/items`));
+      const batch = writeBatch(db);
+      
+      itemsSnap.forEach(itemDoc => {
+        const itemData = itemDoc.data();
+        const newItemId = doc(collection(db, `projects/${newProjectId}/items`)).id;
+        
+        batch.set(doc(db, `projects/${newProjectId}/items`, newItemId), {
+          ...itemData,
+          id: newItemId,
+          projectId: newProjectId,
+          fornecedoresIds: [], // Zerar fornecedores vinculados na execução
+          criadoEm: serverTimestamp()
+        });
+      });
+      
+      // 3. Duplicar documentos do projeto (projects/${id}/documentos)
+      const docsSnap = await getDocs(collection(db, `projects/${projetoOriginal.id}/documentos`));
+      
+      docsSnap.forEach(docDoc => {
+        const docData = docDoc.data();
+        const newDocId = doc(collection(db, `projects/${newProjectId}/documentos`)).id;
+        
+        batch.set(doc(db, `projects/${newProjectId}/documentos`, newDocId), {
+          ...docData,
+          id: newDocId,
+          projectId: newProjectId,
+          criadoEm: serverTimestamp()
+        });
+      });
+      
+      await batch.commit();
+      alert('Projeto duplicado com sucesso!');
+      await loadProjetos();
+      
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao duplicar projeto: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleExcluir = async (e: React.MouseEvent, id: string, titulo: string) => {
     e.stopPropagation();
@@ -52,6 +123,38 @@ export default function ProjetosPage() {
     } catch (err) {
       console.error(err);
       alert('Erro ao excluir projeto.');
+    }
+  };
+
+  const handleStatusChange = async (projeto: Projeto, novoStatus: StatusProjeto) => {
+    const statusOriginal = projeto.status || 'em_elaboracao';
+    if (statusOriginal === novoStatus) return;
+
+    const labelOriginal = formatStatus(statusOriginal);
+    const labelNovo = formatStatus(novoStatus);
+
+    const confirmar = window.confirm(
+      `Deseja alterar o status do projeto "${projeto.titulo || projeto.nome}" de "${labelOriginal}" para "${labelNovo}"?`
+    );
+
+    if (!confirmar) return;
+
+    try {
+      setLoading(true);
+      const projRef = doc(db, 'projects', projeto.id);
+      await setDoc(projRef, { 
+        status: novoStatus, 
+        atualizadoEm: serverTimestamp() 
+      }, { merge: true });
+
+      alert(`Status do projeto "${projeto.titulo || projeto.nome}" alterado para "${labelNovo}" com sucesso!`);
+      await loadProjetos();
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao alterar status do projeto: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
+      await loadProjetos(); // Recarrega se der erro para restabelecer o select
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -92,13 +195,20 @@ export default function ProjetosPage() {
       case 'aprovado': return 'bg-green-100 text-green-800';
       case 'em_elaboracao': return 'bg-blue-100 text-blue-800';
       case 'em_captacao': return 'bg-purple-100 text-purple-800';
+      case 'em_execucao': return 'bg-emerald-100 text-emerald-800';
       case 'cancelado': return 'bg-red-100 text-red-800';
+      case 'reprovado': return 'bg-red-100 text-red-800';
+      case 'diligencias': return 'bg-amber-100 text-amber-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
 
   const formatStatus = (status?: string) => {
     if (!status) return 'Em Elaboração';
+    if (status === 'em_elaboracao') return 'Em Elaboração';
+    if (status === 'em_captacao') return 'Em Captação';
+    if (status === 'em_execucao') return 'Em Execução';
+    if (status === 'diligencias') return 'Diligências';
     return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
@@ -183,10 +293,23 @@ export default function ProjetosPage() {
                       {calculateDuration(p)}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(p.status)}`}>
-                      {formatStatus(p.status)}
-                    </span>
+                  <td className="px-4 py-3 text-center" onClick={(ev) => ev.stopPropagation()}>
+                    <select
+                      value={p.status || 'em_elaboracao'}
+                      onChange={(ev) => handleStatusChange(p, ev.target.value as StatusProjeto)}
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold cursor-pointer border border-transparent hover:border-gray-300 focus:ring-1 focus:ring-offset-1 focus:ring-lie-green transition-all outline-none ${getStatusColor(p.status)}`}
+                      title="Clique para alterar o status"
+                    >
+                      <option value="em_elaboracao">Em Elaboração</option>
+                      <option value="em_captacao">Em Captação</option>
+                      <option value="aprovado">Aprovado</option>
+                      <option value="em_execucao">Em Execução</option>
+                      <option value="reprovado">Reprovado</option>
+                      <option value="diligencias">Diligências</option>
+                      {p.status && !['em_elaboracao', 'em_captacao', 'aprovado', 'em_execucao', 'reprovado', 'diligencias'].includes(p.status) && (
+                        <option value={p.status}>{formatStatus(p.status)}</option>
+                      )}
+                    </select>
                   </td>
                   <td className="px-4 py-3 text-sm text-center text-gray-500">
                     {p.atualizadoEm?.toDate().toLocaleDateString('pt-BR') || '-'}
@@ -221,6 +344,13 @@ export default function ProjetosPage() {
                         title="Consolidar PDF"
                       >
                         {consolidando === p.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={(ev) => handleDuplicar(ev, p)}
+                        className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition"
+                        title="Duplicar Projeto"
+                      >
+                        <Copy className="w-4 h-4" />
                       </button>
                       <button
                         onClick={(ev) => handleExcluir(ev, p.id, p.titulo)}

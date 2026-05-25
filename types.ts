@@ -39,7 +39,9 @@ export type StatusProjeto =
   | 'em_prestacao_contas' // executado, prestando contas
   | 'concluido'           // prestação aprovada
   | 'arquivado'           // arquivado/encerrado
-  | 'cancelado';          // cancelado
+  | 'cancelado'           // cancelado
+  | 'reprovado'           // reprovado
+  | 'diligencias';        // diligências
 
 export type InstrumentoOrigem = 
   | 'LPIE' | 'LIE' | 'CONDECA' | 'Emenda Federal' | 'Emenda Estadual' | 'Emenda Municipal' 
@@ -94,6 +96,8 @@ export interface Projeto {
   orgao: string;
   orgaoOutro?: string;
   logoUrl?: string;
+  planoDivulgacao?: string;
+  entidadeSigla?: string;
 
   // Plano de Trabalho
   resumo?: string;
@@ -501,6 +505,8 @@ export interface Dirigente {
   complemento?: string;
   cidade?: string;
   uf?: string;
+  bairro?: string;
+  ordem?: number;
 
   criadoEm: Timestamp;
   atualizadoEm?: Timestamp;

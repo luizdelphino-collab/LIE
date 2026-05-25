@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query, writeBatch } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, FileDown, FileText, Package } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
@@ -39,6 +39,7 @@ export default function ProjetoFormPage() {
   const [entidades, setEntidades] = useState<Entidade[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedMod, setSelectedMod] = useState<string>('');
+  const [originalPeriod, setOriginalPeriod] = useState<{ mesInicio?: string; mesTermino?: string }>({});
 
   const [formData, setFormData] = useState<Partial<Projeto>>({
     titulo: '',
@@ -81,7 +82,9 @@ export default function ProjetoFormPage() {
         try {
           const snap = await getDoc(doc(db, 'projects', id));
           if (snap.exists()) {
-            setFormData(snap.data() as Projeto);
+            const data = snap.data() as Projeto;
+            setFormData(data);
+            setOriginalPeriod({ mesInicio: data.mesInicio, mesTermino: data.mesTermino });
           }
         } finally {
           setLoading(false);
@@ -230,6 +233,67 @@ export default function ProjetoFormPage() {
     setSaving(true);
     try {
       const projId = isNew ? doc(collection(db, 'projects')).id : id!;
+
+      // Salvaguardas se as datas mudaram
+      const dateChanged = !isNew && (formData.mesInicio !== originalPeriod.mesInicio || formData.mesTermino !== originalPeriod.mesTermino);
+      
+      if (dateChanged) {
+        // 1. Verificar se há fornecedores vinculados nos itens
+        const itemsSnap = await getDocs(collection(db, `projects/${projId}/items`));
+        let temFornecedores = false;
+        itemsSnap.forEach(itemDoc => {
+          const itemData = itemDoc.data();
+          if (itemData.fornecedoresIds && itemData.fornecedoresIds.length > 0) {
+            temFornecedores = true;
+          }
+        });
+
+        // 2. Verificar se há registros na execução mensal com quantidades informadas ou arquivos
+        const execSnap = await getDocs(collection(db, `projects/${projId}/execucao`));
+        let temExecucao = false;
+        execSnap.forEach(execDoc => {
+          const execData = execDoc.data();
+          if (execData.itens && execData.itens.length > 0) {
+            execData.itens.forEach((item: any) => {
+              if (item.fornecedoresExecucao && item.fornecedoresExecucao.length > 0) {
+                item.fornecedoresExecucao.forEach((f: any) => {
+                  if (f.quantidade > 0 || f.notaFiscalUrl || f.comprovanteUrl || f.extratoBancarioUrl) {
+                    temExecucao = true;
+                  }
+                });
+              }
+            });
+          }
+        });
+
+        if (temFornecedores || temExecucao) {
+          alert("Você possui o módulo Execução preenchido neste projeto, por isso não é possível alterar o período de execução.");
+          setSaving(false);
+          return;
+        }
+
+        // 3. Verificar se há cronograma cadastrado
+        const cronSnap = await getDocs(collection(db, `projects/${projId}/cronograma`));
+        const temCronograma = !cronSnap.empty;
+
+        if (temCronograma) {
+          const confirmar = window.confirm(
+            "Este projeto já possui Cronograma de Execução, se continuar com a alteração de período, o cronograma de execução será apagado e deverá ser cadastrado novamente. Deseja continuar?"
+          );
+          if (!confirmar) {
+            setSaving(false);
+            return;
+          }
+
+          // Se clicar em SIM, resetar/deletar a subcoleção cronograma
+          const batch = writeBatch(db);
+          cronSnap.forEach(cronDoc => {
+            batch.delete(cronDoc.ref);
+          });
+          await batch.commit();
+        }
+      }
+
       const payload = {
         ...formData,
         duracaoMeses: calculateStages(),
@@ -237,6 +301,12 @@ export default function ProjetoFormPage() {
       };
       if (isNew) (payload as any).criadoEm = serverTimestamp();
       await setDoc(doc(db, 'projects', projId), payload, { merge: true });
+      
+      // Atualizar o originalPeriod com as novas datas se for uma edição
+      if (!isNew) {
+        setOriginalPeriod({ mesInicio: formData.mesInicio, mesTermino: formData.mesTermino });
+      }
+
       setIsEditing(false);
       if (isNew) navigate(`/projetos/${projId}`, { replace: true });
     } catch (err) {
@@ -423,6 +493,33 @@ export default function ProjetoFormPage() {
                   <input type="text" name="orgaoOutro" placeholder="Especifique o órgão" value={formData.orgaoOutro} onChange={handleChange} disabled={!isEditing} className={inputCls} />
                 )}
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Status do Projeto *</label>
+              <select
+                name="status"
+                required
+                value={formData.status || 'em_elaboracao'}
+                onChange={handleChange}
+                disabled={!isEditing}
+                className={inputCls}
+              >
+                <option value="em_elaboracao">Em Elaboração</option>
+                <option value="em_captacao">Em Captação</option>
+                <option value="aprovado">Aprovado</option>
+                <option value="em_execucao">Em Execução</option>
+                <option value="reprovado">Reprovado</option>
+                <option value="diligencias">Diligências</option>
+                {formData.status && !['em_elaboracao', 'em_captacao', 'aprovado', 'em_execucao', 'reprovado', 'diligencias'].includes(formData.status) && (
+                  <option value={formData.status}>
+                    {formData.status === 'em_analise' ? 'Em Análise' :
+                     formData.status === 'em_prestacao_contas' ? 'Em Prestação de Contas' :
+                     formData.status === 'concluido' ? 'Concluído' :
+                     formData.status === 'arquivado' ? 'Arquivado' :
+                     formData.status === 'cancelado' ? 'Cancelado' : formData.status}
+                  </option>
+                )}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Logo do Projeto</label>

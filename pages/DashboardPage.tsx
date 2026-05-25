@@ -157,6 +157,8 @@ function statusLabel(s: StatusProjeto): string {
     concluido: 'Concluído',
     arquivado: 'Arquivado',
     cancelado: 'Cancelado',
+    reprovado: 'Reprovado',
+    diligencias: 'Diligências',
   };
   return map[s];
 }

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown, AlertTriangle, History, X } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import type { DocumentoEntidade, Entidade } from '../types';
 
@@ -20,6 +20,9 @@ export default function EntidadeDocumentosPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedDocForHistory, setSelectedDocForHistory] = useState<DocumentoEntidade | null>(null);
+  const [historicoDocs, setHistoricoDocs] = useState<any[]>([]);
+  const [loadingHistorico, setLoadingHistorico] = useState(false);
 
   const [formData, setFormData] = useState<Partial<DocumentoEntidade>>({
     nome: '',
@@ -88,6 +91,29 @@ export default function EntidadeDocumentosPage() {
     setIsFormOpen(true);
   };
 
+  const openHistoryModal = async (docObj: DocumentoEntidade) => {
+    setSelectedDocForHistory(docObj);
+    setLoadingHistorico(true);
+    try {
+      const histSnap = await getDocs(collection(db, `entities/${id}/documentos/${docObj.id}/historico`));
+      const list = histSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      
+      // Ordenar localmente por data de arquivamento (mais recente primeiro)
+      list.sort((a, b) => {
+        const timeA = a.versaoSalvaEm?.toDate ? a.versaoSalvaEm.toDate().getTime() : (a.versaoSalvaEm?.seconds * 1000 || 0);
+        const timeB = b.versaoSalvaEm?.toDate ? b.versaoSalvaEm.toDate().getTime() : (b.versaoSalvaEm?.seconds * 1000 || 0);
+        return timeB - timeA;
+      });
+      
+      setHistoricoDocs(list);
+    } catch (e) {
+      console.error("Erro ao carregar histórico", e);
+      alert("Erro ao carregar histórico do documento.");
+    } finally {
+      setLoadingHistorico(false);
+    }
+  };
+
   const deleteDocument = async (docId: string) => {
     if (!confirm("Tem certeza que deseja excluir este documento?")) return;
     try {
@@ -130,6 +156,28 @@ export default function EntidadeDocumentosPage() {
     try {
       const docId = editId || doc(collection(db, `entities/${id}/documentos`)).id;
       let finalUrl = formData.arquivoUrl;
+
+      // Se for edição, pedir confirmação e arquivar a versão antiga no histórico
+      if (editId) {
+        const confirmar = window.confirm(
+          "Tem certeza que deseja realizar esta alteração? O documento antigo será arquivado no histórico de versões e substituído pelo novo, com as novas informações."
+        );
+        if (!confirmar) {
+          setSaving(false);
+          return;
+        }
+
+        // Buscar versão atual no banco para arquivar no histórico
+        const atualSnap = await getDoc(doc(db, `entities/${id}/documentos`, editId));
+        if (atualSnap.exists()) {
+          const atualData = atualSnap.data();
+          const historicoRef = doc(collection(db, `entities/${id}/documentos/${editId}/historico`));
+          await setDoc(historicoRef, {
+            ...atualData,
+            versaoSalvaEm: serverTimestamp()
+          });
+        }
+      }
 
       if (selectedFile) {
         const ext = selectedFile.name.split('.').pop();
@@ -351,6 +399,9 @@ export default function EntidadeDocumentosPage() {
                             <Eye className="w-4 h-4" />
                           </a>
                         )}
+                        <button onClick={() => openHistoryModal(doc)} className="p-1.5 text-amber-600 hover:bg-amber-50 rounded" title="Histórico do Documento">
+                          <History className="w-4 h-4" />
+                        </button>
                         <button onClick={() => openEditForm(doc)} className="p-1.5 text-gray-600 hover:bg-gray-100 rounded" title="Editar">
                           <Edit3 className="w-4 h-4" />
                         </button>
@@ -366,6 +417,91 @@ export default function EntidadeDocumentosPage() {
           </table>
         )}
       </div>
+
+      {selectedDocForHistory && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden">
+            <header className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-lie-ink">Histórico de Versões</h3>
+                <p className="text-sm text-lie-gray">{selectedDocForHistory.nome} ({selectedDocForHistory.tipo})</p>
+              </div>
+              <button 
+                onClick={() => setSelectedDocForHistory(null)}
+                className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1">
+              {loadingHistorico ? (
+                <div className="text-center py-8 text-lie-gray">Carregando histórico...</div>
+              ) : historicoDocs.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 italic">
+                  Nenhuma versão anterior arquivada para este documento.
+                </div>
+              ) : (
+                <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-xs font-bold text-lie-gray uppercase border-b border-gray-100">
+                      <tr>
+                        <th className="px-4 py-3">Arquivado Em</th>
+                        <th className="px-4 py-3">Nome / Observação</th>
+                        <th className="px-4 py-3">Emissão</th>
+                        <th className="px-4 py-3">Validade</th>
+                        <th className="px-4 py-3 text-right">Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {historicoDocs.map((hist) => (
+                        <tr key={hist.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium text-lie-ink">
+                            {hist.versaoSalvaEm ? (
+                              <>
+                                {hist.versaoSalvaEm.toDate ? hist.versaoSalvaEm.toDate().toLocaleDateString('pt-BR') : new Date(hist.versaoSalvaEm).toLocaleDateString('pt-BR')} às{' '}
+                                {hist.versaoSalvaEm.toDate ? hist.versaoSalvaEm.toDate().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : new Date(hist.versaoSalvaEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                              </>
+                            ) : '-'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-gray-700">{hist.nome}</div>
+                            {hist.observacao && <div className="text-xs text-gray-500 max-w-xs truncate">{hist.observacao}</div>}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">{formatDate(hist.emissao)}</td>
+                          <td className="px-4 py-3 text-gray-600">{formatDate(hist.validade)}</td>
+                          <td className="px-4 py-3 text-right">
+                            {hist.arquivoUrl ? (
+                              <a 
+                                href={hist.arquivoUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline font-semibold bg-blue-50 px-2.5 py-1 rounded-lg transition"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                Visualizar
+                              </a>
+                            ) : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <footer className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+              <button
+                onClick={() => setSelectedDocForHistory(null)}
+                className="px-5 py-2 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-100 transition shadow-sm"
+              >
+                Fechar
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

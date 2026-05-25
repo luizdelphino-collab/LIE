@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Search, Briefcase, Calendar, ChevronRight } from 'lucide-react';
-import type { Projeto } from '../types';
+import type { Projeto, Entidade } from '../types';
 
 export default function ExecucaoProjetosPage() {
   const [projetos, setProjetos] = useState<Projeto[]>([]);
@@ -16,7 +16,23 @@ export default function ExecucaoProjetosPage() {
       try {
         const q = query(collection(db, 'projects'), orderBy('criadoEm', 'desc'));
         const snap = await getDocs(q);
-        const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Projeto));
+        
+        // Carregar entidades para pegar a sigla
+        const entSnap = await getDocs(collection(db, 'entities'));
+        const entidadesMap: Record<string, string> = {};
+        entSnap.forEach(d => {
+          const data = d.data() as Entidade;
+          entidadesMap[d.id] = data.sigla || data.nome;
+        });
+
+        const list = snap.docs.map(d => {
+          const data = d.data() as Projeto;
+          return {
+            ...data,
+            id: d.id,
+            entidadeSigla: entidadesMap[data.entidadeId]
+          } as Projeto;
+        });
         setProjetos(list);
       } catch (err) {
         console.error("Erro ao buscar projetos", err);
