@@ -30,7 +30,7 @@ interface DirigentePdf {
   documentos?: DocItem[];
 }
 
-const LINE_H = 6;
+const LINE_H = 5.5;
 const MARGIN = 20;
 const PAGE_W = 210;
 const PAGE_H = 297;
@@ -73,34 +73,73 @@ function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, numb
 }
 
 async function fetchImageAsBase64(url: string): Promise<string | null> {
+  if (!url) return null;
+  if (url.startsWith('data:')) return url;
+
+  // 1. Tentar via Storage SDK (getBlob)
   try {
-    if (!url) return null;
-    if (url.startsWith('data:')) return url;
-    try {
-      const match = url.match(/\/o\/([^?]+)/);
-      const path = match ? decodeURIComponent(match[1]) : null;
-      if (path) {
-        const blob = await getBlob(ref(storage, path));
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
-      }
-    } catch (e) {
-      console.warn('Erro via Storage, tentando fetch:', e);
+    const match = url.match(/\/o\/([^?]+)/);
+    const path = match ? decodeURIComponent(match[1]) : null;
+    if (path) {
+      const blob = await getBlob(ref(storage, path));
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
     }
-    const resp = await fetch(url);
-    const blob = await resp.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(blob);
-    });
   } catch (e) {
-    console.error('Erro total ao buscar imagem:', e);
-    return null;
+    console.warn('Erro ao carregar via Storage Blob, tentando fetch direto:', e);
   }
+
+  // 2. Tentar Fetch direto
+  try {
+    const resp = await fetch(url);
+    if (resp.ok) {
+      const blob = await resp.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+    }
+  } catch (e) {
+    console.warn('Fetch direto bloqueado por CORS, tentando Proxy 1 (Weserv):', e);
+  }
+
+  // 3. Tentar via Proxy Weserv
+  try {
+    const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png`;
+    const resp = await fetch(weservUrl);
+    if (resp.ok) {
+      const blob = await resp.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+    }
+  } catch (e) {
+    console.warn('Proxy Weserv falhou, tentando Proxy 2 (AllOrigins):', e);
+  }
+
+  // 4. Tentar via Proxy AllOrigins
+  try {
+    const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const resp = await fetch(allOriginsUrl);
+    if (resp.ok) {
+      const blob = await resp.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+    }
+  } catch (e) {
+    console.error('Todos os métodos de carregamento de imagem falharam:', e);
+  }
+
+  return null;
 }
 
 function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
@@ -110,32 +149,32 @@ function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
 }
 
 function drawLetterheadHeader(pdf: jsPDF, entidade: Entidade, logoBase64: string | null, cor: [number, number, number]) {
-  // 1. Logo image on top left (X=20, Y=8, size 18x18)
+  // 1. Logotipo no topo esquerdo (X=20, Y=8, tamanho 18x18)
   if (logoBase64) {
     try {
       const format = getImgFormat(entidade.logoUrl || '');
-      pdf.addImage(logoBase64, format, MARGIN, 8, 18, 18);
+      pdf.addImage(logoBase64, format, MARGIN, 7, 16, 16);
     } catch (e) {
-      console.warn('Erro ao renderizar logo no cabeçalho:', e);
+      console.warn('Erro ao desenhar logo no cabeçalho:', e);
     }
   }
 
-  // 2. Entity Name in the center
-  pdf.setFontSize(10);
+  // 2. Nome da entidade no centro
+  pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(40, 40, 40);
-  pdf.text(entidade.nome.toUpperCase(), PAGE_W / 2, 15, { align: 'center' });
+  pdf.text(entidade.nome.toUpperCase(), PAGE_W / 2, 14, { align: 'center' });
 
-  // 3. CNPJ below the name
+  // 3. CNPJ abaixo do nome
   pdf.setFontSize(8);
   pdf.setFont('helvetica', 'normal');
   pdf.setTextColor(100, 100, 100);
-  pdf.text(`CNPJ: ${entidade.cnpj}`, PAGE_W / 2, 21, { align: 'center' });
+  pdf.text(`CNPJ: ${entidade.cnpj}`, PAGE_W / 2, 19, { align: 'center' });
 
-  // 4. Horizontal brand-colored line
+  // 4. Linha decorativa na cor da entidade
   pdf.setDrawColor(...cor);
   pdf.setLineWidth(0.4);
-  pdf.line(MARGIN, 28, PAGE_W - MARGIN, 28);
+  pdf.line(MARGIN, 26, PAGE_W - MARGIN, 26);
 }
 
 function drawLetterheadFooter(
@@ -145,12 +184,12 @@ function drawLetterheadFooter(
   total: number,
   rubricaUrl?: string
 ) {
-  // 1. Separator line at Y=280
-  pdf.setDrawColor(210, 210, 210);
+  // 1. Linha divisória fina em Y=280
+  pdf.setDrawColor(220, 220, 220);
   pdf.setLineWidth(0.3);
   pdf.line(MARGIN, 280, PAGE_W - MARGIN, 280);
 
-  // 2. Address text at Y=284
+  // 2. Endereço completo formatado
   const addressParts = [
     entidade.logradouro && entidade.numero ? `${entidade.logradouro}, ${entidade.numero}` : entidade.logradouro,
     entidade.complemento,
@@ -165,21 +204,21 @@ function drawLetterheadFooter(
   pdf.setTextColor(110, 110, 110);
   pdf.text(addressText, PAGE_W / 2, 284, { align: 'center' });
 
-  // 3. Contact info (Telefone and E-mail) at Y=288
+  // 3. Contatos
   const telefonesStr = (entidade.telefones || []).join(' / ') || 'Não informado';
   const contactsText = `Telefone: ${telefonesStr}  |  E-mail: ${entidade.email || 'Não informado'}`;
   pdf.text(contactsText, PAGE_W / 2, 288, { align: 'center' });
 
-  // 4. Page number at Y=293
+  // 4. Paginação
   pdf.setFontSize(7.5);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(140, 140, 140);
-  pdf.text(`Página ${pageNum} de ${total}`, PAGE_W / 2, 293, { align: 'center' });
+  pdf.setTextColor(130, 130, 130);
+  pdf.text(`Página ${pageNum} de ${total}`, PAGE_W / 2, 292, { align: 'center' });
 
-  // 5. Rubrica on the left bottom (at X=10, Y=PAGE_H - 15, size 10x10) if present
+  // 5. Rubrica no canto esquerdo
   if (rubricaUrl) {
     try {
-      pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 15, 10, 10);
+      pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 14, 10, 10);
     } catch {}
   }
 }
@@ -187,14 +226,14 @@ function drawLetterheadFooter(
 function checkPageSpace(state: PDFState, neededSpace: number) {
   if (state.y > 275 - neededSpace) {
     state.pdf.addPage();
-    state.y = 35;
+    state.y = 33;
     drawLetterheadHeader(state.pdf, state.entidade, state.logoBase64, state.cor);
   }
 }
 
 function forceNewPage(state: PDFState) {
   state.pdf.addPage();
-  state.y = 35;
+  state.y = 33;
   drawLetterheadHeader(state.pdf, state.entidade, state.logoBase64, state.cor);
 }
 
@@ -203,37 +242,37 @@ function addSectionTitle(state: PDFState, title: string) {
   
   const { pdf, cor } = state;
   const y = state.y;
-  const light = lightenRgb(cor, 0.88);
+  const light = lightenRgb(cor, 0.90);
   
   pdf.setFillColor(...light);
-  pdf.rect(MARGIN, y - 5, CONTENT_W, 9, 'F');
+  pdf.rect(MARGIN, y - 4, CONTENT_W, 8, 'F');
   pdf.setDrawColor(...cor);
-  pdf.setLineWidth(0.5);
+  pdf.setLineWidth(0.4);
   pdf.line(MARGIN, y + 4, MARGIN + CONTENT_W, y + 4);
-  pdf.setFontSize(13);
+  pdf.setFontSize(11);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(...cor);
-  pdf.text(title, MARGIN, y + 1);
+  pdf.text(title, MARGIN + 2, y + 1.5);
   
-  state.y = y + 12;
+  state.y = y + 10;
 }
 
 function addSubSectionTitle(state: PDFState, title: string) {
-  checkPageSpace(state, 15);
+  checkPageSpace(state, 12);
   
   const { pdf } = state;
   const y = state.y;
   
-  pdf.setFontSize(9);
+  pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(80, 80, 80);
   pdf.text(title, MARGIN, y);
   
-  const lineY = y + 3;
+  const lineY = y + 2;
   pdf.setDrawColor(220, 220, 220);
   pdf.line(MARGIN, lineY, MARGIN + CONTENT_W, lineY);
   
-  state.y = lineY + 5;
+  state.y = lineY + 4;
 }
 
 function addField(state: PDFState, label: string, value: string, x: number, maxW = CONTENT_W) {
@@ -244,32 +283,52 @@ function addField(state: PDFState, label: string, value: string, x: number, maxW
   const lines = pdf.splitTextToSize(value || '-', valMaxW);
   const neededHeight = lines.length * LINE_H;
   
-  checkPageSpace(state, neededHeight + 8);
+  checkPageSpace(state, neededHeight + 6);
   
   const y = state.y;
-  pdf.setFontSize(9);
+  pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(80, 80, 80);
   pdf.text(label + ':', x, y);
   
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(20, 20, 20);
+  pdf.setTextColor(30, 30, 30);
   pdf.text(lines, x + labelWidth, y);
   
   state.y = y + neededHeight;
 }
 
 function addJustifiedText(state: PDFState, text: string) {
+  if (!text) return;
   const { pdf } = state;
-  pdf.setFontSize(10);
+  pdf.setFontSize(9.5);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(20, 20, 20);
+  pdf.setTextColor(30, 30, 30);
   
-  const lines = pdf.splitTextToSize(text || '', CONTENT_W);
-  for (const line of lines) {
-    checkPageSpace(state, 12);
-    pdf.text(line, MARGIN, state.y, { align: 'justify', maxWidth: CONTENT_W });
-    state.y += LINE_H + 1;
+  const lines: string[] = pdf.splitTextToSize(text, CONTENT_W);
+  let currentLineIndex = 0;
+  
+  while (currentLineIndex < lines.length) {
+    const remainingH = 275 - state.y;
+    const lineSpacing = LINE_H + 1;
+    const linesThatFit = Math.floor(remainingH / lineSpacing);
+    
+    if (linesThatFit <= 0) {
+      forceNewPage(state);
+      continue;
+    }
+    
+    const linesToPrint = lines.slice(currentLineIndex, currentLineIndex + linesThatFit);
+    const textBlock = linesToPrint.join('\n');
+    
+    pdf.text(textBlock, MARGIN, state.y, { align: 'justify', maxWidth: CONTENT_W });
+    
+    state.y += linesToPrint.length * lineSpacing;
+    currentLineIndex += linesToPrint.length;
+    
+    if (currentLineIndex < lines.length) {
+      forceNewPage(state);
+    }
   }
 }
 
@@ -330,35 +389,35 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   pdf.setFillColor(255, 255, 255);
   pdf.rect(0, faixaY, PAGE_W, faixaH, 'F');
 
-  if ((entidade as any).logoUrl) {
+  if (logoUsar) {
     try {
-      const imgData = await fetchImageAsBase64((entidade as any).logoUrl);
+      const imgData = await fetchImageAsBase64(logoUsar);
       if (imgData) {
-        pdf.addImage(imgData, getImgFormat((entidade as any).logoUrl), PAGE_W / 2 - 30, faixaY + 10, 60, 60);
+        pdf.addImage(imgData, getImgFormat(logoUsar), PAGE_W / 2 - 30, faixaY + 10, 60, 60);
       }
     } catch { }
   }
 
   pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(26);
+  pdf.setFontSize(24);
   pdf.setFont('helvetica', 'bold');
   const nomeLines = pdf.splitTextToSize(entidade.nome || '', CONTENT_W);
   pdf.text(nomeLines, PAGE_W / 2, 25, { align: 'center' });
 
   if (entidade.sigla) {
-    pdf.setFontSize(16);
+    pdf.setFontSize(15);
     pdf.setFont('helvetica', 'normal');
     pdf.text(entidade.sigla, PAGE_W / 2, faixaY + faixaH + 18, { align: 'center' });
   }
 
-  pdf.setFontSize(14);
+  pdf.setFontSize(13);
   pdf.setFont('helvetica', 'bold');
   pdf.text('DOSSIÊ INSTITUCIONAL', PAGE_W / 2, PAGE_H - 15, { align: 'center' });
 
   // Inicializar o estado do PDF para o miolo (inicia na página 2)
   const state: PDFState = {
     pdf,
-    y: 35,
+    y: 33,
     cor,
     entidade,
     logoBase64
@@ -367,7 +426,7 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   // ===== DADOS DA ENTIDADE =====
   forceNewPage(state);
   addSectionTitle(state, '1. Dados da Entidade');
-  state.y += 4;
+  state.y += 2;
   addField(state, 'Razão Social', entidade.nome || '', MARGIN); state.y += 2;
   addField(state, 'Sigla', entidade.sigla || '-', MARGIN); state.y += 2;
   addField(state, 'CNPJ', entidade.cnpj || '-', MARGIN); state.y += 8;
@@ -402,13 +461,13 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   // ===== DIRIGENTES =====
   forceNewPage(state);
   addSectionTitle(state, '2. Relação de Dirigentes');
-  state.y += 4;
+  state.y += 2;
   for (const dir of dirigentes) {
     checkPageSpace(state, 60);
     
     pdf.setFillColor(...corClara);
     pdf.rect(MARGIN, state.y, CONTENT_W, 7, 'F');
-    pdf.setFontSize(10); 
+    pdf.setFontSize(9.5); 
     pdf.setFont('helvetica', 'bold'); 
     pdf.setTextColor(...cor);
     pdf.text(dir.nome?.toUpperCase() || '', MARGIN + 2, state.y + 5);
@@ -445,7 +504,7 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   // ===== HISTÓRICO =====
   forceNewPage(state);
   addSectionTitle(state, '3. Histórico');
-  state.y += 4;
+  state.y += 2;
   if (entidade.historico) {
     addJustifiedText(state, entidade.historico);
     state.y += 8;
@@ -454,7 +513,7 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   // ===== CAPACIDADE TÉCNICA =====
   checkPageSpace(state, 40);
   addSectionTitle(state, '4. Capacidade Técnica e Operacional');
-  state.y += 4;
+  state.y += 2;
   if (entidade.capacidadeTecnica) {
     addJustifiedText(state, entidade.capacidadeTecnica);
   }
@@ -462,7 +521,7 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
   // ===== TABELA DE ANEXOS =====
   forceNewPage(state);
   addSectionTitle(state, '5. Anexos');
-  state.y += 4;
+  state.y += 2;
   const anexoRows = allDocs.map((d, i) => [toRoman(i + 1), d.nome]);
   autoTable(pdf, {
     startY: state.y,
@@ -471,6 +530,7 @@ export async function consolidarEntidade(entidadeId: string, rubricaUrl?: string
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
+    styles: { fontSize: 8.5 },
     didDrawPage: (data) => {
       const pageCount = data.doc.internal.getNumberOfPages();
       if (pageCount > 1) {
