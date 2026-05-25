@@ -338,7 +338,7 @@ export async function consolidarCronograma(
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 8 },
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
     columnStyles: {
       0: { cellWidth: 10 },
       1: { cellWidth: 40 },
@@ -412,9 +412,9 @@ export async function consolidarCronograma(
       head: [['Item', 'Unidade', 'Valor Unitário', 'Quantidade', 'Valor Total']],
       body: monthlyAllocations,
       margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
-      headStyles: { fillColor: cor },
+      headStyles: { fillColor: cor, textColor: [255, 255, 255] },
       alternateRowStyles: { fillColor: corClara },
-      styles: { fontSize: 8 },
+      styles: { fontSize: 9, textColor: [0, 0, 0] },
       columnStyles: {
         0: { cellWidth: 80 },
         1: { cellWidth: 15, halign: 'center' },
@@ -474,9 +474,9 @@ export async function consolidarCronograma(
     head: [['Etapa', 'Mês de Execução', 'Valor Previsto', 'Porcentagem (%)']],
     body: resumoBody,
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
-    headStyles: { fillColor: cor },
+    headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 8.5 },
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
     columnStyles: {
       0: { cellWidth: 30 },
       1: { cellWidth: 60 },

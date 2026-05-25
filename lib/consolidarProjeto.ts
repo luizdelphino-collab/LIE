@@ -635,9 +635,9 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     head: [['Ação', 'Descrição', 'Início', 'Término']],
     body: cronBody,
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
-    headStyles: { fillColor: cor },
+    headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 10, textColor: [0, 0, 0] },
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
     columnStyles: {
       0: { cellWidth: 40 }, 1: { cellWidth: 80 }, 2: { cellWidth: 25 }, 3: { cellWidth: 25 },
     },
@@ -664,9 +664,9 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     head: [['Meta', 'Indicador', 'Fórmula', 'Verificação']],
     body: projeto.metasQualitativas?.map(m => [m.meta, m.indicador, m.formula, m.verificacao]) || [['-','-','-','-']],
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
-    headStyles: { fillColor: cor },
+    headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 10, textColor: [0, 0, 0] },
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
     didDrawPage: (data) => {
       if (data.doc.internal.getNumberOfPages() > 1)
         drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
@@ -684,9 +684,9 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     head: [['Meta', 'Indicador', 'Fórmula', 'Verificação']],
     body: projeto.metasQuantitativas?.map(m => [m.meta, m.indicador, m.formula, m.verificacao]) || [['-','-','-','-']],
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
-    headStyles: { fillColor: cor },
+    headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 10, textColor: [0, 0, 0] },
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
     didDrawPage: (data) => {
       if (data.doc.internal.getNumberOfPages() > 1)
         drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
@@ -717,7 +717,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 10, textColor: [0, 0, 0] },
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
     columnStyles: {
       0: { cellWidth: 10 },
       1: { cellWidth: 38 },
@@ -791,9 +791,9 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
         head: [['Item', 'Unidade', 'Valor Unitário', 'Quantidade', 'Valor Total']],
         body: monthlyAllocations,
         margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
-        headStyles: { fillColor: cor },
+        headStyles: { fillColor: cor, textColor: [255, 255, 255] },
         alternateRowStyles: { fillColor: corCronClara },
-        styles: { fontSize: 10, textColor: [0, 0, 0] },
+        styles: { fontSize: 9, textColor: [0, 0, 0] },
         columnStyles: {
           0: { cellWidth: 80 },
           1: { cellWidth: 15, halign: 'center' },
@@ -847,9 +847,9 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     head: [['Etapa', 'Mês de Execução', 'Valor Previsto', 'Porcentagem (%)']],
     body: resumoBody,
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
-    headStyles: { fillColor: cor },
+    headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 10, textColor: [0, 0, 0] },
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
     columnStyles: {
       0: { cellWidth: 30 },
       1: { cellWidth: 60 },
@@ -878,7 +878,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 10, textColor: [0, 0, 0] },
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
     didDrawPage: (data) => {
       if (data.doc.internal.getNumberOfPages() > 1)
         drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
