@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp, orderBy } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp, orderBy, writeBatch } from 'firebase/firestore';
 import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
@@ -23,6 +23,10 @@ export default function ProjetoItensPage() {
   const [showItemPicker, setShowItemPicker] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
   const [selectedMaster, setSelectedMaster] = useState<ItemMaster | null>(null);
+
+  // Estados para inclusão em lote
+  const [selectedMasters, setSelectedMasters] = useState<ItemMaster[]>([]);
+  const [batchData, setBatchData] = useState<Record<string, { memorialCalculo: string; quantidade: number }>>({});
 
   const [formData, setFormData] = useState<Partial<ItemProjeto>>({
     memorialCalculo: '',
@@ -180,6 +184,8 @@ export default function ProjetoItensPage() {
   const openNew = () => {
     setEditId(null);
     setSelectedMaster(null);
+    setSelectedMasters([]);
+    setBatchData({});
     setFormData({ memorialCalculo: '', quantidade: 1 });
     setShowItemPicker(true);
     setIsFormOpen(true);
@@ -192,6 +198,26 @@ export default function ProjetoItensPage() {
     setFormData({ ...ip });
     setShowItemPicker(false);
     setIsFormOpen(true);
+  };
+
+  const toggleMasterSelection = (it: ItemMaster) => {
+    setSelectedMasters(prev => {
+      const exists = prev.some(m => m.id === it.id);
+      if (exists) {
+        return prev.filter(m => m.id !== it.id);
+      } else {
+        return [...prev, it];
+      }
+    });
+  };
+
+  const avancarLote = () => {
+    const initialBatch: Record<string, { memorialCalculo: string; quantidade: number }> = {};
+    selectedMasters.forEach(m => {
+      initialBatch[m.id] = batchData[m.id] || { memorialCalculo: '', quantidade: 1 };
+    });
+    setBatchData(initialBatch);
+    setShowItemPicker(false);
   };
 
   const selectMasterItem = (it: ItemMaster) => {
@@ -227,6 +253,47 @@ export default function ProjetoItensPage() {
     } catch (e) {
       console.error(e);
       alert("Erro ao vincular item");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSubmitBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || selectedMasters.length === 0) return;
+    setSaving(true);
+    try {
+      const batch = writeBatch(db);
+
+      for (const m of selectedMasters) {
+        const data = batchData[m.id] || { memorialCalculo: '', quantidade: 1 };
+        const docId = doc(collection(db, `projects/${id}/items`)).id;
+        const valorTotal = (m.valorUnitario || 0) * (data.quantidade || 0);
+
+        const payload: Partial<ItemProjeto> = {
+          id: docId,
+          projectId: id,
+          itemId: m.id,
+          nome: m.nome,
+          descricao: m.descricao || '',
+          unidade: m.unidade,
+          valorUnitario: m.valorUnitario,
+          memorialCalculo: data.memorialCalculo,
+          quantidade: data.quantidade,
+          valorTotal,
+          criadoEm: serverTimestamp() as Timestamp
+        };
+
+        batch.set(doc(db, `projects/${id}/items`, docId), payload);
+      }
+
+      await batch.commit();
+      
+      setIsFormOpen(false);
+      carregarDados();
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao vincular itens em lote: " + (e instanceof Error ? e.message : 'Erro desconhecido'));
     } finally {
       setSaving(false);
     }
@@ -287,12 +354,14 @@ export default function ProjetoItensPage() {
       </header>
 
       {isFormOpen && (
-        <div className="bg-white rounded-xl shadow-premium p-6 border border-gray-100 mb-6 animate-fade-in relative">
-          <h2 className="text-lg font-bold text-lie-ink mb-4">{editId ? 'Editar Item no Projeto' : 'Vincular Novo Item'}</h2>
+        <div className="bg-white rounded-xl shadow-premium p-6 border border-gray-100 mb-6 animate-fade-in relative font-sans">
+          <h2 className="text-lg font-bold text-lie-ink mb-4">
+            {editId ? 'Editar Item no Projeto' : 'Vincular Itens em Lote'}
+          </h2>
           
           {showItemPicker ? (
             <div className="space-y-4">
-              <label className="block text-sm font-bold text-gray-700">1. Busque o item no Banco de Dados Geral</label>
+              <label className="block text-sm font-bold text-gray-700">1. Busque e selecione os itens no Banco de Dados Geral</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input 
@@ -305,30 +374,51 @@ export default function ProjetoItensPage() {
                 />
               </div>
               <div className="max-h-60 overflow-y-auto border border-gray-100 rounded-lg divide-y">
-                {filteredMaster.map(m => (
-                  <div 
-                    key={m.id} 
-                    onClick={() => selectMasterItem(m)}
-                    className="p-3 hover:bg-gray-50 cursor-pointer flex items-center justify-between group transition-colors"
-                  >
-                    <div>
-                      <div className="font-bold text-sm text-lie-ink">{m.nome}</div>
-                      <div className="text-[10px] text-gray-500 uppercase tracking-tight font-bold">{m.categoria} • #{m.codigo} • {m.unidade}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs font-bold text-lie-green">
-                        {m.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                {filteredMaster.map(m => {
+                  const isSelected = selectedMasters.some(x => x.id === m.id);
+                  return (
+                    <div 
+                      key={m.id} 
+                      onClick={() => toggleMasterSelection(m)}
+                      className={`p-3 hover:bg-gray-50 cursor-pointer flex items-center justify-between group transition-colors ${isSelected ? 'bg-lie-green/5' : ''}`}
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {}} // toggleMasterSelection já é chamado pelo onClick do container pai
+                          className="rounded border-gray-300 text-lie-green focus:ring-lie-green w-4 h-4 shrink-0 pointer-events-none"
+                        />
+                        <div>
+                          <div className="font-bold text-sm text-lie-ink">{m.nome}</div>
+                          <div className="text-[10px] text-gray-500 uppercase tracking-tight font-bold">{m.categoria} • #{m.codigo} • {m.unidade}</div>
+                        </div>
                       </div>
-                      <span className="text-[10px] text-gray-400 group-hover:text-lie-green">Clique para selecionar</span>
+                      <div className="text-right ml-4 shrink-0">
+                        <div className="text-xs font-bold text-lie-green">
+                          {m.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </div>
+                        <span className="text-[10px] text-gray-400 group-hover:text-lie-green">
+                          {isSelected ? 'Selecionado' : 'Clique para selecionar'}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-              <div className="flex justify-end">
+              <div className="flex justify-between items-center pt-2">
                 <button type="button" onClick={() => setIsFormOpen(false)} className="text-sm text-gray-500 hover:underline">Cancelar</button>
+                <button
+                  type="button"
+                  disabled={selectedMasters.length === 0}
+                  onClick={avancarLote}
+                  className="bg-lie-green hover:bg-lie-greenDark text-white px-5 py-2 rounded-lg font-bold text-sm shadow-sm disabled:opacity-50 transition"
+                >
+                  Avançar ({selectedMasters.length} selecionados)
+                </button>
               </div>
             </div>
-          ) : (
+          ) : editId ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               {selectedMaster && (
                 <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between mb-2">
@@ -337,9 +427,6 @@ export default function ProjetoItensPage() {
                     <h3 className="font-bold text-lie-ink">{selectedMaster.nome}</h3>
                     <p className="text-xs text-gray-500">{selectedMaster.unidade} • {selectedMaster.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
                   </div>
-                  {!editId && (
-                    <button type="button" onClick={() => setShowItemPicker(true)} className="text-xs text-blue-600 hover:underline">Trocar Item</button>
-                  )}
                 </div>
               )}
 
@@ -362,7 +449,7 @@ export default function ProjetoItensPage() {
                     step="0.01" 
                     required 
                     value={formData.quantidade} 
-                    onChange={e => setFormData(p => ({...p, quantidade: parseFloat(e.target.value)}))} 
+                    onChange={e => setFormData(p => ({...p, quantidade: parseFloat(e.target.value) || 0}))} 
                     className="w-full border-gray-300 rounded-lg shadow-sm" 
                   />
                 </div>
@@ -378,7 +465,104 @@ export default function ProjetoItensPage() {
                 <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancelar</button>
                 <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-8 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2">
                   {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {saving ? 'Vinculando...' : editId ? 'Salvar Alterações' : 'Confirmar Vínculo'}
+                  {saving ? 'Vinculando...' : 'Salvar Alterações'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmitBatch} className="space-y-6">
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between mb-4">
+                <div>
+                  <span className="text-[10px] font-bold text-lie-green uppercase">Itens Selecionados em Lote</span>
+                  <h3 className="font-bold text-lie-ink">{selectedMasters.length} itens do Banco de Dados Geral</h3>
+                </div>
+                <button type="button" onClick={() => setShowItemPicker(true)} className="text-xs text-blue-600 hover:underline font-semibold">Adicionar/Trocar Itens</button>
+              </div>
+
+              <div className="space-y-6 divide-y divide-gray-100 max-h-[50vh] overflow-y-auto pr-2">
+                {selectedMasters.map((m, idx) => {
+                  const data = batchData[m.id] || { memorialCalculo: '', quantidade: 1 };
+                  const updateField = (field: 'memorialCalculo' | 'quantidade', val: any) => {
+                    setBatchData(prev => ({
+                      ...prev,
+                      [m.id]: {
+                        ...prev[m.id],
+                        [field]: val
+                      }
+                    }));
+                  };
+
+                  return (
+                    <div key={m.id} className={`pt-4 ${idx === 0 ? 'pt-0' : ''} space-y-3`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] text-gray-400 font-mono">#{m.codigo} • {m.unidade}</span>
+                          <h4 className="font-bold text-lie-ink text-sm">{m.nome}</h4>
+                          <span className="text-[10px] text-gray-500 uppercase tracking-tight font-bold">{m.categoria} • Preço Unitário: {m.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedMasters(prev => prev.filter(x => x.id !== m.id));
+                            setBatchData(prev => {
+                              const copy = { ...prev };
+                              delete copy[m.id];
+                              return copy;
+                            });
+                          }}
+                          className="text-xs text-red-500 hover:underline font-semibold"
+                          title="Remover este item do lote"
+                        >
+                          Remover
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Memorial de Cálculo *</label>
+                          <textarea
+                            required
+                            rows={1}
+                            placeholder="Ex: 10 alunos x 5 dias x R$ 2,50"
+                            value={data.memorialCalculo}
+                            onChange={e => updateField('memorialCalculo', e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg shadow-sm text-sm"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Qtd. *</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              required
+                              value={data.quantidade}
+                              onChange={e => updateField('quantidade', parseFloat(e.target.value) || 0)}
+                              className="w-full border border-gray-300 rounded-lg shadow-sm text-sm font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Total (Auto)</label>
+                            <div className="px-2 py-2 bg-gray-100 rounded-lg font-bold text-xs text-lie-ink text-center h-[38px] flex items-center justify-center">
+                              {((m.valorUnitario || 0) * (data.quantidade || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {selectedMasters.length === 0 && (
+                <div className="p-6 text-center text-lie-gray italic border border-dashed rounded-lg">Nenhum item restou no lote. Por favor, adicione itens.</div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancelar</button>
+                <button type="submit" disabled={saving || selectedMasters.length === 0} className="bg-lie-green hover:bg-lie-greenDark text-white px-8 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2">
+                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {saving ? 'Vinculando...' : `Confirmar Vínculo de ${selectedMasters.length} Itens`}
                 </button>
               </div>
             </form>
