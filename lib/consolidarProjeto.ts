@@ -140,23 +140,16 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
 
 async function fetchPdfAsArrayBuffer(url: string): Promise<ArrayBuffer> {
   if (url.includes('firebasestorage.googleapis.com')) {
-    // Usar Proxy direto para evitar erros vermelhos de CORS no console
-    const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    const respProxy = await fetch(proxiedUrl);
-    if (!respProxy.ok) {
-      throw new Error(`Falha ao baixar PDF (Proxy AllOrigins falhou): ${respProxy.statusText}`);
-    }
-    return await respProxy.arrayBuffer();
-  }
-
-  const match = url.match(/\/o\/([^?]+)/);
-  const path = match ? decodeURIComponent(match[1]) : null;
-  if (path) {
-    try {
-      const blob = await withTimeout(getBlob(ref(storage, path)), 5000, "Timeout getBlob pdf");
-      return await blob.arrayBuffer();
-    } catch (e) {
-      console.warn('Erro ao carregar PDF via getBlob:', e);
+    const match = url.match(/\/o\/([^?]+)/);
+    const path = match ? decodeURIComponent(match[1]) : null;
+    if (path) {
+      try {
+        console.log(`Carregando PDF via getBlob nativo do Storage: ${path}`);
+        const blob = await withTimeout(getBlob(ref(storage, path)), 6000, "Timeout getBlob pdf");
+        return await blob.arrayBuffer();
+      } catch (e) {
+        console.warn('Erro ao carregar PDF via getBlob nativo, tentando proxies...', e);
+      }
     }
   }
 
@@ -170,12 +163,17 @@ async function fetchPdfAsArrayBuffer(url: string): Promise<ArrayBuffer> {
   }
 
   // Fallback para proxy AllOrigins para bypass de CORS
-  const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-  const respProxy = await fetch(proxiedUrl);
-  if (!respProxy.ok) {
-    throw new Error(`Falha ao baixar PDF (CORS e Proxy falharam): ${respProxy.statusText}`);
+  try {
+    const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const respProxy = await fetch(proxiedUrl);
+    if (respProxy.ok) {
+      return await respProxy.arrayBuffer();
+    }
+  } catch (proxyError) {
+    console.error('Falha no proxy AllOrigins para PDF:', proxyError);
   }
-  return await respProxy.arrayBuffer();
+
+  throw new Error(`Falha total ao baixar PDF de cotação/documento: ${url}`);
 }
 
 async function obterPdfPublicoCacheado(r: any): Promise<ArrayBuffer | null> {

@@ -97,7 +97,7 @@ export default function Layout() {
                 LIE
               </div>
               <span className="text-[9px] bg-lie-green/10 text-lie-green px-1.5 py-0.5 rounded font-mono font-semibold tracking-normal normal-case">
-                v1.5.8.2
+                v1.5.8.3
               </span>
             </div>
             <div className="leading-tight hidden xs:block">
