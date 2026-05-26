@@ -69,11 +69,21 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
   if (!url) return null;
   if (url.startsWith('data:')) return url;
 
-  // Se for Firebase Storage, usar Proxy direto para evitar os erros vermelhos de CORS no console do navegador
-  if (url.includes('firebasestorage.googleapis.com')) {
+  // Lista de tentativas em ordem de confiabilidade
+  const methods = [
+    // Método 1: Direto (caso CORS esteja habilitado na origem)
+    { type: 'direct', url: url },
+    // Método 2: Weserv (ótimo e ultra veloz para imagens de produção)
+    { type: 'weserv', url: `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png` },
+    // Método 3: corsproxy.io (super estável e rápido para qualquer tipo de arquivo)
+    { type: 'corsproxy', url: `https://corsproxy.io/?url=${encodeURIComponent(url)}` },
+    // Método 4: allorigins (último recurso)
+    { type: 'allorigins', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` }
+  ];
+
+  for (const m of methods) {
     try {
-      const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png`;
-      const resp = await fetch(weservUrl);
+      const resp = await fetch(m.url);
       if (resp.ok) {
         const blob = await resp.blob();
         return new Promise((resolve) => {
@@ -83,98 +93,68 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
         });
       }
     } catch (e) {
-      console.warn('Proxy Weserv falhou:', e);
+      console.warn(`Tentativa de imagem via ${m.type} falhou:`, e);
     }
-    
-    try {
-      const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      const resp = await fetch(allOriginsUrl);
-      if (resp.ok) {
-        const blob = await resp.blob();
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
-      }
-    } catch (e) {
-      console.error('Todos os métodos de carregamento de imagem falharam:', e);
-    }
-    return null;
   }
 
-  // Caso não seja Firebase, tenta o fluxo normal
-
-  try {
-    const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png`;
-    const resp = await fetch(weservUrl);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
-  } catch (e) {
-    console.warn('Proxy Weserv falhou:', e);
-  }
-
-  try {
-    const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    const resp = await fetch(allOriginsUrl);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
-  } catch (e) {
-    console.error('Todos os métodos de carregamento de imagem falharam:', e);
-  }
-
+  console.error('Todos os métodos de carregamento de imagem falharam.');
   return null;
 }
 
 async function fetchPdfAsArrayBuffer(url: string): Promise<ArrayBuffer> {
+  // 1. Tentar primeiro o getBlob oficial do Firebase se for Firebase Storage (mais seguro, rápido e nativo)
   if (url.includes('firebasestorage.googleapis.com')) {
     const match = url.match(/\/o\/([^?]+)/);
     const path = match ? decodeURIComponent(match[1]) : null;
     if (path) {
       try {
         console.log(`Carregando PDF via getBlob nativo do Storage: ${path}`);
-        const blob = await withTimeout(getBlob(ref(storage, path)), 6000, "Timeout getBlob pdf");
+        // Reduzir timeout para 2.5s para não prender o usuário se o Storage não tiver CORS configurado
+        const blob = await withTimeout(getBlob(ref(storage, path)), 2500, "Timeout getBlob pdf");
         return await blob.arrayBuffer();
       } catch (e) {
-        console.warn('Erro ao carregar PDF via getBlob nativo, tentando proxies...', e);
+        console.warn('Erro ao carregar PDF via getBlob nativo, tentando fallbacks...', e);
       }
     }
   }
 
+  // 2. Tentar download direto
   try {
     const resp = await fetch(url);
     if (resp.ok) {
       return await resp.arrayBuffer();
     }
   } catch (e) {
-    console.warn('Erro CORS no fetch do PDF, tentando proxy...', e);
+    console.warn('Erro CORS no fetch direto do PDF, tentando proxies...', e);
   }
 
-  // Fallback para proxy AllOrigins para bypass de CORS
+  // 3. Tentar via Proxy 1: corsproxy.io (altamente estável e sem limites)
   try {
-    const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    const respProxy = await fetch(proxiedUrl);
-    if (respProxy.ok) {
-      return await respProxy.arrayBuffer();
+    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+    console.log(`Tentando download do PDF via corsproxy.io...`);
+    const resp = await fetch(proxyUrl);
+    if (resp.ok) {
+      return await resp.arrayBuffer();
     }
-  } catch (proxyError) {
-    console.error('Falha no proxy AllOrigins para PDF:', proxyError);
+  } catch (e) {
+    console.warn('Proxy corsproxy.io falhou para o PDF:', e);
+  }
+
+  // 4. Tentar via Proxy 2: AllOrigins (fallback secundário)
+  try {
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    console.log(`Tentando download do PDF via AllOrigins...`);
+    const resp = await fetch(proxyUrl);
+    if (resp.ok) {
+      return await resp.arrayBuffer();
+    }
+  } catch (e) {
+    console.error('Falha no proxy AllOrigins para PDF:', e);
   }
 
   throw new Error(`Falha total ao baixar PDF de cotação/documento: ${url}`);
 }
+
 
 async function obterPdfPublicoCacheado(r: any): Promise<ArrayBuffer | null> {
   const fileKey = `${r.fonte}_${r.identificadorCompra.replace(/[^a-zA-Z0-9]/g, '_')}`;
