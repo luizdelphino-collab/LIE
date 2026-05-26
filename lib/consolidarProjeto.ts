@@ -143,6 +143,53 @@ async function fetchPdfAsArrayBuffer(url: string): Promise<ArrayBuffer> {
   return await resp.arrayBuffer();
 }
 
+async function obterPdfPublicoCacheado(r: any): Promise<ArrayBuffer | null> {
+  // Criar uma chave de arquivo única e limpa de caracteres especiais
+  const fileKey = `${r.fonte}_${r.identificadorCompra.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  const cachePath = `public_quote_pdfs/${fileKey}.pdf`;
+  
+  // 1. Tentar ler diretamente do cache no Storage (ultra-rápido se já capturado)
+  try {
+    const blob = await getBlob(ref(storage, cachePath));
+    return await blob.arrayBuffer();
+  } catch (e) {
+    console.log(`PDF público de ${r.identificadorCompra} não localizado em cache. Acionando serviço de captura backend...`);
+  }
+
+  // 2. Se não existir, chamamos a Cloud Function para capturar e gerar
+  try {
+    const projectId = storage.app.options.projectId;
+    const region = 'us-central1'; // Região padrão do Firebase
+    const funcUrl = `https://${region}-${projectId}.cloudfunctions.net/obterPdfContratacaoPublica`;
+    
+    const resp = await fetch(funcUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data: {
+          url: r.localizacaoUrl,
+          token: fileKey
+        }
+      })
+    });
+
+    if (resp.ok) {
+      const resData = await resp.json();
+      const downloadUrl = resData.result?.downloadUrl;
+      if (downloadUrl) {
+        const fileResp = await fetch(downloadUrl);
+        return await fileResp.arrayBuffer();
+      }
+    }
+  } catch (err) {
+    console.warn('Falha no microsserviço de captura Puppeteer:', err);
+  }
+
+  return null;
+}
+
 function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
   if (url.toLowerCase().includes('.png') || url.startsWith('data:image/png')) return 'PNG';
   if (url.toLowerCase().includes('.webp') || url.startsWith('data:image/webp')) return 'WEBP';
@@ -1100,20 +1147,33 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     // Carregar o PDF principal no pdf-lib
     const mainPdfDoc = await PDFDocument.load(jsPdfBytes);
     
-    // Buscar todas as referências de fomento/manuais que têm arquivos anexados nos itens pesquisados
+    // Buscar todas as referências dos itens pesquisados e fazer a juntada física (manuais e públicas)
     for (const it of itensPesquisados) {
-      const fomentoRefs = it.referencias?.filter((r: any) => r.fonte === 'fomento' && r.localizacaoUrl) || [];
-      for (const r of fomentoRefs) {
-        try {
-          console.log(`Efetuando a juntada de documento: ${r.arquivoNome || r.identificadorCompra} de ${r.orgaoLicitante}`);
-          const bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
-          const fomentoDoc = await PDFDocument.load(bytes);
-          const copiedPages = await mainPdfDoc.copyPages(fomentoDoc, fomentoDoc.getPageIndices());
-          copiedPages.forEach(page => {
-            mainPdfDoc.addPage(page);
-          });
-        } catch (err) {
-          console.error(`Falha ao juntar documento de cotação de ${r.orgaoLicitante}:`, err);
+      if (it.referencias && Array.isArray(it.referencias)) {
+        for (const r of it.referencias) {
+          try {
+            if (r.fonte === 'fomento' && r.localizacaoUrl) {
+              console.log(`Efetuando a juntada de documento manual: ${r.arquivoNome || r.identificadorCompra} de ${r.orgaoLicitante}`);
+              const bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
+              const docToMerge = await PDFDocument.load(bytes);
+              const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
+              copiedPages.forEach(page => {
+                mainPdfDoc.addPage(page);
+              });
+            } else if (r.fonte === 'compras.gov.br' || r.fonte === 'pncp') {
+              console.log(`Efetuando a juntada de documento público: ${r.identificadorCompra} de ${r.orgaoLicitante}`);
+              const bytes = await obterPdfPublicoCacheado(r);
+              if (bytes) {
+                const docToMerge = await PDFDocument.load(bytes);
+                const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
+                copiedPages.forEach(page => {
+                  mainPdfDoc.addPage(page);
+                });
+              }
+            }
+          } catch (err) {
+            console.error(`Falha ao juntar documento de cotação de ${r.orgaoLicitante}:`, err);
+          }
         }
       }
     }
