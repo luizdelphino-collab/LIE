@@ -1040,6 +1040,54 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
 
     state.y = boxY + 30;
 
+    // Capa da Pesquisa: Comparativo Geral de Preços
+    addSubSection(state, "COMPARATIVO GERAL DE PREÇOS (PROPOSTO VS. REFERÊNCIAS)");
+    
+    const publicRefs = it.referencias?.filter((r: any) => r.fonte === 'compras.gov.br' || r.fonte === 'pncp') || [];
+    const manualRefs = it.referencias?.filter((r: any) => r.fonte === 'fomento') || [];
+
+    const avgPublic = publicRefs.length > 0
+      ? publicRefs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / publicRefs.length
+      : null;
+
+    const avgManual = manualRefs.length > 0
+      ? manualRefs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / manualRefs.length
+      : null;
+
+    const formatBrl = (val: number | null) => {
+      if (val === null) return '—';
+      return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    };
+
+    const compBody = [
+      ['Valor Estimado Proposto no Projeto', formatBrl(it.valorUnitario), 'Preço unitário sugerido no Plano de Trabalho'],
+      ['Média de Compras Públicas (Compras.gov.br/PNCP)', formatBrl(avgPublic), `${publicRefs.length} cotação(ões) pública(s) consultada(s)`],
+      ['Média de Parcerias e Fomentos (Upload Manual)', formatBrl(avgManual), `${manualRefs.length} documento(s) de fomento anexo(s)`],
+      ['Mediana Geral Homologada (Blindagem de Cesta)', formatBrl(it.medianaReferencia || null), 'Mediana linear de referência da cesta (IN 65)']
+    ];
+
+    autoTable(pdf, {
+      startY: state.y,
+      head: [['Origem da Cotação / Referência', 'Valor Unitário', 'Observação / Descrição da Fonte']],
+      body: compBody,
+      margin: { left: MARGIN, right: MARGIN },
+      headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255] }, // Slate 700
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      styles: { fontSize: 7.5, textColor: [0, 0, 0] },
+      columnStyles: {
+        0: { cellWidth: 65, fontStyle: 'bold' },
+        1: { cellWidth: 35, fontStyle: 'bold', halign: 'right' },
+        2: { cellWidth: 70 }
+      },
+      didDrawPage: (data) => {
+        if (data.doc.internal.getNumberOfPages() > 1) {
+          drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+        }
+      }
+    });
+
+    state.y = (pdf as any).lastAutoTable.finalY + 8;
+
     // Detalhes do Item
     addSubSection(state, "DETALHAMENTO DO ITEM DO PROJETO");
     addField(state, "Item", it.nome, MARGIN); state.y += 1.5;

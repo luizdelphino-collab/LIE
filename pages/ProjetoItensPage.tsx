@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp, orderBy, writeBatch } from 'firebase/firestore';
-import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck, Eye } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { ItemMaster, ItemProjeto, Projeto } from '../types';
@@ -629,6 +629,17 @@ export default function ProjetoItensPage() {
                     >
                       <Scale className="w-4 h-4" />
                     </button>
+                    {it.pesquisado && (
+                      <a 
+                        href={`/validar?token=${it.tokenPesquisa}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition flex items-center justify-center" 
+                        title="Visualizar Detalhes e Certificado da Pesquisa"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </a>
+                    )}
                     <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar">
                       <Edit3 className="w-4 h-4" />
                     </button>
