@@ -5,11 +5,15 @@ import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
 import type { Projeto, Entidade, ItemProjeto } from '../types';
 
-const MARGIN = 20;
+const MARGIN_LEFT = 30;
+const MARGIN_RIGHT = 20;
+const MARGIN_TOP = 30;
+const MARGIN_BOTTOM = 20;
 const PAGE_W = 210;
 const PAGE_H = 297;
-const CONTENT_W = PAGE_W - MARGIN * 2;
-const LINE_H = 5.2;
+const CONTENT_W = PAGE_W - MARGIN_LEFT - MARGIN_RIGHT;
+const LINE_H = 6.5; // Espaçamento 1.5 ABNT
+const MARGIN = MARGIN_LEFT;
 
 interface PDFState {
   pdf: jsPDF;
@@ -143,7 +147,7 @@ function drawLetterheadHeader(pdf: jsPDF, entidade: Entidade, logoBase64: string
   pdf.text(`CNPJ: ${entidade.cnpj}`, PAGE_W / 2, 19, { align: 'center' });
   pdf.setDrawColor(...cor);
   pdf.setLineWidth(0.4);
-  pdf.line(MARGIN, 26, PAGE_W - MARGIN, 26);
+  pdf.line(MARGIN_LEFT, 26, PAGE_W - MARGIN_RIGHT, 26);
 }
 
 function drawLetterheadFooter(
@@ -155,7 +159,7 @@ function drawLetterheadFooter(
 ) {
   pdf.setDrawColor(220, 220, 220);
   pdf.setLineWidth(0.3);
-  pdf.line(MARGIN, 280, PAGE_W - MARGIN, 280);
+  pdf.line(MARGIN_LEFT, PAGE_H - MARGIN_BOTTOM + 2, PAGE_W - MARGIN_RIGHT, PAGE_H - MARGIN_BOTTOM + 2);
 
   const addressParts = [
     entidade.logradouro && entidade.numero ? `${entidade.logradouro}, ${entidade.numero}` : entidade.logradouro,
@@ -169,64 +173,58 @@ function drawLetterheadFooter(
   pdf.setFontSize(7.5);
   pdf.setFont('helvetica', 'normal');
   pdf.setTextColor(110, 110, 110);
-  pdf.text(addressText, PAGE_W / 2, 284, { align: 'center' });
+  pdf.text(addressText, PAGE_W / 2, PAGE_H - MARGIN_BOTTOM + 6, { align: 'center' });
 
   const telefonesStr = (entidade.telefones || []).join(' / ') || 'Não informado';
   const contactsText = `Telefone: ${telefonesStr}  |  E-mail: ${entidade.email || 'Não informado'}`;
-  pdf.text(contactsText, PAGE_W / 2, 288, { align: 'center' });
+  pdf.text(contactsText, PAGE_W / 2, PAGE_H - MARGIN_BOTTOM + 10, { align: 'center' });
 
   pdf.setFontSize(7.5);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(130, 130, 130);
-  pdf.text(`Página ${pageNum} de ${total}`, PAGE_W / 2, 292, { align: 'center' });
+  pdf.text(`Página ${pageNum} de ${total}`, PAGE_W / 2, PAGE_H - MARGIN_BOTTOM + 14, { align: 'center' });
 
   if (rubricaUrl) {
     try {
-      pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), 10, PAGE_H - 14, 10, 10);
+      pdf.addImage(rubricaUrl, getImgFormat(rubricaUrl), MARGIN_LEFT, PAGE_H - MARGIN_BOTTOM + 4, 10, 10);
     } catch {}
   }
 }
 
 function checkPageSpace(state: PDFState, neededSpace: number) {
-  if (state.y > 275 - neededSpace) {
+  if (state.y > PAGE_H - MARGIN_BOTTOM - neededSpace) {
     state.pdf.addPage();
-    state.y = 33;
+    state.y = MARGIN_TOP;
     drawLetterheadHeader(state.pdf, state.entidade, state.logoBase64, state.cor);
   }
 }
 
 function forceNewPage(state: PDFState) {
   state.pdf.addPage();
-  state.y = 33;
+  state.y = MARGIN_TOP;
   drawLetterheadHeader(state.pdf, state.entidade, state.logoBase64, state.cor);
 }
 
 function addChapterTitle(state: PDFState, title: string): number {
   checkPageSpace(state, 20);
-  const { pdf, cor } = state;
+  const { pdf } = state;
   const y = state.y;
-  const light = lightenRgb(cor, 0.92);
-  pdf.setFillColor(...light);
-  pdf.rect(MARGIN, y - 4, CONTENT_W, 8, 'F');
-  pdf.setDrawColor(...cor);
-  pdf.setLineWidth(0.4);
-  pdf.line(MARGIN, y + 4, MARGIN + CONTENT_W, y + 4);
-  pdf.setFontSize(14);
+  pdf.setFontSize(12);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(...cor);
-  pdf.text(title, MARGIN + 2, y + 2);
-  state.y = y + 10;
+  pdf.setTextColor(0, 0, 0);
+  pdf.text(title, MARGIN_LEFT, y);
+  state.y = y + LINE_H + 2;
   return (pdf as any).internal.getCurrentPageInfo().pageNumber;
 }
 
 function addSubTitle(state: PDFState, title: string) {
   checkPageSpace(state, 12);
   const { pdf } = state;
-  pdf.setFontSize(12);
+  pdf.setFontSize(11);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(0, 0, 0);
-  pdf.text(title, MARGIN, state.y);
-  state.y += LINE_H + 1;
+  pdf.text(title, MARGIN_LEFT, state.y);
+  state.y += LINE_H;
 }
 
 function addBodyText(state: PDFState, text: string) {
@@ -235,41 +233,72 @@ function addBodyText(state: PDFState, text: string) {
   pdf.setFontSize(10);
   pdf.setFont('helvetica', 'normal');
   pdf.setTextColor(0, 0, 0);
+  
   const paragraphs = text.split('\n');
-  const lineSpacing = LINE_H + 1.2;
+  const lineSpacing = LINE_H;
+  const indent = 12.5; // Recuo da primeira linha ABNT
+  
   for (let p = 0; p < paragraphs.length; p++) {
     const paraText = paragraphs[p];
     if (paraText.trim() === '') {
       state.y += lineSpacing * 0.5;
       continue;
     }
-    const lines: string[] = pdf.splitTextToSize(paraText, CONTENT_W);
+    
+    // Manual word wrap and justify
+    const words = paraText.trim().split(/\s+/);
+    let currentLineWords: string[] = [];
+    let lines: { text: string, isFirst: boolean }[] = [];
+    let isFirstLine = true;
+    
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      currentLineWords.push(word);
+      const lineStr = currentLineWords.join(' ');
+      const lineWidth = pdf.getTextWidth(lineStr);
+      const maxW = isFirstLine ? CONTENT_W - indent : CONTENT_W;
+      
+      if (lineWidth > maxW && currentLineWords.length > 1) {
+        currentLineWords.pop();
+        lines.push({ text: currentLineWords.join(' '), isFirst: isFirstLine });
+        currentLineWords = [word];
+        isFirstLine = false;
+      }
+    }
+    if (currentLineWords.length > 0) {
+      lines.push({ text: currentLineWords.join(' '), isFirst: isFirstLine });
+    }
+    
     for (let i = 0; i < lines.length; i++) {
-      checkPageSpace(state, 10);
-      
-      const line = lines[i].trim();
+      checkPageSpace(state, lineSpacing);
+      const lineObj = lines[i];
+      const lineStr = lineObj.text;
       const isLastLine = (i === lines.length - 1);
-      const words = line.split(' ');
+      const lineWords = lineStr.split(' ');
       
-      if (isLastLine || words.length <= 1) {
-        pdf.text(line, MARGIN, state.y);
+      const startX = lineObj.isFirst ? MARGIN_LEFT + indent : MARGIN_LEFT;
+      const maxW = lineObj.isFirst ? CONTENT_W - indent : CONTENT_W;
+      
+      if (isLastLine || lineWords.length <= 1) {
+        pdf.text(lineStr, startX, state.y);
       } else {
-        const textWidth = pdf.getTextWidth(line);
-        const extraSpace = CONTENT_W - textWidth;
-        const additionalSpacePerSpace = extraSpace / (words.length - 1);
+        const textWidth = pdf.getTextWidth(lineStr);
+        const extraSpace = maxW - textWidth;
+        const additionalSpacePerSpace = extraSpace / (lineWords.length - 1);
         
-        let currentX = MARGIN;
+        let currentX = startX;
         const spaceWidth = pdf.getTextWidth(' ');
         
-        for (let w = 0; w < words.length; w++) {
-          pdf.text(words[w], currentX, state.y);
-          currentX += pdf.getTextWidth(words[w]) + spaceWidth + additionalSpacePerSpace;
+        for (let w = 0; w < lineWords.length; w++) {
+          pdf.text(lineWords[w], currentX, state.y);
+          currentX += pdf.getTextWidth(lineWords[w]) + spaceWidth + additionalSpacePerSpace;
         }
       }
       state.y += lineSpacing;
     }
-    if (p < paragraphs.length - 1 && paraText.trim() !== '') {
-      state.y += 1.5;
+    
+    if (p < paragraphs.length - 1) {
+      state.y += lineSpacing * 0.5;
     }
   }
 }
@@ -296,14 +325,11 @@ function addSubSection(state: PDFState, title: string) {
   checkPageSpace(state, 12);
   const { pdf } = state;
   const y = state.y;
-  pdf.setFontSize(12);
+  pdf.setFontSize(11);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(0, 0, 0);
-  pdf.text(title, MARGIN, y);
-  const lineY = y + 2;
-  pdf.setDrawColor(220, 220, 220);
-  pdf.line(MARGIN, lineY, MARGIN + CONTENT_W, lineY);
-  state.y = lineY + 3.5;
+  pdf.text(title, MARGIN_LEFT, y);
+  state.y = y + LINE_H;
 }
 
 function formatMesAno(ym?: string): string {
@@ -350,20 +376,13 @@ function drawToc(
   // Cabeçalho timbrado
   drawLetterheadHeader(pdf, entidade, logoBase64, cor);
 
-  let y = 38;
-  const light = lightenRgb(cor, 0.92);
-
-  // Título do Sumário
-  pdf.setFillColor(...light);
-  pdf.rect(MARGIN, y - 4, CONTENT_W, 9, 'F');
-  pdf.setDrawColor(...cor);
-  pdf.setLineWidth(0.4);
-  pdf.line(MARGIN, y + 5, MARGIN + CONTENT_W, y + 5);
+  let y = MARGIN_TOP + 5;
+    
   pdf.setFontSize(12);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(...cor);
-  pdf.text('SUMÁRIO', MARGIN + 2, y + 2);
-  y += 16;
+  pdf.setTextColor(0, 0, 0);
+  pdf.text('SUMÁRIO', MARGIN_LEFT, y);
+  y += 15;
 
   // Linhas do sumário
   for (const entry of toc) {
@@ -371,13 +390,13 @@ function drawToc(
     const numW = 8;
     const pageStr = `${entry.page}`;
     const pageStrW = pdf.getTextWidth(pageStr);
-    const titleX = MARGIN + numW + 2;
+    const titleX = MARGIN_LEFT + numW + 2;
     const maxTitleW = CONTENT_W - numW - pageStrW - 8;
 
     pdf.setFontSize(10);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(0, 0, 0);
-    pdf.text(entry.num, MARGIN, y);
+    pdf.text(entry.num, MARGIN_LEFT, y);
 
     pdf.setFont('helvetica', 'normal');
     const titleLines = pdf.splitTextToSize(entry.title, maxTitleW);
@@ -385,7 +404,7 @@ function drawToc(
 
     // Linha de pontos
     const titleEndX = titleX + pdf.getTextWidth(titleLines[0]);
-    const dotLineEndX = PAGE_W - MARGIN - pageStrW - 3;
+    const dotLineEndX = PAGE_W - MARGIN_RIGHT - pageStrW - 3;
     if (dotLineEndX > titleEndX + 4) {
       pdf.setTextColor(0, 0, 0);
       let dotX = titleEndX + 2;
@@ -398,11 +417,10 @@ function drawToc(
     // Número da página alinhado à direita
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(0, 0, 0);
-    pdf.text(pageStr, PAGE_W - MARGIN - pageStrW, y);
+    pdf.text(pageStr, PAGE_W - MARGIN_RIGHT - pageStrW, y);
 
     y += 7;
-
-    if (y > 270) break; // Segurança: não ultrapassar o rodapé
+    if (y > PAGE_H - MARGIN_BOTTOM - 10) break; // Segurança: não ultrapassar o rodapé
   }
 }
 
@@ -634,7 +652,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     startY: state.y,
     head: [['Ação', 'Descrição', 'Início', 'Término']],
     body: cronBody,
-    margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+    margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
     styles: { fontSize: 9, textColor: [0, 0, 0] },
@@ -663,7 +681,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     startY: state.y,
     head: [['Meta', 'Indicador', 'Fórmula', 'Verificação']],
     body: projeto.metasQualitativas?.map(m => [m.meta, m.indicador, m.formula, m.verificacao]) || [['-','-','-','-']],
-    margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+    margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
     styles: { fontSize: 9, textColor: [0, 0, 0] },
@@ -683,7 +701,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     startY: state.y,
     head: [['Meta', 'Indicador', 'Fórmula', 'Verificação']],
     body: projeto.metasQuantitativas?.map(m => [m.meta, m.indicador, m.formula, m.verificacao]) || [['-','-','-','-']],
-    margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+    margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
     styles: { fontSize: 9, textColor: [0, 0, 0] },
@@ -714,7 +732,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     startY: state.y,
     head: [['Item', 'Nome', 'Descrição', 'Memorial de Cálculo', 'Unidade']],
     body: itemsBody,
-    margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+    margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
     styles: { fontSize: 9, textColor: [0, 0, 0] },
@@ -790,7 +808,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
         startY: state.y,
         head: [['Item', 'Unidade', 'Valor Unitário', 'Quantidade', 'Valor Total']],
         body: monthlyAllocations,
-        margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+        margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
         headStyles: { fillColor: cor, textColor: [255, 255, 255] },
         alternateRowStyles: { fillColor: corCronClara },
         styles: { fontSize: 9, textColor: [0, 0, 0] },
@@ -846,7 +864,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     startY: state.y,
     head: [['Etapa', 'Mês de Execução', 'Valor Previsto', 'Porcentagem (%)']],
     body: resumoBody,
-    margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+    margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
     styles: { fontSize: 9, textColor: [0, 0, 0] },
@@ -875,7 +893,7 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     startY: state.y,
     head: [['Nº', 'Documento']],
     body: anexoRows.length > 0 ? anexoRows : [['—', 'Nenhum documento anexado']],
-    margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+    margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
     styles: { fontSize: 9, textColor: [0, 0, 0] },
