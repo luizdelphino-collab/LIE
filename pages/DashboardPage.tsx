@@ -7,10 +7,10 @@ import type { Projeto, StatusProjeto } from '../types';
 
 interface Stats {
   totalProjetos: number;
-  emExecucao: number;
-  valorAprovado: number;
-  valorCaptado: number;
-  valorExecutado: number;
+  totalEntidades: number;
+  totalItens: number;
+  totalFornecedores: number;
+  projetosPorStatus: Record<string, { count: number; valor: number }>;
 }
 
 export default function DashboardPage() {
@@ -21,18 +21,46 @@ export default function DashboardPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'projects'));
-        const projetos = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Projeto, 'id'>) }));
+        const [snapProjetos, snapEntidades, snapItens, snapFornecedores] = await Promise.all([
+          getDocs(collection(db, 'projects')),
+          getDocs(collection(db, 'entidades')),
+          getDocs(collection(db, 'itens_master')),
+          getDocs(collection(db, 'fornecedores'))
+        ]);
+
+        const entidadesMap: Record<string, string> = {};
+        snapEntidades.docs.forEach(d => {
+          entidadesMap[d.id] = d.data().nome;
+        });
+
+        const projetos = snapProjetos.docs.map((d) => {
+          const data = d.data() as Omit<Projeto, 'id'>;
+          return {
+            id: d.id,
+            ...data,
+            entidadeNome: entidadesMap[data.entidadeId] || 'Entidade desconhecida'
+          };
+        });
+
+        const projetosPorStatus: Record<string, { count: number; valor: number }> = {};
+        projetos.forEach(p => {
+          const status = p.status || 'em_elaboracao';
+          if (!projetosPorStatus[status]) {
+            projetosPorStatus[status] = { count: 0, valor: 0 };
+          }
+          projetosPorStatus[status].count += 1;
+          projetosPorStatus[status].valor += (p.valorAprovado || 0);
+        });
 
         const s: Stats = {
           totalProjetos: projetos.length,
-          emExecucao: projetos.filter((p) => p.status === 'em_execucao').length,
-          valorAprovado: projetos.reduce((acc, p) => acc + (p.valorAprovado || 0), 0),
-          valorCaptado: projetos.reduce((acc, p) => acc + (p.valorCaptado || 0), 0),
-          valorExecutado: projetos.reduce((acc, p) => acc + (p.valorExecutado || 0), 0),
+          totalEntidades: snapEntidades.size,
+          totalItens: snapItens.size,
+          totalFornecedores: snapFornecedores.size,
+          projetosPorStatus
         };
         setStats(s);
-        setProjetosRecentes(projetos.slice(0, 5));
+        setProjetosRecentes(projetos.sort((a, b) => b.criadoEm.toMillis() - a.criadoEm.toMillis()).slice(0, 5));
       } finally {
         setLoading(false);
       }
@@ -57,69 +85,96 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard
+          icon={<Users className="w-5 h-5" />}
+          label="Entidades"
+          value={String(stats?.totalEntidades ?? 0)}
+          accent="bg-blue-100 text-blue-700"
+        />
+        <StatCard
           icon={<Briefcase className="w-5 h-5" />}
           label="Projetos"
           value={String(stats?.totalProjetos ?? 0)}
           accent="bg-lie-green/10 text-lie-green"
         />
         <StatCard
-          icon={<TrendingUp className="w-5 h-5" />}
-          label="Em execução"
-          value={String(stats?.emExecucao ?? 0)}
-          accent="bg-blue-100 text-blue-700"
-        />
-        <StatCard
           icon={<DollarSign className="w-5 h-5" />}
-          label="Valor captado"
-          value={fmt(stats?.valorCaptado ?? 0)}
+          label="Itens Cadastrados"
+          value={String(stats?.totalItens ?? 0)}
           accent="bg-amber-100 text-amber-700"
         />
         <StatCard
-          icon={<Users className="w-5 h-5" />}
-          label="Valor executado"
-          value={fmt(stats?.valorExecutado ?? 0)}
+          icon={<TrendingUp className="w-5 h-5" />}
+          label="Fornecedores"
+          value={String(stats?.totalFornecedores ?? 0)}
           accent="bg-purple-100 text-purple-700"
         />
       </div>
 
-      <section className="bg-white rounded-xl shadow-premium p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-lie-ink">Projetos recentes</h2>
-          <Link to="/projetos" className="text-sm text-lie-green hover:underline">
-            Ver todos
-          </Link>
-        </div>
-
-        {projetosRecentes.length === 0 ? (
-          <p className="text-sm text-lie-gray py-8 text-center">
-            Nenhum projeto cadastrado ainda.{' '}
-            <Link to="/projetos/novo" className="text-lie-green hover:underline">
-              Criar o primeiro
-            </Link>
-          </p>
-        ) : (
-          <ul className="divide-y divide-gray-100">
-            {projetosRecentes.map((p) => (
-              <li key={p.id} className="py-3 flex items-center justify-between">
-                <div>
-                  <Link
-                    to={`/projetos/${p.id}`}
-                    className="font-medium text-lie-ink hover:text-lie-green"
-                  >
-                    {p.titulo || p.nome || 'Projeto Sem Título'}
-                  </Link>
-                  <div className="text-xs text-lie-gray">
-                    {p.esfera} · exercício {p.exercicio} · {statusLabel(p.status)}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        {/* Projetos por Status */}
+        <section className="bg-white rounded-xl shadow-premium p-6">
+          <h2 className="text-lg font-semibold text-lie-ink mb-4">Projetos por Status</h2>
+          {Object.keys(stats?.projetosPorStatus || {}).length === 0 ? (
+            <p className="text-sm text-lie-gray">Nenhum projeto cadastrado.</p>
+          ) : (
+            <div className="space-y-4">
+              {Object.entries(stats?.projetosPorStatus || {}).map(([status, data]) => (
+                <div key={status} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
+                  <div>
+                    <div className="font-medium text-lie-ink">{statusLabel(status as StatusProjeto)}</div>
+                    <div className="text-xs text-lie-gray">{data.count} {data.count === 1 ? 'projeto' : 'projetos'}</div>
+                  </div>
+                  <div className="text-sm font-semibold text-lie-ink">
+                    {fmt(data.valor)}
                   </div>
                 </div>
-                <div className="text-sm font-semibold text-lie-ink">
-                  {fmt(p.valorAprovado)}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Projetos Recentes */}
+        <section className="bg-white rounded-xl shadow-premium p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-lie-ink">Projetos Recentes</h2>
+            <Link to="/projetos" className="text-sm text-lie-green hover:underline">
+              Ver todos
+            </Link>
+          </div>
+
+          {projetosRecentes.length === 0 ? (
+            <p className="text-sm text-lie-gray py-8 text-center">
+              Nenhum projeto cadastrado ainda.{' '}
+              <Link to="/projetos/novo" className="text-lie-green hover:underline">
+                Criar o primeiro
+              </Link>
+            </p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {projetosRecentes.map((p: any) => (
+                <li key={p.id} className="py-3 flex items-center justify-between">
+                  <div>
+                    <Link
+                      to={`/projetos/${p.id}`}
+                      className="font-medium text-lie-ink hover:text-lie-green"
+                    >
+                      {p.titulo || p.nome || 'Projeto Sem Título'}
+                    </Link>
+                    <div className="text-xs text-lie-gray mt-1">
+                      <span className="font-semibold text-lie-ink">{p.entidadeNome}</span>
+                      <span className="mx-2">•</span>
+                      {statusLabel(p.status)}
+                    </div>
+                  </div>
+                  <div className="text-sm font-semibold text-lie-ink">
+                    {fmt(p.valorAprovado)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
