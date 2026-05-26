@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp, orderBy, writeBatch } from 'firebase/firestore';
-import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck, Eye } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck, Eye, Sparkles, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { ItemMaster, ItemProjeto, Projeto } from '../types';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
+import { pesquisarItemAutomatico, type AutoPesquisaResult } from '../lib/pesquisaAutomatica';
 
 export default function ProjetoItensPage() {
   const { id } = useParams();
@@ -38,6 +39,14 @@ export default function ProjetoItensPage() {
   const [isPesquisaOpen, setIsPesquisaOpen] = useState(false);
   const [selectedItemForPesquisa, setSelectedItemForPesquisa] = useState<ItemProjeto | null>(null);
 
+  // Estados para pesquisa automática em lote
+  const [batchPesquisaOpen, setBatchPesquisaOpen] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, current: '' });
+  const [batchResults, setBatchResults] = useState<AutoPesquisaResult[]>([]);
+
+  const [entidadeNome, setEntidadeNome] = useState<string>('');
+
   const carregarDados = async () => {
     if (!id) return;
     try {
@@ -45,7 +54,14 @@ export default function ProjetoItensPage() {
       
       // Projeto
       const projSnap = await getDoc(doc(db, 'projects', id));
-      if (projSnap.exists()) setProjeto({ id: projSnap.id, ...projSnap.data() } as Projeto);
+      if (projSnap.exists()) {
+        const projData = { id: projSnap.id, ...projSnap.data() } as Projeto;
+        setProjeto(projData);
+        if (projData.entidadeId) {
+          const entSnap = await getDoc(doc(db, 'entities', projData.entidadeId));
+          if (entSnap.exists()) setEntidadeNome((entSnap.data() as any).nome || '');
+        }
+      }
 
       // Itens do Projeto
       const snapProj = await getDocs(query(collection(db, `projects/${id}/items`), orderBy('criadoEm', 'asc')));
@@ -321,6 +337,26 @@ export default function ProjetoItensPage() {
 
   const totalProjeto = itensProjeto.reduce((acc, it) => acc + (it.valorTotal || 0), 0);
 
+  const startBatchPesquisa = async () => {
+    if (!projeto) return;
+    setBatchRunning(true);
+    setBatchResults([]);
+    setBatchProgress({ done: 0, total: itensProjeto.length, current: '' });
+
+    const results: AutoPesquisaResult[] = [];
+    for (let i = 0; i < itensProjeto.length; i++) {
+      const item = itensProjeto[i];
+      setBatchProgress({ done: i, total: itensProjeto.length, current: item.nome });
+      const res = await pesquisarItemAutomatico(item, projeto.titulo, entidadeNome);
+      results.push(res);
+      setBatchResults([...results]);
+    }
+
+    setBatchProgress({ done: itensProjeto.length, total: itensProjeto.length, current: '' });
+    setBatchRunning(false);
+    await carregarDados();
+  };
+
   if (loading) return <div className="p-6 text-lie-gray">Carregando itens do projeto...</div>;
 
   return (
@@ -336,8 +372,19 @@ export default function ProjetoItensPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button 
-            onClick={exportToExcel} 
+          <button
+            onClick={() => setBatchPesquisaOpen(true)}
+            disabled={itensProjeto.length === 0}
+            title="Pesquisa Automática de Preços (IN 65/2021)"
+            className="group flex items-center bg-white border border-amber-300 text-amber-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-amber-50 shadow-sm disabled:opacity-50"
+          >
+            <Sparkles className="w-5 h-5 shrink-0" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
+              Pesquisar Tudo
+            </span>
+          </button>
+          <button
+            onClick={exportToExcel}
             disabled={itensProjeto.length === 0}
             className="group flex items-center bg-white border border-gray-300 text-green-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-green-50 shadow-sm disabled:opacity-50"
           >
@@ -678,6 +725,135 @@ export default function ProjetoItensPage() {
           entidadeNome={projeto?.entidadeSigla || "Entidade"}
           onSave={() => carregarDados()}
         />
+      )}
+
+      {batchPesquisaOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh] animate-zoom-in">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-500 rounded-lg">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Pesquisa Automática de Preços</h3>
+                  <p className="text-xs text-gray-300">
+                    {batchRunning
+                      ? `Processando ${batchProgress.done + 1} de ${batchProgress.total} — ${batchProgress.current}`
+                      : batchResults.length > 0
+                        ? `Concluído: ${batchResults.length} item(ns) processado(s)`
+                        : `${itensProjeto.length} item(ns) serão pesquisados sequencialmente (IN 65/2021)`
+                    }
+                  </p>
+                </div>
+              </div>
+              {!batchRunning && (
+                <button
+                  onClick={() => { setBatchPesquisaOpen(false); setBatchResults([]); }}
+                  className="hover:bg-white/10 p-2 rounded-full transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {batchRunning && (
+                <div className="space-y-2">
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-amber-500 h-full transition-all duration-300"
+                      style={{ width: `${(batchProgress.done / batchProgress.total) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Buscando catálogo CATMAT/CATSER, consultando Compras.gov.br/PNCP e arquivando comprovantes…
+                  </p>
+                </div>
+              )}
+
+              {!batchRunning && batchResults.length === 0 && (
+                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                  <p>
+                    A pesquisa automática executa, pra cada item do projeto, o mesmo fluxo da
+                    pesquisa individual: busca no catálogo público, consulta de preços praticados
+                    e auto-seleção de referências <strong>iguais ou superiores</strong> ao valor estimado.
+                  </p>
+                  <p>
+                    Os itens já pesquisados serão <strong>reprocessados</strong> e suas cestas atualizadas.
+                    Cada referência gera um comprovante PDF arquivado no Storage.
+                  </p>
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                    <strong>Tempo estimado:</strong> aproximadamente 10–60 segundos por item, dependendo
+                    da quantidade de cotações encontradas e da resposta da API governamental.
+                  </p>
+                </div>
+              )}
+
+              {batchResults.length > 0 && (
+                <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+                  {batchResults.map((r, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex items-start gap-2 p-2.5 rounded-lg border text-xs ${
+                        r.status === 'ok' ? 'bg-green-50 border-green-200' :
+                        r.status === 'sem-match' ? 'bg-gray-50 border-gray-200' :
+                        r.status === 'sem-refs' ? 'bg-amber-50 border-amber-200' :
+                        'bg-red-50 border-red-200'
+                      }`}
+                    >
+                      {r.status === 'ok' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
+                      {r.status === 'sem-match' && <AlertCircle className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />}
+                      {r.status === 'sem-refs' && <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />}
+                      {r.status === 'erro' && <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
+                      <div className="flex-1">
+                        <div className="font-bold text-gray-800">{r.itemNome}</div>
+                        <div className="text-gray-600 mt-0.5">
+                          {r.status === 'ok' && `${r.refsCount} referência(s) homologada(s).`}
+                          {r.status !== 'ok' && r.reason}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
+              {!batchRunning && batchResults.length === 0 && (
+                <>
+                  <button
+                    onClick={() => setBatchPesquisaOpen(false)}
+                    className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={startBatchPesquisa}
+                    className="flex-1 py-2 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 transition flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Pesquisar {itensProjeto.length} item(ns)
+                  </button>
+                </>
+              )}
+              {batchRunning && (
+                <div className="flex-1 text-center text-sm text-gray-500 italic">
+                  Aguarde — a janela fechará após a conclusão de todos os itens.
+                </div>
+              )}
+              {!batchRunning && batchResults.length > 0 && (
+                <button
+                  onClick={() => { setBatchPesquisaOpen(false); setBatchResults([]); }}
+                  className="flex-1 py-2 bg-lie-green text-white font-bold rounded-lg hover:bg-lie-greenDark transition"
+                >
+                  Fechar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
