@@ -95,6 +95,18 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       // Ordenar por valor unitário (descendente) para facilitar blindagem superior
       resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
       setPrecosGoverno(resultados);
+
+      // Auto-selecionar todas as referências que são superiores ou iguais ao estimado do projeto
+      const elegiveis = resultados.filter(p => p.valorUnitario >= item.valorUnitario);
+      if (elegiveis.length > 0) {
+        setCestaReferencias(prev => {
+          // Filtra para evitar duplicados
+          const novas = elegiveis.filter(e => 
+            !prev.some(p => `${p.fonte}-${p.identificadorCompra}-${p.valorUnitario}` === `${e.fonte}-${e.identificadorCompra}-${e.valorUnitario}`)
+          );
+          return [...prev, ...novas];
+        });
+      }
     } catch (e) {
       console.error("Erro ao carregar preços praticados:", e);
       alert("Erro ao consultar a API pública. Tente novamente.");

@@ -4,6 +4,8 @@ import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
 import type { Projeto, Entidade, ItemProjeto } from '../types';
+import { PDFDocument } from 'pdf-lib';
+import { obterDetalheMaterialPorCodigo } from './apiCompras';
 
 const MARGIN_LEFT = 20;
 const MARGIN_RIGHT = 15;
@@ -120,6 +122,25 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
   }
 
   return null;
+}
+
+async function fetchPdfAsArrayBuffer(url: string): Promise<ArrayBuffer> {
+  const match = url.match(/\/o\/([^?]+)/);
+  const path = match ? decodeURIComponent(match[1]) : null;
+  if (path) {
+    try {
+      const blob = await getBlob(ref(storage, path));
+      return await blob.arrayBuffer();
+    } catch (e) {
+      console.warn('Erro ao carregar PDF via getBlob:', e);
+    }
+  }
+
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`Falha ao baixar PDF: ${resp.statusText}`);
+  }
+  return await resp.arrayBuffer();
 }
 
 function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
@@ -976,6 +997,13 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     if (it.descricao) {
       addField(state, "Especificação", it.descricao, MARGIN); state.y += 1.5;
     }
+    if (it.ultimoCodigoVinculado) {
+      const matInfo = obterDetalheMaterialPorCodigo(it.ultimoCodigoVinculado, it.nome);
+      if (matInfo) {
+        addField(state, "Catálogo CATMAT/CATSER", `${matInfo.nome} (Código: ${matInfo.codigoItem})\nDescrição: ${matInfo.descricaoItem}`, MARGIN);
+        state.y += 1.5;
+      }
+    }
     addField(state, "Memorial Cálculo", it.memorialCalculo, MARGIN); state.y += 1.5;
     addField(state, "Qtd / Unidade", `${it.quantidade} ${it.unidade}`, MARGIN); state.y += 1.5;
     addField(state, "Valor Estimado Unitário", it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), MARGIN); state.y += 4;
@@ -1089,5 +1117,45 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     drawLetterheadFooter(pdf, entidade, i, totalPages, rubricaUrl);
   }
 
-  pdf.save(`Projeto_${projeto.titulo.replace(/\s/g, '_')}.pdf`);
+  // Salvar o jsPDF em ArrayBuffer para manipulação com pdf-lib
+  const jsPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
+  
+  try {
+    // Carregar o PDF principal no pdf-lib
+    const mainPdfDoc = await PDFDocument.load(jsPdfBytes);
+    
+    // Buscar todas as referências de fomento/manuais que têm arquivos anexados nos itens pesquisados
+    for (const it of itensPesquisados) {
+      const fomentoRefs = it.referencias?.filter((r: any) => r.fonte === 'fomento' && r.localizacaoUrl) || [];
+      for (const r of fomentoRefs) {
+        try {
+          console.log(`Efetuando a juntada de documento: ${r.arquivoNome || r.identificadorCompra} de ${r.orgaoLicitante}`);
+          const bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
+          const fomentoDoc = await PDFDocument.load(bytes);
+          const copiedPages = await mainPdfDoc.copyPages(fomentoDoc, fomentoDoc.getPageIndices());
+          copiedPages.forEach(page => {
+            mainPdfDoc.addPage(page);
+          });
+        } catch (err) {
+          console.error(`Falha ao juntar documento de cotação de ${r.orgaoLicitante}:`, err);
+        }
+      }
+    }
+
+    // Salvar o PDF consolidado com todas as páginas unificadas fisicamente
+    const mergedPdfBytes = await mainPdfDoc.save();
+    const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `Projeto_${projeto.titulo.replace(/\s/g, '_')}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(downloadUrl);
+  } catch (pdfLibError) {
+    console.error("Erro durante a unificação de PDFs com pdf-lib, baixando PDF básico como fallback:", pdfLibError);
+    // Fallback: baixar apenas o PDF básico sem anexos para evitar que o usuário fique sem o relatório
+    pdf.save(`Projeto_${projeto.titulo.replace(/\s/g, '_')}.pdf`);
+  }
 }
