@@ -362,18 +362,20 @@ function addBodyText(state: PDFState, text: string) {
 
 function addField(state: PDFState, label: string, value: string, x: number, maxW = CONTENT_W) {
   const { pdf } = state;
-  const labelWidth = 35;
+  pdf.setFontSize(10);
+  pdf.setFont('helvetica', 'bold');
+  const labelText = label + ':';
+  // Calcula dinamicamente a largura do rótulo para evitar sobreposições (com margem de segurança de 2.5mm)
+  const labelWidth = Math.max(35, pdf.getTextWidth(labelText) + 2.5);
   const valMaxW = maxW - labelWidth;
   const lines = pdf.splitTextToSize(value || '-', valMaxW);
   const neededHeight = lines.length * LINE_H;
   checkPageSpace(state, neededHeight + 4);
   const y = state.y;
-  pdf.setFontSize(10);
-  pdf.setFont('helvetica', 'bold');
+  
   pdf.setTextColor(0, 0, 0);
-  pdf.text(label + ':', x, y);
+  pdf.text(labelText, x, y);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(0, 0, 0);
   pdf.text(lines, x + labelWidth, y);
   state.y = y + neededHeight;
 }
@@ -1045,59 +1047,33 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
 
     state.y = (pdf as any).lastAutoTable.finalY + 8;
 
-    // Resumo estatístico e QR Code side-by-side
-    checkPageSpace(state, 45);
+    // Resumo estatístico ocupando a largura total (sem QR Code)
+    checkPageSpace(state, 40);
     const summaryY = state.y;
 
-    // Caixa estatística à esquerda
+    // Caixa estatística
     pdf.setFillColor(248, 250, 252);
     pdf.setDrawColor(220, 220, 220);
     pdf.setLineWidth(0.3);
-    pdf.rect(MARGIN, summaryY, 115, 36, 'DF');
+    pdf.rect(MARGIN, summaryY, CONTENT_W, 36, 'DF');
 
-    pdf.setFontSize(8);
+    pdf.setFontSize(8.5);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(80, 80, 80);
-    pdf.text("DECLARAÇÃO E ANÁLISE ESTATÍSTICA DE MERCADO", MARGIN + 4, summaryY + 5);
+    pdf.text("DECLARAÇÃO E ANÁLISE ESTATÍSTICA DE MERCADO", MARGIN + 6, summaryY + 6);
 
-    pdf.setFontSize(7.5);
+    pdf.setFontSize(8);
     pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(60, 60, 60);
     
     // Média e Mediana
-    pdf.text(`Média da Cesta: R$ ${it.mediaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 4, summaryY + 12);
-    pdf.text(`Mediana da Cesta: R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 4, summaryY + 17);
+    pdf.text(`Média da Cesta: R$ ${it.mediaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 6, summaryY + 13);
+    pdf.text(`Mediana da Cesta: R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 6, summaryY + 18);
     
     const declaracaoStr = `Declara-se que o preço unitário sugerido de R$ ${it.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} é economicamente viável e justificado perante o mercado público (IN 65/2021), encontrando-se abaixo da mediana linear de R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} praticada por órgãos federais e estaduais de fomento.`;
-    const splitDec = pdf.splitTextToSize(declaracaoStr, 107);
-    pdf.setFontSize(6.5);
-    pdf.text(splitDec, MARGIN + 4, summaryY + 23);
-
-    // QR Code de Autenticidade à direita
-    const qrX = PAGE_W - MARGIN - 30; // 30mm de largura
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
-    const validarUrl = `${origin}/validar?token=${it.tokenPesquisa}`;
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(validarUrl)}`;
-    
-    let qrBase64: string | null = null;
-    try {
-      qrBase64 = await fetchImageAsBase64(qrCodeUrl);
-    } catch {}
-
-    if (qrBase64) {
-      try {
-        pdf.addImage(qrBase64, 'PNG', qrX, summaryY, 30, 30);
-      } catch {
-        drawFallbackBarcode(pdf, qrX, summaryY, 30, 30, it.tokenPesquisa || '');
-      }
-    } else {
-      drawFallbackBarcode(pdf, qrX, summaryY, 30, 30, it.tokenPesquisa || '');
-    }
-
-    pdf.setFontSize(6.5);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(100, 100, 100);
-    pdf.text("ESCANEIE PARA VALIDAR", qrX + 15, summaryY + 34, { align: 'center' });
+    const splitDec = pdf.splitTextToSize(declaracaoStr, CONTENT_W - 12);
+    pdf.setFontSize(7.5);
+    pdf.text(splitDec, MARGIN + 6, summaryY + 24);
 
     state.y = summaryY + 42;
   }
