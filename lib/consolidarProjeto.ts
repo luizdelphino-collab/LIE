@@ -24,6 +24,7 @@ interface PDFState {
   entidade: Entidade;
   logoBase64: string | null;
   projetoTitulo: string;
+  isFirstPageEmpty?: boolean;
 }
 
 // Mapa de páginas de início de cada capítulo (para sumário)
@@ -320,6 +321,12 @@ function checkPageSpace(state: PDFState, neededSpace: number) {
 }
 
 function forceNewPage(state: PDFState) {
+  if (state.isFirstPageEmpty) {
+    state.isFirstPageEmpty = false;
+    state.y = MARGIN_TOP;
+    drawLetterheadHeader(state.pdf, state.entidade, state.logoBase64, state.cor);
+    return;
+  }
   state.pdf.addPage();
   state.y = MARGIN_TOP;
   drawLetterheadHeader(state.pdf, state.entidade, state.logoBase64, state.cor);
@@ -609,65 +616,67 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
     try { logoBase64 = await fetchImageAsBase64(logoUsar); } catch {}
   }
 
-  // ========== PÁGINA 1: CAPA ==========
-  pdf.setFillColor(248, 250, 252);
-  pdf.rect(0, 0, PAGE_W, PAGE_H, 'F');
-  pdf.setFillColor(...cor);
-  pdf.rect(0, 0, 15, PAGE_H, 'F');
+  if (options.projeto) {
+    // ========== PÁGINA 1: CAPA ==========
+    pdf.setFillColor(248, 250, 252);
+    pdf.rect(0, 0, PAGE_W, PAGE_H, 'F');
+    pdf.setFillColor(...cor);
+    pdf.rect(0, 0, 15, PAGE_H, 'F');
 
-  const logoCapa = projeto.logoUrl || entidade.logoUrl;
-  if (logoCapa) {
-    try {
-      const imgData = await fetchImageAsBase64(logoCapa);
-      if (imgData) pdf.addImage(imgData, getImgFormat(logoCapa), 50, 50, 45, 45);
-    } catch {}
+    const logoCapa = projeto.logoUrl || entidade.logoUrl;
+    if (logoCapa) {
+      try {
+        const imgData = await fetchImageAsBase64(logoCapa);
+        if (imgData) pdf.addImage(imgData, getImgFormat(logoCapa), 50, 50, 45, 45);
+      } catch {}
+    }
+
+    pdf.setDrawColor(...cor);
+    pdf.setLineWidth(0.6);
+    pdf.line(50, 110, 170, 110);
+
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(12);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('PLANO DE TRABALHO', 50, 120);
+
+    pdf.setTextColor(...cor);
+    pdf.setFontSize(18);
+    pdf.setFont('helvetica', 'bold');
+    const projTitleLines = pdf.splitTextToSize(projeto.titulo?.toUpperCase() || '', 120);
+    pdf.text(projTitleLines, 50, 132);
+
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(12);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('PROPONENTE:', 50, 170);
+    pdf.setFont('helvetica', 'normal');
+    const entNameLines = pdf.splitTextToSize(entidade.nome || '', 120);
+    pdf.text(entNameLines, 50, 178);
+
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(`${entidade.cidade || 'São Paulo'} / ${entidade.uf || 'SP'}, 2026`, 50, 255);
+
+    // ========== PÁGINA 2: SUMÁRIO (placeholder — preenchido ao final) ==========
+    pdf.addPage();
+    // Cabeçalho será desenhado depois pelo drawToc, mas precisamos garantir que a página existe
   }
 
-  pdf.setDrawColor(...cor);
-  pdf.setLineWidth(0.6);
-  pdf.line(50, 110, 170, 110);
-
-  pdf.setTextColor(0, 0, 0);
-  pdf.setFontSize(12);
-  pdf.setFont('helvetica', 'bold');
-  pdf.text('PLANO DE TRABALHO', 50, 120);
-
-  pdf.setTextColor(...cor);
-  pdf.setFontSize(18);
-  pdf.setFont('helvetica', 'bold');
-  const projTitleLines = pdf.splitTextToSize(projeto.titulo?.toUpperCase() || '', 120);
-  pdf.text(projTitleLines, 50, 132);
-
-  pdf.setTextColor(0, 0, 0);
-  pdf.setFontSize(12);
-  pdf.setFont('helvetica', 'bold');
-  pdf.text('PROPONENTE:', 50, 170);
-  pdf.setFont('helvetica', 'normal');
-  const entNameLines = pdf.splitTextToSize(entidade.nome || '', 120);
-  pdf.text(entNameLines, 50, 178);
-
-  pdf.setTextColor(0, 0, 0);
-  pdf.setFontSize(10);
-  pdf.setFont('helvetica', 'normal');
-  pdf.text(`${entidade.cidade || 'São Paulo'} / ${entidade.uf || 'SP'}, 2026`, 50, 255);
-
-  // ========== PÁGINA 2: SUMÁRIO (placeholder — preenchido ao final) ==========
-  pdf.addPage();
-  // Cabeçalho será desenhado depois pelo drawToc, mas precisamos garantir que a página existe
-
-  // Inicializar estado começando na página 3
+  // Inicializar estado
   const state: PDFState = {
     pdf,
     y: 33,
     cor,
     entidade,
     logoBase64,
-    projetoTitulo: projeto.titulo
+    projetoTitulo: projeto.titulo,
+    isFirstPageEmpty: !options.projeto
   };
 
   const toc: TocEntry[] = [];
 
-  if (options.projeto) {
   if (options.projeto) {
   // ========== CAP 1: IDENTIFICAÇÃO DO PROJETO (página 3) ==========
   forceNewPage(state);
@@ -1046,11 +1055,13 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
         drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
     }
   });
+  }
 
   // ========== CERTIFICADOS DE AUTENTICIDADE E COTAÇÃO (IN 65/2021) ==========
   const itensPesquisados = itensProjeto.filter(it => it.pesquisado === true);
 
-  for (const it of itensPesquisados) {
+  if (options.pesquisa) {
+    for (const it of itensPesquisados) {
     forceNewPage(state);
     
     // Título do Certificado em box elegante com borda e fundo cinza sutil
@@ -1208,35 +1219,42 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
     pdf.text(splitDec, MARGIN + 6, summaryY + 24);
 
     state.y = summaryY + 42;
-  }
-
-  // ========== RODAPÉS em todas as páginas (exceto capa e sumário) ==========
-  const totalPages = (pdf as any).internal.getNumberOfPages();
-
-  if (options.projeto) {
-    // Página 2 = sumário: desenhar o sumário agora que sabemos as páginas
-    drawToc(pdf, entidade, logoBase64, cor, toc);
-    // Rodapé do sumário (página 2)
-    pdf.setPage(2);
-    drawLetterheadFooter(pdf, entidade, 2, totalPages, rubricaUrl);
-  }
-
-  // Rodapés nas páginas 3 em diante (apenas no que foi gerado pelo jsPDF)
-  
-  if (!options.numerarRubricar && options.projeto) {
-    for (let i = 3; i <= totalPages; i++) {
-      pdf.setPage(i);
-      drawLetterheadFooter(pdf, entidade, i, totalPages, rubricaUrl);
     }
   }
 
+  const gerouJsPdf = options.projeto || (options.pesquisa && itensPesquisados.length > 0);
 
-  // Salvar o jsPDF em ArrayBuffer para manipulação com pdf-lib
-  const jsPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
-  
+  if (gerouJsPdf) {
+    // ========== RODAPÉS em todas as páginas (exceto capa e sumário) ==========
+    const totalPages = (pdf as any).internal.getNumberOfPages();
+
+    if (options.projeto) {
+      // Página 2 = sumário: desenhar o sumário agora que sabemos as páginas
+      drawToc(pdf, entidade, logoBase64, cor, toc);
+      // Rodapé do sumário (página 2)
+      pdf.setPage(2);
+      drawLetterheadFooter(pdf, entidade, 2, totalPages, rubricaUrl);
+    }
+
+    // Rodapés nas demais páginas geradas pelo jsPDF
+    if (!options.numerarRubricar) {
+      const startPage = options.projeto ? 3 : 1;
+      for (let i = startPage; i <= totalPages; i++) {
+        pdf.setPage(i);
+        drawLetterheadFooter(pdf, entidade, i, totalPages, rubricaUrl);
+      }
+    }
+  }
+
   try {
-    // Carregar o PDF principal no pdf-lib
-    const mainPdfDoc = await PDFDocument.load(jsPdfBytes);
+    let mainPdfDoc: PDFDocument;
+    
+    if (gerouJsPdf) {
+      const jsPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
+      mainPdfDoc = await PDFDocument.load(jsPdfBytes);
+    } else {
+      mainPdfDoc = await PDFDocument.create();
+    }
     
     // Buscar todas as referências dos itens pesquisados e fazer a juntada física (manuais e públicas)
     if (options.pesquisa) {
@@ -1299,6 +1317,15 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
       }
     }
 
+    if (mainPdfDoc.getPageCount() === 0) {
+      const page = mainPdfDoc.addPage([595.276, 841.89]);
+      page.drawText('Nenhum documento ou conteudo selecionado para impressao.', {
+        x: 50,
+        y: 400,
+        size: 12
+      });
+    }
+
     if (options.numerarRubricar) {
       const pages = mainPdfDoc.getPages();
       const totalMergedPages = pages.length;
@@ -1311,7 +1338,8 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
         } catch(e) { console.error('Falha ao embutir rubrica no pdf-lib', e); }
       }
 
-      for (let i = 2; i < totalMergedPages; i++) {
+      const startIdx = options.projeto ? 2 : 0;
+      for (let i = startIdx; i < totalMergedPages; i++) {
         const page = pages[i];
         const { width, height } = page.getSize();
         
@@ -1332,7 +1360,6 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
       }
     }
 
-
     // Salvar o PDF consolidado com todas as páginas unificadas fisicamente
     const mergedPdfBytes = await mainPdfDoc.save();
     const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
@@ -1349,6 +1376,4 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
     // Fallback: baixar apenas o PDF básico sem anexos para evitar que o usuário fique sem o relatório
     pdf.save(`Projeto_${projeto.titulo.replace(/\s/g, '_')}.pdf`);
   }
-}
-}
 }
