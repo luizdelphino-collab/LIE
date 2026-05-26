@@ -1350,12 +1350,16 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
 
   // ========== CAPACIDADE TÉCNICA E OPERACIONAL (opcional) ==========
   let capacidadeTecnicaStartPage: number | null = null;
-  let capacidadeDocs: { id: string; nome: string; tipo: string; ano: number; orgaoEmitente?: string; arquivoUrl: string }[] = [];
+  let capacidadeDocs: { id: string; nome: string; arquivoUrl: string; arquivoNome?: string; criadoEm?: any; tipo?: string; ano?: number; orgaoEmitente?: string }[] = [];
   if (options.capacidadeTecnica) {
     const capDocsSnap = await getDocs(collection(db, `entities/${projeto.entidadeId}/capacidadeDocumentos`));
     capacidadeDocs = capDocsSnap.docs
       .map(d => ({ id: d.id, ...d.data() } as any))
-      .sort((a, b) => (b.ano || 0) - (a.ano || 0));
+      .sort((a, b) => {
+        const ta = a.criadoEm?.toDate?.().getTime?.() || 0;
+        const tb = b.criadoEm?.toDate?.().getTime?.() || 0;
+        return tb - ta;
+      });
 
     forceNewPage(state);
     capacidadeTecnicaStartPage = (pdf as any).internal.getCurrentPageInfo().pageNumber;
@@ -1380,24 +1384,21 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
       addSubTitle(state, 'Documentos Comprobatórios');
       state.y += 1;
 
-      const tipoLabel = (t: string) => {
-        if (t === 'portfolio') return 'Portfólio';
-        if (t === 'atestado') return 'Atestado';
-        if (t === 'contrato') return 'Contrato Vigente';
-        return 'Outro';
+      const fmtDate = (ts: any) => {
+        if (!ts) return '-';
+        const d = ts.toDate ? ts.toDate() : new Date(ts);
+        return d.toLocaleDateString('pt-BR');
       };
 
       const rows = capacidadeDocs.map((d, i) => [
         toRoman(i + 1),
-        String(d.ano || '-'),
-        tipoLabel(d.tipo),
-        d.nome || '-',
-        d.orgaoEmitente || '-'
+        d.arquivoNome || d.nome || '-',
+        fmtDate(d.criadoEm)
       ]);
 
       autoTable(pdf, {
         startY: state.y,
-        head: [['Nº', 'Ano', 'Tipo', 'Documento', 'Órgão Emitente']],
+        head: [['Nº', 'Documento', 'Enviado em']],
         body: rows,
         margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
         headStyles: { fillColor: cor, textColor: [255, 255, 255] },
@@ -1405,10 +1406,8 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
         styles: { fontSize: 9, textColor: [0, 0, 0] },
         columnStyles: {
           0: { cellWidth: 12, halign: 'center' },
-          1: { cellWidth: 15, halign: 'center' },
-          2: { cellWidth: 28 },
-          3: { cellWidth: 75 },
-          4: { cellWidth: 45 },
+          1: { cellWidth: 130 },
+          2: { cellWidth: 33, halign: 'center' },
         },
         didDrawPage: (data) => {
           if (data.doc.internal.getNumberOfPages() > 1)
@@ -1517,19 +1516,13 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
 
     // Ordem: Comprobatórios da Capacidade Técnica → Documentos da Entidade → Certidões → Pesquisa
     if (options.capacidadeTecnica && capacidadeDocs.length > 0) {
-      const tipoLabel = (t: string) => {
-        if (t === 'portfolio') return 'Portfólio';
-        if (t === 'atestado') return 'Atestado';
-        if (t === 'contrato') return 'Contrato Vigente';
-        return 'Outro';
-      };
       for (const d of capacidadeDocs) {
         const docStartPage = mainPdfDoc.getPageCount() + 1;
         try {
           const bytes = await fetchPdfAsArrayBuffer(d.arquivoUrl);
           if (bytes) {
             await mergePdfBytes(mainPdfDoc, bytes);
-            const label = `  • [${d.ano}] ${tipoLabel(d.tipo)} — ${d.nome}`;
+            const label = `  • ${d.arquivoNome || d.nome}`;
             toc.push({ num: '', title: label, page: docStartPage });
           }
         } catch (e) {

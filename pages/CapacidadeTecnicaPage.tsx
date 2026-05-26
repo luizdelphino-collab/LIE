@@ -6,32 +6,47 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import {
   ArrowLeft, Save, Award, BookOpen, Loader2, CheckCircle2, Plus, FileText,
-  Trash2, Eye, Upload, Briefcase, ScrollText, FileCheck, FileQuestion, Edit3
+  Trash2, Eye, Upload, X, AlertCircle
 } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import type { Entidade } from '../types';
 
-type TipoDocumento = 'portfolio' | 'atestado' | 'contrato' | 'outro';
-
 interface CapacidadeDocumento {
   id: string;
   nome: string;
-  tipo: TipoDocumento;
-  ano: number;
-  orgaoEmitente?: string;
   arquivoUrl: string;
   arquivoNome?: string;
+  tamanho?: number;
   criadoEm?: Timestamp;
+  // Campos legados — exibidos se existirem
+  tipo?: string;
+  ano?: number;
+  orgaoEmitente?: string;
 }
 
-const TIPO_LABELS: Record<TipoDocumento, { label: string; color: string; icon: any }> = {
-  portfolio:  { label: 'Portfólio',           color: 'bg-indigo-100 text-indigo-800 border-indigo-200', icon: Briefcase },
-  atestado:   { label: 'Atestado',            color: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: FileCheck },
-  contrato:   { label: 'Contrato em Vigência', color: 'bg-amber-100 text-amber-800 border-amber-200', icon: ScrollText },
-  outro:      { label: 'Outro',               color: 'bg-gray-100 text-gray-700 border-gray-200', icon: FileQuestion },
-};
+interface UploadItem {
+  id: string;
+  file: File;
+  progress: number;
+  status: 'pending' | 'uploading' | 'done' | 'error';
+  error?: string;
+}
 
-const ANO_ATUAL = new Date().getFullYear();
+const MAX_FILE_MB = 20;
+const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
+
+function formatBytes(bytes: number): string {
+  if (!bytes) return '-';
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(0)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function formatDate(ts?: Timestamp): string {
+  if (!ts) return '-';
+  const d = ts.toDate ? ts.toDate() : new Date(ts as any);
+  return d.toLocaleDateString('pt-BR');
+}
 
 export default function CapacidadeTecnicaPage() {
   const { id } = useParams();
@@ -46,14 +61,10 @@ export default function CapacidadeTecnicaPage() {
   const [capacidadeTecnica, setCapacidadeTecnica] = useState('');
 
   const [documentos, setDocumentos] = useState<CapacidadeDocumento[]>([]);
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [formData, setFormData] = useState<Partial<CapacidadeDocumento>>({
-    nome: '', tipo: 'atestado', ano: ANO_ATUAL, orgaoEmitente: ''
-  });
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [savingDoc, setSavingDoc] = useState(false);
+
+  // Upload em lote
+  const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
+  const [uploadingBatch, setUploadingBatch] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const carregarTudo = async () => {
@@ -80,7 +91,6 @@ export default function CapacidadeTecnicaPage() {
     const snap = await getDocs(collection(db, `entities/${id}/capacidadeDocumentos`));
     const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as CapacidadeDocumento));
     list.sort((a, b) => {
-      if (b.ano !== a.ano) return b.ano - a.ano;
       const ta = a.criadoEm?.toDate?.().getTime?.() || 0;
       const tb = b.criadoEm?.toDate?.().getTime?.() || 0;
       return tb - ta;
@@ -105,89 +115,115 @@ export default function CapacidadeTecnicaPage() {
     }
   };
 
-  const openNew = () => {
-    setEditId(null);
-    setFormData({ nome: '', tipo: 'atestado', ano: ANO_ATUAL, orgaoEmitente: '' });
-    setSelectedFile(null);
-    setUploadProgress(0);
-    setIsFormOpen(true);
+  const handlePickFiles = () => {
+    fileInputRef.current?.click();
   };
 
-  const openEdit = (d: CapacidadeDocumento) => {
-    setEditId(d.id);
-    setFormData({ nome: d.nome, tipo: d.tipo, ano: d.ano, orgaoEmitente: d.orgaoEmitente || '' });
-    setSelectedFile(null);
-    setUploadProgress(0);
-    setIsFormOpen(true);
-  };
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (f.size > 10 * 1024 * 1024) {
-      alert('Arquivo maior que 10MB. Comprima ou divida o documento.');
-      return;
+    const rejected: string[] = [];
+    const accepted: UploadItem[] = [];
+
+    for (const f of files) {
+      if (f.size > MAX_FILE_BYTES) {
+        rejected.push(`${f.name} (${formatBytes(f.size)})`);
+        continue;
+      }
+      accepted.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        file: f,
+        progress: 0,
+        status: 'pending'
+      });
     }
-    setSelectedFile(f);
+
+    if (rejected.length > 0) {
+      alert(`Os seguintes arquivos excedem ${MAX_FILE_MB}MB e foram ignorados:\n\n${rejected.join('\n')}`);
+    }
+
+    if (accepted.length > 0) {
+      setUploadQueue(accepted);
+      // Start upload imediatamente
+      iniciarUploads(accepted);
+    }
+
+    // Limpa input pra permitir selecionar os mesmos arquivos de novo se quiser
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleSubmitDoc = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const iniciarUploads = async (items: UploadItem[]) => {
     if (!id) return;
-    if (!formData.nome || !formData.tipo || !formData.ano) {
-      alert('Preencha nome, tipo e ano.');
-      return;
-    }
-    if (!editId && !selectedFile) {
-      alert('Selecione um arquivo PDF.');
-      return;
-    }
+    setUploadingBatch(true);
 
-    setSavingDoc(true);
-    try {
-      const docId = editId || doc(collection(db, `entities/${id}/capacidadeDocumentos`)).id;
-      let arquivoUrl = documentos.find(d => d.id === editId)?.arquivoUrl || '';
-      let arquivoNome = documentos.find(d => d.id === editId)?.arquivoNome || '';
+    // Upload paralelo de até 3 simultâneos pra não estourar nem ficar lento
+    const CONCURRENT = 3;
+    let cursor = 0;
 
-      if (selectedFile) {
-        const ext = selectedFile.name.split('.').pop();
+    const updateItem = (itemId: string, patch: Partial<UploadItem>) => {
+      setUploadQueue(prev => prev.map(it => it.id === itemId ? { ...it, ...patch } : it));
+    };
+
+    const uploadOne = async (item: UploadItem): Promise<void> => {
+      updateItem(item.id, { status: 'uploading', progress: 0 });
+      try {
+        const docId = doc(collection(db, `entities/${id}/capacidadeDocumentos`)).id;
+        const ext = item.file.name.split('.').pop() || 'pdf';
         const path = `entities/${id}/capacidade_tecnica/${docId}_${Date.now()}.${ext}`;
         const fileRef = ref(storage, path);
-        const task = uploadBytesResumable(fileRef, selectedFile);
+        const task = uploadBytesResumable(fileRef, item.file);
+
         await new Promise<void>((resolve, reject) => {
           task.on('state_changed',
-            (s) => setUploadProgress((s.bytesTransferred / s.totalBytes) * 100),
-            reject,
+            (s) => {
+              const pct = (s.bytesTransferred / s.totalBytes) * 100;
+              updateItem(item.id, { progress: pct });
+            },
+            (err) => reject(err),
             async () => {
-              arquivoUrl = await getDownloadURL(task.snapshot.ref);
-              arquivoNome = selectedFile.name;
-              resolve();
+              try {
+                const url = await getDownloadURL(task.snapshot.ref);
+                await setDoc(doc(db, `entities/${id}/capacidadeDocumentos`, docId), {
+                  id: docId,
+                  nome: item.file.name.replace(/\.[^.]+$/, ''),
+                  arquivoUrl: url,
+                  arquivoNome: item.file.name,
+                  tamanho: item.file.size,
+                  criadoEm: serverTimestamp()
+                });
+                updateItem(item.id, { status: 'done', progress: 100 });
+                resolve();
+              } catch (e) {
+                reject(e);
+              }
             }
           );
         });
+      } catch (err: any) {
+        console.error('Erro no upload:', item.file.name, err);
+        updateItem(item.id, { status: 'error', error: err?.message || 'Falha' });
       }
+    };
 
-      const payload: any = {
-        id: docId,
-        nome: formData.nome,
-        tipo: formData.tipo,
-        ano: Number(formData.ano),
-        orgaoEmitente: formData.orgaoEmitente || '',
-        arquivoUrl,
-        arquivoNome
-      };
-      if (!editId) payload.criadoEm = serverTimestamp();
-
-      await setDoc(doc(db, `entities/${id}/capacidadeDocumentos`, docId), payload, { merge: true });
-
-      setIsFormOpen(false);
-      await carregarDocumentos();
-    } catch (err: any) {
-      alert(`Erro ao salvar documento: ${err?.message || err}`);
-    } finally {
-      setSavingDoc(false);
-      setUploadProgress(0);
+    const runners: Promise<void>[] = [];
+    const runNext = async (): Promise<void> => {
+      while (cursor < items.length) {
+        const i = cursor++;
+        await uploadOne(items[i]);
+      }
+    };
+    for (let k = 0; k < Math.min(CONCURRENT, items.length); k++) {
+      runners.push(runNext());
     }
+    await Promise.all(runners);
+
+    setUploadingBatch(false);
+    await carregarDocumentos();
+  };
+
+  const limparQueue = () => {
+    setUploadQueue([]);
   };
 
   const handleExcluirDoc = async (d: CapacidadeDocumento) => {
@@ -210,6 +246,12 @@ export default function CapacidadeTecnicaPage() {
       </div>
     );
   }
+
+  const totalProgress = uploadQueue.length === 0
+    ? 0
+    : uploadQueue.reduce((acc, it) => acc + it.progress, 0) / uploadQueue.length;
+  const concluidos = uploadQueue.filter(it => it.status === 'done').length;
+  const comErro = uploadQueue.filter(it => it.status === 'error').length;
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -235,8 +277,8 @@ export default function CapacidadeTecnicaPage() {
         <p>
           <strong>Por que cadastrar isso?</strong> Os textos e os <strong>documentos comprobatórios</strong>
           (portfólios, atestados de capacidade técnica emitidos por governos, contratos em vigência, etc.)
-          são impressos como uma seção dedicada do consolidado do projeto. Eles comprovam ao parecerista a
-          experiência institucional e a capacidade da entidade pra executar o projeto.
+          são impressos como uma seção dedicada do consolidado do projeto, comprovando ao parecerista
+          a experiência institucional e a capacidade da entidade pra executar o projeto.
         </p>
       </div>
 
@@ -301,7 +343,7 @@ export default function CapacidadeTecnicaPage() {
 
       {/* ===== DOCUMENTOS COMPROBATÓRIOS ===== */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="font-bold text-lie-ink flex items-center gap-2">
               <FileText className="w-5 h-5 text-amber-600" />
@@ -311,174 +353,149 @@ export default function CapacidadeTecnicaPage() {
               )}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Ordenados por ano (mais recentes primeiro). PDF, até 10MB cada.
+              Selecione um ou vários PDFs (até {MAX_FILE_MB}MB cada). Upload em lote com progresso individual.
             </p>
           </div>
-          {!isFormOpen && (
-            <button
-              onClick={openNew}
-              className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-lg font-bold hover:bg-amber-600 transition shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              Adicionar Documento
-            </button>
-          )}
+          <button
+            onClick={handlePickFiles}
+            disabled={uploadingBatch}
+            className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-lg font-bold hover:bg-amber-600 transition shadow-sm disabled:opacity-50"
+          >
+            {uploadingBatch ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {uploadingBatch ? 'Enviando…' : 'Adicionar Documentos'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            multiple
+            className="hidden"
+            onChange={handleFilesSelected}
+          />
         </div>
 
-        {isFormOpen && (
-          <form onSubmit={handleSubmitDoc} className="p-5 bg-amber-50/40 border-b border-amber-100 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-gray-700 mb-1">Nome do Documento *</label>
-                <input
-                  type="text" required
-                  value={formData.nome || ''}
-                  onChange={(e) => setFormData(p => ({ ...p, nome: e.target.value }))}
-                  placeholder="Ex.: Atestado de Capacidade Técnica - Prefeitura de São Paulo"
-                  className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-lie-green focus:border-lie-green"
-                />
+        {/* Fila de upload */}
+        {uploadQueue.length > 0 && (
+          <div className="p-4 bg-amber-50/40 border-b border-amber-100">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs font-bold text-amber-900">
+                {uploadingBatch
+                  ? `Enviando ${concluidos} de ${uploadQueue.length}…`
+                  : `Concluído: ${concluidos} enviado(s)${comErro > 0 ? `, ${comErro} com erro` : ''}`
+                }
               </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Tipo *</label>
-                <select
-                  required
-                  value={formData.tipo}
-                  onChange={(e) => setFormData(p => ({ ...p, tipo: e.target.value as TipoDocumento }))}
-                  className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-lie-green focus:border-lie-green"
+              {!uploadingBatch && (
+                <button
+                  onClick={limparQueue}
+                  className="text-xs font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1"
                 >
-                  <option value="portfolio">Portfólio</option>
-                  <option value="atestado">Atestado de Capacidade</option>
-                  <option value="contrato">Contrato em Vigência</option>
-                  <option value="outro">Outro</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Ano *</label>
-                <input
-                  type="number" required
-                  min={1950} max={ANO_ATUAL + 1}
-                  value={formData.ano || ANO_ATUAL}
-                  onChange={(e) => setFormData(p => ({ ...p, ano: Number(e.target.value) }))}
-                  className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-lie-green focus:border-lie-green"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-gray-700 mb-1">Órgão Emitente / Contratante</label>
-                <input
-                  type="text"
-                  value={formData.orgaoEmitente || ''}
-                  onChange={(e) => setFormData(p => ({ ...p, orgaoEmitente: e.target.value }))}
-                  placeholder="Ex.: Secretaria Municipal de Esportes"
-                  className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-lie-green focus:border-lie-green"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-gray-700 mb-1">
-                  Arquivo PDF {editId ? '(opcional: selecione para substituir)' : '*'}
-                </label>
+                  <X className="w-3.5 h-3.5" />
+                  Limpar fila
+                </button>
+              )}
+            </div>
+
+            {/* Barra global */}
+            <div className="mb-3">
+              <div className="w-full bg-amber-100 rounded-full h-2 overflow-hidden">
                 <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex items-center justify-center gap-2 cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition text-sm text-gray-500"
-                >
-                  <Upload className="w-4 h-4" />
-                  {selectedFile ? <span className="font-bold text-amber-700">{selectedFile.name}</span> : 'Clique para selecionar (PDF, até 10MB)'}
-                </div>
-                <input
-                  ref={fileInputRef} type="file" accept="application/pdf"
-                  className="hidden" onChange={handleFileChange}
+                  className="bg-amber-500 h-full transition-all"
+                  style={{ width: `${totalProgress}%` }}
                 />
-                {uploadProgress > 0 && uploadProgress < 100 && (
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2 overflow-hidden">
-                    <div className="bg-amber-500 h-full transition-all" style={{ width: `${uploadProgress}%` }} />
-                  </div>
-                )}
+              </div>
+              <div className="text-[10px] text-amber-700 text-right mt-0.5 font-mono">
+                {totalProgress.toFixed(0)}% geral
               </div>
             </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-amber-200">
-              <button
-                type="button"
-                onClick={() => { setIsFormOpen(false); setEditId(null); }}
-                className="px-4 py-2 text-gray-600 hover:bg-gray-100 font-bold rounded-lg transition"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit" disabled={savingDoc}
-                className="px-5 py-2 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 transition flex items-center gap-2 disabled:opacity-50"
-              >
-                {savingDoc ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {savingDoc ? 'Salvando…' : (editId ? 'Atualizar' : 'Adicionar')}
-              </button>
+
+            {/* Por arquivo */}
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {uploadQueue.map(it => (
+                <div key={it.id} className="bg-white border border-amber-200 rounded-lg p-2.5">
+                  <div className="flex items-center justify-between mb-1 gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {it.status === 'done' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />}
+                      {it.status === 'uploading' && <Loader2 className="w-4 h-4 text-amber-600 animate-spin shrink-0" />}
+                      {it.status === 'pending' && <Upload className="w-4 h-4 text-gray-400 shrink-0" />}
+                      {it.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />}
+                      <span className="text-xs font-bold text-gray-800 truncate">{it.file.name}</span>
+                      <span className="text-[10px] text-gray-500 shrink-0">{formatBytes(it.file.size)}</span>
+                    </div>
+                    <span className={`text-[10px] font-mono shrink-0 ${
+                      it.status === 'done' ? 'text-green-700' :
+                      it.status === 'error' ? 'text-red-700' :
+                      'text-amber-700'
+                    }`}>
+                      {it.status === 'error' ? 'erro' : `${it.progress.toFixed(0)}%`}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${
+                        it.status === 'done' ? 'bg-green-500' :
+                        it.status === 'error' ? 'bg-red-500' :
+                        'bg-amber-500'
+                      }`}
+                      style={{ width: `${it.progress}%` }}
+                    />
+                  </div>
+                  {it.error && (
+                    <p className="text-[10px] text-red-700 mt-1">{it.error}</p>
+                  )}
+                </div>
+              ))}
             </div>
-          </form>
+          </div>
         )}
 
-        {documentos.length === 0 && !isFormOpen ? (
+        {documentos.length === 0 ? (
           <div className="p-10 text-center text-gray-400">
             <FileText className="w-10 h-10 mx-auto mb-2 text-gray-300" />
-            <p className="text-sm italic">Nenhum documento comprobatório cadastrado.</p>
+            <p className="text-sm italic">Nenhum documento comprobatório enviado.</p>
             <button
-              onClick={openNew}
+              onClick={handlePickFiles}
               className="mt-3 text-amber-600 font-bold text-sm hover:underline"
             >
-              Adicionar o primeiro
+              Selecionar arquivos…
             </button>
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {documentos.map(d => {
-              const t = TIPO_LABELS[d.tipo];
-              const Icon = t.icon;
-              return (
-                <div key={d.id} className="p-4 flex items-start gap-3 hover:bg-gray-50 transition">
-                  <div className={`p-2 rounded-lg ${t.color} border shrink-0`}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-lie-ink">{d.nome}</span>
-                      <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${t.color} border`}>
-                        {t.label}
-                      </span>
-                      <span className="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-0.5 rounded">
-                        {d.ano}
-                      </span>
-                    </div>
-                    {d.orgaoEmitente && (
-                      <p className="text-xs text-gray-600 mt-1">{d.orgaoEmitente}</p>
-                    )}
-                    {d.arquivoNome && (
-                      <p className="text-[11px] text-gray-400 mt-0.5 truncate">{d.arquivoNome}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {d.arquivoUrl && (
-                      <a
-                        href={d.arquivoUrl} target="_blank" rel="noopener noreferrer"
-                        title="Visualizar"
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded transition"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </a>
-                    )}
-                    <button
-                      onClick={() => openEdit(d)}
-                      title="Editar"
-                      className="p-2 text-gray-500 hover:bg-gray-100 rounded transition"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleExcluirDoc(d)}
-                      title="Excluir"
-                      className="p-2 text-red-500 hover:bg-red-50 rounded transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+            {documentos.map(d => (
+              <div key={d.id} className="p-4 flex items-start gap-3 hover:bg-gray-50 transition">
+                <div className="p-2 rounded-lg bg-amber-100 text-amber-700 border border-amber-200 shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-lie-ink truncate">{d.arquivoNome || d.nome}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                    {d.criadoEm && <span>Enviado em {formatDate(d.criadoEm)}</span>}
+                    {d.tamanho && <span>• {formatBytes(d.tamanho)}</span>}
+                    {d.tipo && <span>• {d.tipo}</span>}
+                    {d.ano && <span>• {d.ano}</span>}
+                    {d.orgaoEmitente && <span>• {d.orgaoEmitente}</span>}
                   </div>
                 </div>
-              );
-            })}
+                <div className="flex items-center gap-1 shrink-0">
+                  {d.arquivoUrl && (
+                    <a
+                      href={d.arquivoUrl} target="_blank" rel="noopener noreferrer"
+                      title="Visualizar"
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded transition"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </a>
+                  )}
+                  <button
+                    onClick={() => handleExcluirDoc(d)}
+                    title="Excluir"
+                    className="p-2 text-red-500 hover:bg-red-50 rounded transition"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
