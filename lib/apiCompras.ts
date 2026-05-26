@@ -3,6 +3,17 @@
 // =============================================================================
 
 import { PrecoReferencia } from '../types';
+import { storage } from './firebase';
+
+function consultarPrecosComprasUrl(codigoItemCatalogo: number, pagina = 1, tamanhoPagina = 100): string {
+  const projectId = storage.app.options.projectId;
+  const params = new URLSearchParams({
+    codigoItemCatalogo: String(codigoItemCatalogo),
+    pagina: String(pagina),
+    tamanhoPagina: String(tamanhoPagina)
+  });
+  return `https://us-central1-${projectId}.cloudfunctions.net/consultarPrecosCompras?${params}`;
+}
 
 export interface GovernmentMaterial {
   codigoItem: number;
@@ -174,16 +185,12 @@ export function obterDetalheMaterialPorCodigo(codigo: number, termoFallback?: st
 }
 
 // 2. Consulta de Preços Praticados no Compras.gov.br com fallback resiliente para offline/timeouts
+// Passa pela Cloud Function 'consultarPrecosCompras' pra contornar o CORS bloqueado pela API gov.
 export async function consultarPrecosPraticados(codigoItemCatalogo: number, valorUnitarioEstimado?: number): Promise<PrecoReferencia[]> {
-  const url = `https://dadosabertos.compras.gov.br/modulo-pesquisa-preco/1_consultarMaterial?pagina=1&tamanhoPagina=100&codigoItemCatalogo=${codigoItemCatalogo}`;
-  
+  const url = consultarPrecosComprasUrl(codigoItemCatalogo);
+
   try {
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-      }
-    });
+    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
 
     if (response.ok) {
       const data = await response.json();
@@ -201,12 +208,14 @@ export async function consultarPrecosPraticados(codigoItemCatalogo: number, valo
           localizacaoUrl: r.linkProcesso || `https://pncp.gov.br/app/contratacoes?q=${r.uasg || '180001'}`
         }));
       }
+    } else {
+      console.warn(`Cloud Function consultarPrecosCompras retornou HTTP ${response.status}, usando fallback.`);
     }
   } catch (err) {
-    console.warn("API pública inoperante ou timeout de rede, aplicando cotações de fallback seguras:", err);
+    console.warn("Proxy de pesquisa de preços inoperante, aplicando cotações de fallback seguras:", err);
   }
 
-  // Fallback Resiliente (Dados Reais e Plausíveis simulados baseados no valor estimado)
+  // Fallback Resiliente (dados plausíveis baseados no valor estimado)
   return gerarPrecosFallback(codigoItemCatalogo, valorUnitarioEstimado);
 }
 

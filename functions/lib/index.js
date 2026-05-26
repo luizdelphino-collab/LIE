@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
+exports.consultarPrecosCompras = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const puppeteer = require("puppeteer");
@@ -183,6 +183,70 @@ exports.downloadStorageFile = functions
     catch (e) {
         console.error('Erro ao servir arquivo:', path, e);
         res.status(500).json({ error: 'Erro interno: ' + (e?.message || e) });
+    }
+});
+/**
+ * Proxy para a API pública de Pesquisa de Preços do Compras.gov.br.
+ *
+ * Por quê: a API governamental (dadosabertos.compras.gov.br) não envia
+ * headers CORS, então o browser bloqueia chamadas diretas do nosso
+ * frontend. Essa function roda server-side (sem CORS), consulta a API
+ * e devolve o JSON com headers CORS abertos pro nosso domínio.
+ *
+ * Uso:
+ *   GET https://us-central1-lie-projetos.cloudfunctions.net/consultarPrecosCompras?codigoItemCatalogo=601221
+ *
+ * Aceita opcionalmente: pagina (default 1), tamanhoPagina (default 100).
+ */
+exports.consultarPrecosCompras = functions
+    .runWith({ timeoutSeconds: 60, memory: '512MB' })
+    .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Vary', 'Origin');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'GET') {
+        res.status(405).json({ error: 'Apenas GET é suportado.' });
+        return;
+    }
+    const codigoItemCatalogo = String(req.query.codigoItemCatalogo || '').trim();
+    if (!codigoItemCatalogo || !/^\d+$/.test(codigoItemCatalogo)) {
+        res.status(400).json({ error: 'Query param "codigoItemCatalogo" obrigatório e numérico.' });
+        return;
+    }
+    const pagina = String(req.query.pagina || '1');
+    const tamanhoPagina = String(req.query.tamanhoPagina || '100');
+    const upstreamUrl = `https://dadosabertos.compras.gov.br/modulo-pesquisa-preco/1_consultarMaterial?pagina=${encodeURIComponent(pagina)}&tamanhoPagina=${encodeURIComponent(tamanhoPagina)}&codigoItemCatalogo=${encodeURIComponent(codigoItemCatalogo)}`;
+    try {
+        const upstreamResp = await fetch(upstreamUrl, {
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
+            }
+        });
+        const text = await upstreamResp.text();
+        // Cache curto no CDN — preços não mudam minuto a minuto
+        res.set('Cache-Control', 'public, max-age=600');
+        res.status(upstreamResp.status);
+        try {
+            res.json(JSON.parse(text));
+        }
+        catch {
+            res.set('Content-Type', upstreamResp.headers.get('content-type') || 'text/plain');
+            res.send(text);
+        }
+    }
+    catch (e) {
+        console.error('Falha ao consultar API Compras.gov.br:', e);
+        res.status(502).json({
+            error: 'Falha ao consultar a API pública.',
+            detail: e?.message || String(e)
+        });
     }
 });
 //# sourceMappingURL=index.js.map
