@@ -1,11 +1,15 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
-import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
 import type { Projeto, Entidade, ItemProjeto } from '../types';
 import { PDFDocument } from 'pdf-lib';
 import { obterDetalheMaterialPorCodigo } from './apiCompras';
+
+function downloadStorageFileUrl(path: string): string {
+  const projectId = storage.app.options.projectId;
+  return `https://us-central1-${projectId}.cloudfunctions.net/downloadStorageFile?path=${encodeURIComponent(path)}`;
+}
 
 const MARGIN_LEFT = 20;
 const MARGIN_RIGHT = 15;
@@ -58,13 +62,6 @@ function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, numb
     Math.round(rgb[2] + (255 - rgb[2]) * amount),
   ];
 }
-const withTimeout = <T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> => {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
-  ]);
-};
-
 /** Extrai o path interno (entities/.../doc.pdf) de uma URL do Firebase Storage. */
 function storagePathFromUrl(url: string): string | null {
   if (!url.includes('firebasestorage.googleapis.com')) return null;
@@ -81,61 +78,33 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-/** Baixa imagem como dataURL. Usa SEMPRE getBlob nativo do Firebase Storage
- *  pra URLs do nosso bucket — depende do CORS configurado em cors.json
- *  (apply via `gsutil cors set cors.json gs://lie-projetos.firebasestorage.app`).
- *  Fetch direto só pra URLs externas (data:, http externos com CORS open). */
 async function fetchImageAsBase64(url: string): Promise<string | null> {
   if (!url) return null;
   if (url.startsWith('data:')) return url;
 
   const path = storagePathFromUrl(url);
-  if (path) {
-    try {
-      const blob = await getBlob(ref(storage, path));
-      return await blobToDataUrl(blob);
-    } catch (e) {
-      console.error(`Falha ao baixar imagem do Storage (${path}). CORS configurado? Veja cors.json:`, e);
-      return null;
-    }
-  }
+  const fetchUrl = path ? downloadStorageFileUrl(path) : url;
 
-  // URL externa (não-Firebase) — fetch simples
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(fetchUrl);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     return await blobToDataUrl(await resp.blob());
   } catch (e) {
-    console.error('Falha ao baixar imagem externa:', url, e);
+    console.error('Falha ao baixar imagem:', url, e);
     return null;
   }
 }
 
-/** Baixa PDF como ArrayBuffer. Mesma lógica: getBlob nativo pra Firebase
- *  Storage (precisa CORS configurado), fetch pra URLs externas. */
 async function fetchPdfAsArrayBuffer(url: string): Promise<ArrayBuffer> {
   const path = storagePathFromUrl(url);
-  if (path) {
-    try {
-      const blob = await getBlob(ref(storage, path));
-      return await blob.arrayBuffer();
-    } catch (e: any) {
-      throw new Error(
-        `Falha ao baixar PDF do Storage (${path}). ` +
-        `Verifique se o CORS está aplicado no bucket: aplique cors.json ` +
-        `via 'gsutil cors set cors.json gs://lie-projetos.firebasestorage.app'. ` +
-        `Erro original: ${e?.message || e}`
-      );
-    }
-  }
+  const fetchUrl = path ? downloadStorageFileUrl(path) : url;
 
-  // URL externa
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(fetchUrl);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     return await resp.arrayBuffer();
   } catch (e: any) {
-    throw new Error(`Falha ao baixar PDF externo (${url}): ${e?.message || e}`);
+    throw new Error(`Falha ao baixar PDF (${url}): ${e?.message || e}`);
   }
 }
 
@@ -1295,7 +1264,7 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
       let rubricaImage = null;
       if (rubricaUrl) {
         try {
-          const imgBytes = await fetch(rubricaUrl).then(res => res.arrayBuffer());
+          const imgBytes = await fetchPdfAsArrayBuffer(rubricaUrl);
           rubricaImage = await mainPdfDoc.embedPng(imgBytes);
         } catch(e) { console.error('Falha ao embutir rubrica no pdf-lib', e); }
       }

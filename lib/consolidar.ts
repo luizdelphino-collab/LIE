@@ -1,9 +1,13 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
-import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
 import type { Entidade } from '../types';
+
+function downloadStorageFileUrl(path: string): string {
+  const projectId = storage.app.options.projectId;
+  return `https://us-central1-${projectId}.cloudfunctions.net/downloadStorageFile?path=${encodeURIComponent(path)}`;
+}
 
 interface DocItem {
   nome: string;
@@ -82,10 +86,6 @@ function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, numb
   ];
 }
 
-/** Baixa imagem como dataURL. Pra URLs do Firebase Storage usa getBlob
- *  nativo (depende do CORS configurado em cors.json). Pra URLs externas,
- *  fetch direto. Sem gambiarra de proxy — se CORS não estiver no bucket,
- *  nenhum proxy resolve mesmo (testado: corsproxy.io/AllOrigins falham). */
 async function fetchImageAsBase64(url: string): Promise<string | null> {
   if (!url) return null;
   if (url.startsWith('data:')) return url;
@@ -97,28 +97,19 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
     reader.readAsDataURL(blob);
   });
 
-  // Firebase Storage → SDK nativo (precisa CORS configurado no bucket).
+  let fetchUrl = url;
   if (url.includes('firebasestorage.googleapis.com')) {
     const match = url.match(/\/o\/([^?]+)/);
     const path = match ? decodeURIComponent(match[1]) : null;
-    if (path) {
-      try {
-        const blob = await getBlob(ref(storage, path));
-        return await toDataUrl(blob);
-      } catch (e) {
-        console.error(`Falha ao baixar imagem do Storage (${path}). CORS configurado? Veja cors.json:`, e);
-        return null;
-      }
-    }
+    if (path) fetchUrl = downloadStorageFileUrl(path);
   }
 
-  // URL externa.
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(fetchUrl);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     return await toDataUrl(await resp.blob());
   } catch (e) {
-    console.error('Falha ao baixar imagem externa:', url, e);
+    console.error('Falha ao baixar imagem:', url, e);
     return null;
   }
 }

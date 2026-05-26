@@ -87,3 +87,116 @@ export const obterPdfContratacaoPublica = functions
       await browser.close();
     }
   });
+
+/**
+ * Proxy de download para arquivos do Firebase Storage.
+ *
+ * Por quê: o bucket lie-projetos.firebasestorage.app não tem CORS
+ * configurado, e o frontend (projetos.lie.com.br) precisa baixar PDFs
+ * e imagens pra montar o PDF consolidado. Tentamos gsutil cors set,
+ * mas é setup manual que não foi feito. Em vez disso, esta function
+ * baixa o arquivo via Admin SDK (zero CORS no server) e retorna o
+ * binário com headers CORS abertos pro nosso domínio.
+ *
+ * Uso:
+ *   GET https://us-central1-lie-projetos.cloudfunctions.net/downloadStorageFile?path=entities/abc/doc.pdf
+ *
+ * Segurança: aceita apenas paths que começam com pastas conhecidas
+ * (entities/, logos/, projects/, public_quote_pdfs/) pra evitar
+ * exposição arbitrária de arquivos do bucket.
+ */
+const ALLOWED_PATH_PREFIXES = [
+  'entities/',
+  'logos/',
+  'projects/',
+  'public_quote_pdfs/',
+];
+
+const ALLOWED_ORIGINS = [
+  'https://projetos.lie.com.br',
+  'https://lie-projetos.web.app',
+  'https://lie-projetos.firebaseapp.com',
+  'http://localhost:5173',
+  'http://localhost:5000',
+  'http://127.0.0.1:5173',
+];
+
+function pickAllowedOrigin(reqOrigin: string | undefined): string {
+  if (reqOrigin && ALLOWED_ORIGINS.includes(reqOrigin)) return reqOrigin;
+  // Em produção retornamos o domínio principal (não wildcard) pra
+  // permitir credenciais futuras se necessário.
+  return ALLOWED_ORIGINS[0];
+}
+
+export const downloadStorageFile = functions
+  .runWith({ timeoutSeconds: 60, memory: '512MB' })
+  .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin as string | undefined);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Vary', 'Origin');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'Apenas GET é suportado.' });
+      return;
+    }
+
+    let path = String(req.query.path || '').trim();
+    if (!path) {
+      res.status(400).json({ error: 'Query param "path" é obrigatório.' });
+      return;
+    }
+
+    // Aceita também URLs completas do Storage — extrai o path interno.
+    const urlMatch = path.match(/\/o\/([^?]+)/);
+    if (urlMatch) {
+      path = decodeURIComponent(urlMatch[1]);
+    }
+
+    // Segurança: só serve de pastas conhecidas.
+    const allowed = ALLOWED_PATH_PREFIXES.some(p => path.startsWith(p));
+    if (!allowed) {
+      res.status(403).json({
+        error: 'Path não permitido. Aceitos: ' + ALLOWED_PATH_PREFIXES.join(', '),
+      });
+      return;
+    }
+
+    try {
+      const file = admin.storage().bucket().file(path);
+      const [exists] = await file.exists();
+      if (!exists) {
+        res.status(404).json({ error: 'Arquivo não encontrado: ' + path });
+        return;
+      }
+
+      const [metadata] = await file.getMetadata();
+      const contentType = metadata.contentType || 'application/octet-stream';
+      const size = metadata.size ? Number(metadata.size) : undefined;
+
+      res.set('Content-Type', contentType);
+      if (size) res.set('Content-Length', String(size));
+      // Cache 1h no browser + CDN (arquivos do Storage raramente mudam).
+      res.set('Cache-Control', 'public, max-age=3600');
+
+      file.createReadStream()
+        .on('error', (err) => {
+          console.error('Erro no stream do arquivo:', path, err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Erro ao ler arquivo: ' + err.message });
+          } else {
+            res.end();
+          }
+        })
+        .pipe(res);
+    } catch (e: any) {
+      console.error('Erro ao servir arquivo:', path, e);
+      res.status(500).json({ error: 'Erro interno: ' + (e?.message || e) });
+    }
+  });
