@@ -97,6 +97,13 @@ service cloud.firestore {
       allow write: if hasRole('admin');
     }
 
+    // --- VALIDAÇÃO PÚBLICA DE COTAÇÕES (IN 65/2021) ---
+    match /cotacoesValidadoras/{token} {
+      allow read: if true; // Acesso público para auditoria
+      allow create, update: if isAuthenticated();
+      allow delete: if hasRole('admin');
+    }
+
     // --- ENTIDADES ---
     match /entities/{entityId} {
       allow read: if isAuthenticated();

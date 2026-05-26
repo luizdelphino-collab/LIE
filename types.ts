@@ -316,6 +316,19 @@ export interface ItemMaster {
   criadoEm: Timestamp;
 }
 
+export interface PrecoReferencia {
+  orgaoLicitante: string;
+  uasg?: string;
+  identificadorCompra: string;
+  dataHomologacao: string;
+  quantidade?: number;
+  unidadeMedida?: string;
+  valorUnitario: number;
+  fonte: 'compras.gov.br' | 'pncp' | 'fomento' | 'manual';
+  localizacaoUrl: string; // Para manual/fomento, é a URL de upload no Firebase Storage
+  arquivoNome?: string;
+}
+
 export interface ItemProjeto {
   id: string;
   projectId: string;
@@ -330,6 +343,14 @@ export interface ItemProjeto {
   ordem?: number;
   fornecedoresIds?: string[]; // IDs dos fornecedores vinculados ao item na execução
   criadoEm: Timestamp;
+
+  // Campos de Pesquisa de Preço Público (IN 65/2021)
+  pesquisado?: boolean;
+  ultimoCodigoVinculado?: number;
+  referencias?: PrecoReferencia[];
+  mediaReferencia?: number;
+  medianaReferencia?: number;
+  tokenPesquisa?: string; // Token neutro único para validação pública
 }
 
 export interface CronogramaItem {

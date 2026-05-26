@@ -22,6 +22,7 @@ import EntidadeDocumentosPage from './pages/EntidadeDocumentosPage';
 import DirigentesPage from './pages/DirigentesPage';
 import DirigenteFormPage from './pages/DirigenteFormPage';
 import UsuariosPage from './pages/UsuariosPage';
+import ValidarCotacaoPage from './pages/ValidarCotacaoPage';
 
 function ProtectedRoutes() {
   const { fbUser, loading } = useAuth();
@@ -48,6 +49,7 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
+        <Route path="/validar" element={<ValidarCotacaoPage />} />
         <Route element={<ProtectedRoutes />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/projetos" element={<ProjetosPage />} />

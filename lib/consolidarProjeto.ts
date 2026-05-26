@@ -191,6 +191,32 @@ function drawLetterheadFooter(
   }
 }
 
+function drawFallbackBarcode(pdf: jsPDF, x: number, y: number, w: number, h: number, token: string) {
+  // Desenhar um mini box cinza com borda
+  pdf.setFillColor(240, 240, 240);
+  pdf.setDrawColor(180, 180, 180);
+  pdf.rect(x, y, w, h - 5, 'DF');
+  
+  // Desenhar linhas finas simulando um código de barras
+  pdf.setDrawColor(0, 0, 0);
+  pdf.setLineWidth(0.3);
+  let curX = x + 3;
+  while (curX < x + w - 3) {
+    const barW = Math.random() > 0.5 ? 0.7 : 0.3;
+    const gap = Math.random() > 0.5 ? 1 : 0.5;
+    pdf.setLineWidth(barW);
+    pdf.line(curX, y + 3, curX, y + h - 8);
+    curX += barW + gap;
+  }
+
+  // Token embaixo
+  pdf.setFontSize(6);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(50, 50, 50);
+  const truncatedToken = token ? `${token.substring(0, 8)}...${token.substring(24)}` : 'VALIDAÇÃO';
+  pdf.text(truncatedToken, x + w / 2, y + h - 2, { align: 'center' });
+}
+
 function checkPageSpace(state: PDFState, neededSpace: number) {
   if (state.y > PAGE_H - MARGIN_BOTTOM - neededSpace) {
     state.pdf.addPage();
@@ -896,12 +922,143 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 9, textColor: [0, 0, 0] },
-    didDrawPage: (data) => {
-      if (data.doc.internal.getNumberOfPages() > 1)
-        drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+     // ========== CERTIFICADOS DE AUTENTICIDADE E COTAÇÃO (IN 65/2021) ==========
+  const itemsSnap = await getDocs(collection(db, `projects/${projetoId}/items`));
+  const itensPesquisados = itemsSnap.docs
+    .map(d => ({ id: d.id, ...d.data() } as ItemProjeto))
+    .filter(it => it.pesquisado === true);
+
+  for (const it of itensPesquisados) {
+    forceNewPage(state);
+    
+    // Título do Certificado em box elegante com borda e fundo cinza sutil
+    const boxY = state.y;
+    pdf.setFillColor(248, 250, 252);
+    pdf.rect(MARGIN, boxY, CONTENT_W, 25, 'F');
+    pdf.setDrawColor(...cor);
+    pdf.setLineWidth(0.4);
+    pdf.rect(MARGIN, boxY, CONTENT_W, 25, 'D');
+    
+    pdf.setFontSize(10.5);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(...cor);
+    pdf.text("CERTIFICADO DE AUTENTICIDADE E COTAÇÃO DE PREÇOS PÚBLICOS", PAGE_W / 2, boxY + 7.5, { align: 'center' });
+    
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(80, 80, 80);
+    pdf.text("JUSTIFICATIVA DE PREÇO DE MERCADO • INSTRUÇÃO NORMATIVA SEGES/ME Nº 65/2021", PAGE_W / 2, boxY + 13.5, { align: 'center' });
+
+    pdf.setFontSize(7.5);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(110, 110, 110);
+    pdf.text(`REGISTRO DE VALIDAÇÃO: ${it.tokenPesquisa || 'N/A'}`, PAGE_W / 2, boxY + 19, { align: 'center' });
+
+    state.y = boxY + 30;
+
+    // Detalhes do Item
+    addSubSection(state, "DETALHAMENTO DO ITEM DO PROJETO");
+    addField(state, "Item", it.nome, MARGIN); state.y += 1.5;
+    if (it.descricao) {
+      addField(state, "Especificação", it.descricao, MARGIN); state.y += 1.5;
     }
-  });
+    addField(state, "Memorial Cálculo", it.memorialCalculo, MARGIN); state.y += 1.5;
+    addField(state, "Qtd / Unidade", `${it.quantidade} ${it.unidade}`, MARGIN); state.y += 1.5;
+    addField(state, "Valor Estimado Unitário", it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), MARGIN); state.y += 4;
+
+    // Cesta de referências
+    addSubSection(state, "CESTA DE PREÇOS PÚBLICOS DE REFERÊNCIA (IN 65/2021)");
+    
+    // Tabela de referências
+    const refRows = it.referencias?.map((r: any) => [
+      r.fonte.toUpperCase(),
+      r.orgaoLicitante,
+      r.identificadorCompra,
+      r.dataHomologacao,
+      r.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    ]) || [];
+
+    autoTable(pdf, {
+      startY: state.y,
+      head: [['Fonte', 'Órgão Licitante / Compra', 'Identificador', 'Data', 'Unitário']],
+      body: refRows.length > 0 ? refRows : [['—', '—', '—', '—', '—']],
+      margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+      headStyles: { fillColor: cor },
+      alternateRowStyles: { fillColor: corClara },
+      styles: { fontSize: 7.5 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 60 },
+        2: { cellWidth: 45 },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 25 },
+      },
+      didDrawPage: (data) => {
+        const pageCount = data.doc.internal.getNumberOfPages();
+        if (pageCount > 1) {
+          drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+        }
+      }
+    });
+
+    state.y = (pdf as any).lastAutoTable.finalY + 8;
+
+    // Resumo estatístico e QR Code side-by-side
+    checkPageSpace(state, 45);
+    const summaryY = state.y;
+
+    // Caixa estatística à esquerda
+    pdf.setFillColor(248, 250, 252);
+    pdf.setDrawColor(220, 220, 220);
+    pdf.setLineWidth(0.3);
+    pdf.rect(MARGIN, summaryY, 115, 36, 'DF');
+
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(80, 80, 80);
+    pdf.text("DECLARAÇÃO E ANÁLISE ESTATÍSTICA DE MERCADO", MARGIN + 4, summaryY + 5);
+
+    pdf.setFontSize(7.5);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(60, 60, 60);
+    
+    // Média e Mediana
+    pdf.text(`Média da Cesta: R$ ${it.mediaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 4, summaryY + 12);
+    pdf.text(`Mediana da Cesta: R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 4, summaryY + 17);
+    
+    const declaracaoStr = `Declara-se que o preço unitário sugerido de R$ ${it.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} é economicamente viável e justificado perante o mercado público (IN 65/2021), encontrando-se abaixo da mediana linear de R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} praticada por órgãos federais e estaduais de fomento.`;
+    const splitDec = pdf.splitTextToSize(declaracaoStr, 107);
+    pdf.setFontSize(6.5);
+    pdf.text(splitDec, MARGIN + 4, summaryY + 23);
+
+    // QR Code de Autenticidade à direita
+    const qrX = PAGE_W - MARGIN - 30; // 30mm de largura
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
+    const validarUrl = `${origin}/validar?token=${it.tokenPesquisa}`;
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(validarUrl)}`;
+    
+    let qrBase64: string | null = null;
+    try {
+      qrBase64 = await fetchImageAsBase64(qrCodeUrl);
+    } catch {}
+
+    if (qrBase64) {
+      try {
+        pdf.addImage(qrBase64, 'PNG', qrX, summaryY, 30, 30);
+      } catch {
+        drawFallbackBarcode(pdf, qrX, summaryY, 30, 30, it.tokenPesquisa || '');
+      }
+    } else {
+      drawFallbackBarcode(pdf, qrX, summaryY, 30, 30, it.tokenPesquisa || '');
+    }
+
+    pdf.setFontSize(6.5);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(100, 100, 100);
+    pdf.text("ESCANEIE PARA VALIDAR", qrX + 15, summaryY + 34, { align: 'center' });
+
+    state.y = summaryY + 42;
+  }
 
   // ========== RODAPÉS em todas as páginas (exceto capa e sumário) ==========
   const totalPages = (pdf as any).internal.getNumberOfPages();

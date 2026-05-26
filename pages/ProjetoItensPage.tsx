@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp, orderBy, writeBatch } from 'firebase/firestore';
-import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { ItemMaster, ItemProjeto, Projeto } from '../types';
+import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
 
 export default function ProjetoItensPage() {
   const { id } = useParams();
@@ -32,6 +33,10 @@ export default function ProjetoItensPage() {
     memorialCalculo: '',
     quantidade: 1,
   });
+
+  // Estados para pesquisa de preços públicos (IN 65/2021)
+  const [isPesquisaOpen, setIsPesquisaOpen] = useState(false);
+  const [selectedItemForPesquisa, setSelectedItemForPesquisa] = useState<ItemProjeto | null>(null);
 
   const carregarDados = async () => {
     if (!id) return;
@@ -590,6 +595,16 @@ export default function ProjetoItensPage() {
                   <div className="font-bold text-lie-ink">{it.nome}</div>
                   <div className="text-[10px] text-gray-500 uppercase font-bold">#{itensMaster.find(m => m.id === it.itemId)?.codigo}</div>
                   {it.descricao && <div className="text-[10px] text-gray-400 line-clamp-1">{it.descricao}</div>}
+                  {it.pesquisado ? (
+                    <div className="flex items-center gap-1 mt-1 text-[9px] font-bold text-lie-green uppercase tracking-wide">
+                      <Check className="w-3 h-3 text-lie-green" />
+                      Pesquisado (Ref: {it.medianaReferencia?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'R$ 0,00'})
+                    </div>
+                  ) : (
+                    <div className="text-[9px] font-bold text-amber-500 uppercase tracking-wide mt-1 flex items-center gap-1">
+                      <span>⚠️ Preço não pesquisado (IN 65/2021)</span>
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-600 italic">
                   {it.memorialCalculo}
@@ -604,6 +619,16 @@ export default function ProjetoItensPage() {
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
+                    <button 
+                      onClick={() => {
+                        setSelectedItemForPesquisa(it);
+                        setIsPesquisaOpen(true);
+                      }} 
+                      className={`p-1.5 rounded transition ${it.pesquisado ? 'text-lie-green hover:bg-lie-green/10' : 'text-amber-500 hover:bg-amber-50'}`} 
+                      title="Pesquisa de Preços Públicos (IN 65/2021)"
+                    >
+                      <Scale className="w-4 h-4" />
+                    </button>
                     <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar">
                       <Edit3 className="w-4 h-4" />
                     </button>
@@ -629,6 +654,20 @@ export default function ProjetoItensPage() {
           <div className="p-12 text-center text-lie-gray italic">Nenhum item vinculado a este projeto ainda.</div>
         )}
       </div>
+
+      {selectedItemForPesquisa && (
+        <PesquisaPrecoModal
+          isOpen={isPesquisaOpen}
+          onClose={() => {
+            setIsPesquisaOpen(false);
+            setSelectedItemForPesquisa(null);
+          }}
+          item={selectedItemForPesquisa}
+          projetoTitulo={projeto?.titulo}
+          entidadeNome={projeto?.entidadeSigla || "Entidade"}
+          onSave={() => carregarDados()}
+        />
+      )}
     </div>
   );
 }
