@@ -5,8 +5,8 @@ import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
 import type { Projeto, Entidade, ItemProjeto } from '../types';
 
-const MARGIN_LEFT = 30;
-const MARGIN_RIGHT = 20;
+const MARGIN_LEFT = 20;
+const MARGIN_RIGHT = 15;
 const MARGIN_TOP = 30;
 const MARGIN_BOTTOM = 20;
 const PAGE_W = 210;
@@ -132,7 +132,7 @@ function drawLetterheadHeader(pdf: jsPDF, entidade: Entidade, logoBase64: string
   if (logoBase64) {
     try {
       const format = getImgFormat(entidade.logoUrl || '');
-      pdf.addImage(logoBase64, format, MARGIN, 7, 16, 16);
+      pdf.addImage(logoBase64, format, 12, 7, 16, 16);
     } catch (e) {
       console.warn('Erro ao desenhar logo no cabeçalho:', e);
     }
@@ -296,7 +296,17 @@ function addBodyText(state: PDFState, text: string) {
     }
     
     for (let i = 0; i < lines.length; i++) {
+      const pageBefore = (pdf as any).internal.getCurrentPageInfo().pageNumber;
       checkPageSpace(state, lineSpacing);
+      const pageAfter = (pdf as any).internal.getCurrentPageInfo().pageNumber;
+      
+      if (pageAfter > pageBefore) {
+        // Restaura a fonte do corpo que foi alterada pelo cabeçalho da nova página
+        pdf.setFontSize(10);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(0, 0, 0);
+      }
+      
       const lineObj = lines[i];
       const lineStr = lineObj.text;
       const isLastLine = (i === lines.length - 1);
