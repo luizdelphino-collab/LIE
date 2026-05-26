@@ -1350,15 +1350,22 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
 
   // ========== CAPACIDADE TÉCNICA E OPERACIONAL (opcional) ==========
   let capacidadeTecnicaStartPage: number | null = null;
-  let capacidadeDocs: { id: string; nome: string; arquivoUrl: string; arquivoNome?: string; criadoEm?: any; tipo?: string; ano?: number; orgaoEmitente?: string }[] = [];
+  let capacidadeDocs: { id: string; nome: string; arquivoUrl: string; arquivoNome?: string; criadoEm?: any; ordem?: number; tipo?: string; ano?: number; orgaoEmitente?: string }[] = [];
   if (options.capacidadeTecnica) {
     const capDocsSnap = await getDocs(collection(db, `entities/${projeto.entidadeId}/capacidadeDocumentos`));
     capacidadeDocs = capDocsSnap.docs
       .map(d => ({ id: d.id, ...d.data() } as any))
       .sort((a, b) => {
+        const oa = a.ordem;
+        const ob = b.ordem;
+        // Ordem manual definida pelo usuário tem prioridade
+        if (oa !== undefined && ob !== undefined) return oa - ob;
+        if (oa !== undefined) return -1;
+        if (ob !== undefined) return 1;
+        // Fallback: mais antigos primeiro (= ordem de upload)
         const ta = a.criadoEm?.toDate?.().getTime?.() || 0;
         const tb = b.criadoEm?.toDate?.().getTime?.() || 0;
-        return tb - ta;
+        return ta - tb;
       });
 
     forceNewPage(state);

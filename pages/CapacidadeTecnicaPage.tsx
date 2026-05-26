@@ -6,8 +6,9 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import {
   ArrowLeft, Save, Award, BookOpen, Loader2, CheckCircle2, Plus, FileText,
-  Trash2, Eye, Upload, X, AlertCircle
+  Trash2, Eye, Upload, X, AlertCircle, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown
 } from 'lucide-react';
+import { writeBatch } from 'firebase/firestore';
 import { db, storage } from '../lib/firebase';
 import type { Entidade } from '../types';
 
@@ -17,6 +18,7 @@ interface CapacidadeDocumento {
   arquivoUrl: string;
   arquivoNome?: string;
   tamanho?: number;
+  ordem?: number;
   criadoEm?: Timestamp;
   // Campos legados — exibidos se existirem
   tipo?: string;
@@ -91,11 +93,57 @@ export default function CapacidadeTecnicaPage() {
     const snap = await getDocs(collection(db, `entities/${id}/capacidadeDocumentos`));
     const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as CapacidadeDocumento));
     list.sort((a, b) => {
+      const oa = a.ordem;
+      const ob = b.ordem;
+      // Quem tem ordem definida vem primeiro, em ordem crescente
+      if (oa !== undefined && ob !== undefined) return oa - ob;
+      if (oa !== undefined) return -1;
+      if (ob !== undefined) return 1;
+      // Fallback: mais recente primeiro
       const ta = a.criadoEm?.toDate?.().getTime?.() || 0;
       const tb = b.criadoEm?.toDate?.().getTime?.() || 0;
       return tb - ta;
     });
     setDocumentos(list);
+  };
+
+  const persistirOrdem = async (lista: CapacidadeDocumento[]) => {
+    if (!id) return;
+    const batch = writeBatch(db);
+    lista.forEach((d, idx) => {
+      batch.set(
+        doc(db, `entities/${id}/capacidadeDocumentos`, d.id),
+        { ordem: idx },
+        { merge: true }
+      );
+    });
+    await batch.commit();
+  };
+
+  const moverDocumento = async (index: number, direcao: 'up' | 'down' | 'top' | 'bottom') => {
+    const nova = [...documentos];
+    if (direcao === 'up' && index > 0) {
+      [nova[index - 1], nova[index]] = [nova[index], nova[index - 1]];
+    } else if (direcao === 'down' && index < nova.length - 1) {
+      [nova[index + 1], nova[index]] = [nova[index], nova[index + 1]];
+    } else if (direcao === 'top' && index > 0) {
+      const [moved] = nova.splice(index, 1);
+      nova.unshift(moved);
+    } else if (direcao === 'bottom' && index < nova.length - 1) {
+      const [moved] = nova.splice(index, 1);
+      nova.push(moved);
+    } else {
+      return;
+    }
+    // Atualiza ordem local e persiste em batch
+    nova.forEach((d, i) => (d.ordem = i));
+    setDocumentos(nova);
+    try {
+      await persistirOrdem(nova);
+    } catch (e: any) {
+      alert(`Erro ao salvar nova ordem: ${e?.message || e}`);
+      await carregarDocumentos();
+    }
   };
 
   useEffect(() => { carregarTudo(); }, [id]);
@@ -157,6 +205,9 @@ export default function CapacidadeTecnicaPage() {
     if (!id) return;
     setUploadingBatch(true);
 
+    // Posição base no fim da lista atual (novos uploads entram após os existentes)
+    const baseOrdem = documentos.length;
+
     // Upload paralelo de até 3 simultâneos pra não estourar nem ficar lento
     const CONCURRENT = 3;
     let cursor = 0;
@@ -165,7 +216,7 @@ export default function CapacidadeTecnicaPage() {
       setUploadQueue(prev => prev.map(it => it.id === itemId ? { ...it, ...patch } : it));
     };
 
-    const uploadOne = async (item: UploadItem): Promise<void> => {
+    const uploadOne = async (item: UploadItem, indexNoLote: number): Promise<void> => {
       updateItem(item.id, { status: 'uploading', progress: 0 });
       try {
         const docId = doc(collection(db, `entities/${id}/capacidadeDocumentos`)).id;
@@ -190,6 +241,7 @@ export default function CapacidadeTecnicaPage() {
                   arquivoUrl: url,
                   arquivoNome: item.file.name,
                   tamanho: item.file.size,
+                  ordem: baseOrdem + indexNoLote,
                   criadoEm: serverTimestamp()
                 });
                 updateItem(item.id, { status: 'done', progress: 100 });
@@ -210,7 +262,7 @@ export default function CapacidadeTecnicaPage() {
     const runNext = async (): Promise<void> => {
       while (cursor < items.length) {
         const i = cursor++;
-        await uploadOne(items[i]);
+        await uploadOne(items[i], i);
       }
     };
     for (let k = 0; k < Math.min(CONCURRENT, items.length); k++) {
@@ -460,43 +512,87 @@ export default function CapacidadeTecnicaPage() {
             </button>
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
-            {documentos.map(d => (
-              <div key={d.id} className="p-4 flex items-start gap-3 hover:bg-gray-50 transition">
-                <div className="p-2 rounded-lg bg-amber-100 text-amber-700 border border-amber-200 shrink-0">
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-lie-ink truncate">{d.arquivoNome || d.nome}</div>
-                  <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
-                    {d.criadoEm && <span>Enviado em {formatDate(d.criadoEm)}</span>}
-                    {d.tamanho && <span>• {formatBytes(d.tamanho)}</span>}
-                    {d.tipo && <span>• {d.tipo}</span>}
-                    {d.ano && <span>• {d.ano}</span>}
-                    {d.orgaoEmitente && <span>• {d.orgaoEmitente}</span>}
+          <>
+            <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 text-[11px] text-gray-500 italic">
+              A ordem desta lista define a ordem de impressão no PDF consolidado. Use as setas pra reorganizar.
+            </div>
+            <div className="divide-y divide-gray-100">
+              {documentos.map((d, index) => (
+                <div key={d.id} className="p-4 flex items-start gap-3 hover:bg-gray-50 transition">
+                  {/* Controles de ordem */}
+                  <div className="flex flex-col items-center gap-0.5 shrink-0 pt-1">
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5 mb-1">
+                      #{index + 1}
+                    </span>
+                    <button
+                      onClick={() => moverDocumento(index, 'top')}
+                      disabled={index === 0}
+                      title="Mover para o topo (1° na impressão)"
+                      className="p-1 text-gray-400 hover:text-amber-700 hover:bg-amber-50 rounded disabled:opacity-20 disabled:cursor-not-allowed"
+                    >
+                      <ChevronsUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => moverDocumento(index, 'up')}
+                      disabled={index === 0}
+                      title="Subir uma posição"
+                      className="p-1 text-gray-400 hover:text-amber-700 hover:bg-amber-50 rounded disabled:opacity-20 disabled:cursor-not-allowed"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => moverDocumento(index, 'down')}
+                      disabled={index === documentos.length - 1}
+                      title="Descer uma posição"
+                      className="p-1 text-gray-400 hover:text-amber-700 hover:bg-amber-50 rounded disabled:opacity-20 disabled:cursor-not-allowed"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => moverDocumento(index, 'bottom')}
+                      disabled={index === documentos.length - 1}
+                      title="Mover para o fim"
+                      className="p-1 text-gray-400 hover:text-amber-700 hover:bg-amber-50 rounded disabled:opacity-20 disabled:cursor-not-allowed"
+                    >
+                      <ChevronsDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="p-2 rounded-lg bg-amber-100 text-amber-700 border border-amber-200 shrink-0">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-lie-ink truncate">{d.arquivoNome || d.nome}</div>
+                    <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                      {d.criadoEm && <span>Enviado em {formatDate(d.criadoEm)}</span>}
+                      {d.tamanho && <span>• {formatBytes(d.tamanho)}</span>}
+                      {d.tipo && <span>• {d.tipo}</span>}
+                      {d.ano && <span>• {d.ano}</span>}
+                      {d.orgaoEmitente && <span>• {d.orgaoEmitente}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {d.arquivoUrl && (
+                      <a
+                        href={d.arquivoUrl} target="_blank" rel="noopener noreferrer"
+                        title="Visualizar"
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded transition"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </a>
+                    )}
+                    <button
+                      onClick={() => handleExcluirDoc(d)}
+                      title="Excluir"
+                      className="p-2 text-red-500 hover:bg-red-50 rounded transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {d.arquivoUrl && (
-                    <a
-                      href={d.arquivoUrl} target="_blank" rel="noopener noreferrer"
-                      title="Visualizar"
-                      className="p-2 text-blue-600 hover:bg-blue-50 rounded transition"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </a>
-                  )}
-                  <button
-                    onClick={() => handleExcluirDoc(d)}
-                    title="Excluir"
-                    className="p-2 text-red-500 hover:bg-red-50 rounded transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>
