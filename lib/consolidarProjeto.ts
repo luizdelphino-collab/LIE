@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db, storage } from './firebase';
 import type { Projeto, Entidade, ItemProjeto } from '../types';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, PDFFont, PDFImage } from 'pdf-lib';
 import { obterDetalheMaterialPorCodigo } from './apiCompras';
 
 function downloadStorageFileUrl(path: string): string {
@@ -494,13 +494,373 @@ function drawToc(
   }
 }
 
+function renderPesquisaCertificadosJsPdf(
+  itensPesquisados: ItemProjeto[],
+  entidade: Entidade,
+  cor: [number, number, number],
+  logoBase64: string | null
+): Uint8Array | null {
+  if (itensPesquisados.length === 0) return null;
+
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  const corClara = lightenRgb(cor, 0.88);
+  const state: PDFState = {
+    pdf,
+    y: 33,
+    cor,
+    entidade,
+    logoBase64,
+    projetoTitulo: '',
+    isFirstPageEmpty: true
+  };
+
+  for (const it of itensPesquisados) {
+    forceNewPage(state);
+
+    const boxY = state.y;
+    pdf.setFillColor(248, 250, 252);
+    pdf.rect(MARGIN, boxY, CONTENT_W, 25, 'F');
+    pdf.setDrawColor(...cor);
+    pdf.setLineWidth(0.4);
+    pdf.rect(MARGIN, boxY, CONTENT_W, 25, 'D');
+
+    pdf.setFontSize(10.5);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(...cor);
+    pdf.text("CERTIFICADO DE AUTENTICIDADE E COTAÇÃO DE PREÇOS PÚBLICOS", PAGE_W / 2, boxY + 7.5, { align: 'center' });
+
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(80, 80, 80);
+    pdf.text("JUSTIFICATIVA DE PREÇO DE MERCADO • INSTRUÇÃO NORMATIVA SEGES/ME Nº 65/2021", PAGE_W / 2, boxY + 13.5, { align: 'center' });
+
+    pdf.setFontSize(7.5);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(110, 110, 110);
+    pdf.text(`REGISTRO DE VALIDAÇÃO: ${it.tokenPesquisa || 'N/A'}`, PAGE_W / 2, boxY + 19, { align: 'center' });
+
+    state.y = boxY + 30;
+
+    addSubSection(state, "COMPARATIVO GERAL DE PREÇOS (PROPOSTO VS. REFERÊNCIAS)");
+
+    const publicRefs = it.referencias?.filter((r: any) => r.fonte === 'compras.gov.br' || r.fonte === 'pncp') || [];
+    const manualRefs = it.referencias?.filter((r: any) => r.fonte === 'fomento') || [];
+
+    const avgPublic = publicRefs.length > 0
+      ? publicRefs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / publicRefs.length
+      : null;
+
+    const avgManual = manualRefs.length > 0
+      ? manualRefs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / manualRefs.length
+      : null;
+
+    const formatBrl = (val: number | null) => {
+      if (val === null) return '—';
+      return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    };
+
+    const compBody = [
+      ['Valor Estimado Proposto no Projeto', formatBrl(it.valorUnitario), 'Preço unitário sugerido no Plano de Trabalho'],
+      ['Média de Compras Públicas (Compras.gov.br/PNCP)', formatBrl(avgPublic), `${publicRefs.length} cotação(ões) pública(s) consultada(s)`],
+      ['Média de Parcerias e Fomentos (Upload Manual)', formatBrl(avgManual), `${manualRefs.length} documento(s) de fomento anexo(s)`],
+      ['Mediana Geral Homologada (Blindagem de Cesta)', formatBrl(it.medianaReferencia || null), 'Mediana linear de referência da cesta (IN 65)']
+    ];
+
+    autoTable(pdf, {
+      startY: state.y,
+      head: [['Origem da Cotação / Referência', 'Valor Unitário', 'Observação / Descrição da Fonte']],
+      body: compBody,
+      margin: { left: MARGIN, right: MARGIN },
+      headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      styles: { fontSize: 7.5, textColor: [0, 0, 0] },
+      columnStyles: {
+        0: { cellWidth: 65, fontStyle: 'bold' },
+        1: { cellWidth: 35, fontStyle: 'bold', halign: 'right' },
+        2: { cellWidth: 70 }
+      },
+      didDrawPage: (data) => {
+        if (data.doc.internal.getNumberOfPages() > 1) {
+          drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+        }
+      }
+    });
+
+    state.y = (pdf as any).lastAutoTable.finalY + 8;
+
+    addSubSection(state, "DETALHAMENTO DO ITEM DO PROJETO");
+    addField(state, "Item", it.nome, MARGIN); state.y += 1.5;
+    if (it.descricao) {
+      addField(state, "Especificação", it.descricao, MARGIN); state.y += 1.5;
+    }
+    if (it.ultimoCodigoVinculado) {
+      const matInfo = obterDetalheMaterialPorCodigo(it.ultimoCodigoVinculado, it.nome);
+      if (matInfo) {
+        addField(state, "Catálogo CATMAT/CATSER", `${matInfo.nome} (Código: ${matInfo.codigoItem})\nDescrição: ${matInfo.descricaoItem}`, MARGIN);
+        state.y += 1.5;
+      }
+    }
+    addField(state, "Memorial Cálculo", it.memorialCalculo, MARGIN); state.y += 1.5;
+    addField(state, "Qtd / Unidade", `${it.quantidade} ${it.unidade}`, MARGIN); state.y += 1.5;
+    addField(state, "Valor Estimado Unitário", it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), MARGIN); state.y += 4;
+
+    addSubSection(state, "CESTA DE PREÇOS PÚBLICOS DE REFERÊNCIA (IN 65/2021)");
+
+    const refRows = it.referencias?.map((r: any) => [
+      r.fonte.toUpperCase(),
+      r.orgaoLicitante,
+      r.identificadorCompra,
+      r.dataHomologacao,
+      r.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    ]) || [];
+
+    autoTable(pdf, {
+      startY: state.y,
+      head: [['Fonte', 'Órgão Licitante / Compra', 'Identificador', 'Data', 'Unitário']],
+      body: refRows.length > 0 ? refRows : [['—', '—', '—', '—', '—']],
+      margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+      headStyles: { fillColor: cor },
+      alternateRowStyles: { fillColor: corClara },
+      styles: { fontSize: 7.5 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 60 },
+        2: { cellWidth: 45 },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 25 },
+      },
+      didDrawPage: (data) => {
+        if (data.doc.internal.getNumberOfPages() > 1) {
+          drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+        }
+      }
+    });
+
+    state.y = (pdf as any).lastAutoTable.finalY + 8;
+
+    checkPageSpace(state, 40);
+    const summaryY = state.y;
+
+    pdf.setFillColor(248, 250, 252);
+    pdf.setDrawColor(220, 220, 220);
+    pdf.setLineWidth(0.3);
+    pdf.rect(MARGIN, summaryY, CONTENT_W, 36, 'DF');
+
+    pdf.setFontSize(8.5);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(80, 80, 80);
+    pdf.text("DECLARAÇÃO E ANÁLISE ESTATÍSTICA DE MERCADO", MARGIN + 6, summaryY + 6);
+
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(60, 60, 60);
+    pdf.text(`Média da Cesta: R$ ${it.mediaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 6, summaryY + 13);
+    pdf.text(`Mediana da Cesta: R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 6, summaryY + 18);
+
+    const declaracaoStr = `Declara-se que o preço unitário sugerido de R$ ${it.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} é economicamente viável e justificado perante o mercado público (IN 65/2021), encontrando-se abaixo da mediana linear de R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} praticada por órgãos federais e estaduais de fomento.`;
+    const splitDec = pdf.splitTextToSize(declaracaoStr, CONTENT_W - 12);
+    pdf.setFontSize(7.5);
+    pdf.text(splitDec, MARGIN + 6, summaryY + 24);
+
+    state.y = summaryY + 42;
+  }
+
+  return new Uint8Array(pdf.output('arraybuffer'));
+}
+
 export interface PrintOptions {
   projeto: boolean;
+  capacidadeTecnica?: boolean;
   pesquisa: boolean;
   documentosEntidade: boolean;
   certidoes: boolean;
   numerarRubricar: boolean;
   rubricaUrl?: string;
+}
+
+function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; format: 'png' | 'jpg' } | null {
+  const match = dataUrl.match(/^data:image\/([a-zA-Z]+);base64,(.+)$/);
+  if (!match) return null;
+  const fmt = match[1].toLowerCase();
+  const format: 'png' | 'jpg' = fmt === 'png' ? 'png' : 'jpg';
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return { bytes, format };
+}
+
+async function embedLogoPdfLib(pdfDoc: PDFDocument, logoBase64: string | null): Promise<PDFImage | null> {
+  if (!logoBase64) return null;
+  const parsed = dataUrlToBytes(logoBase64);
+  if (!parsed) return null;
+  try {
+    return parsed.format === 'png'
+      ? await pdfDoc.embedPng(parsed.bytes)
+      : await pdfDoc.embedJpg(parsed.bytes);
+  } catch (e) {
+    console.warn('Falha ao embeddar logo no pdf-lib:', e);
+    return null;
+  }
+}
+
+async function addSeparatorPage(
+  pdfDoc: PDFDocument,
+  titulo: string,
+  subtitulo: string,
+  logoImg: PDFImage | null,
+  cor: [number, number, number],
+  fontBold: PDFFont,
+  fontReg: PDFFont
+): Promise<number> {
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const { width, height } = page.getSize();
+  const corRgb = rgb(cor[0] / 255, cor[1] / 255, cor[2] / 255);
+
+  page.drawRectangle({ x: 0, y: 0, width: 42, height, color: corRgb });
+
+  if (logoImg) {
+    const targetSize = 110;
+    const scale = targetSize / Math.max(logoImg.width, logoImg.height);
+    const w = logoImg.width * scale;
+    const h = logoImg.height * scale;
+    page.drawImage(logoImg, {
+      x: (width - w) / 2,
+      y: height / 2 + 60,
+      width: w,
+      height: h
+    });
+  }
+
+  page.drawLine({
+    start: { x: width * 0.28, y: height / 2 - 5 },
+    end: { x: width * 0.72, y: height / 2 - 5 },
+    thickness: 1.2,
+    color: corRgb
+  });
+
+  const titleSize = 22;
+  const titleWidth = fontBold.widthOfTextAtSize(titulo, titleSize);
+  page.drawText(titulo, {
+    x: (width - titleWidth) / 2,
+    y: height / 2 - 38,
+    size: titleSize,
+    font: fontBold,
+    color: corRgb
+  });
+
+  if (subtitulo) {
+    const subSize = 11;
+    const maxWidth = width * 0.7;
+    const words = subtitulo.split(' ');
+    const lines: string[] = [];
+    let current = '';
+    for (const w of words) {
+      const test = current ? current + ' ' + w : w;
+      if (fontReg.widthOfTextAtSize(test, subSize) > maxWidth && current) {
+        lines.push(current);
+        current = w;
+      } else {
+        current = test;
+      }
+    }
+    if (current) lines.push(current);
+
+    let lineY = height / 2 - 65;
+    for (const line of lines) {
+      const lw = fontReg.widthOfTextAtSize(line, subSize);
+      page.drawText(line, {
+        x: (width - lw) / 2,
+        y: lineY,
+        size: subSize,
+        font: fontReg,
+        color: rgb(0.35, 0.35, 0.35)
+      });
+      lineY -= subSize * 1.4;
+    }
+  }
+
+  return pdfDoc.getPageCount();
+}
+
+async function drawTocOnPdfLib(
+  pdfDoc: PDFDocument,
+  pageIndex: number,
+  toc: TocEntry[],
+  cor: [number, number, number],
+  fontReg: PDFFont,
+  fontBold: PDFFont
+) {
+  if (pageIndex >= pdfDoc.getPageCount()) return;
+  const page = pdfDoc.getPage(pageIndex);
+  const { width, height } = page.getSize();
+  const corRgb = rgb(cor[0] / 255, cor[1] / 255, cor[2] / 255);
+
+  page.drawText('SUMÁRIO', {
+    x: 55, y: height - 70, size: 16, font: fontBold, color: rgb(0, 0, 0)
+  });
+  page.drawLine({
+    start: { x: 55, y: height - 80 },
+    end: { x: width - 55, y: height - 80 },
+    thickness: 0.6,
+    color: corRgb
+  });
+
+  let y = height - 105;
+  const lineSize = 10;
+  const lineGap = 18;
+  const dotChar = '.';
+
+  for (const entry of toc) {
+    if (y < 50) break;
+
+    const numText = entry.num ? entry.num + '.' : '';
+    const titleText = entry.title;
+    const pageText = String(entry.page);
+
+    let cursor = 55;
+    if (numText) {
+      page.drawText(numText, { x: cursor, y, size: lineSize, font: fontBold, color: rgb(0, 0, 0) });
+      cursor += fontBold.widthOfTextAtSize(numText, lineSize) + 5;
+    }
+
+    const isSub = entry.num === '';
+    const titleX = isSub ? cursor + 12 : cursor;
+    page.drawText(titleText, {
+      x: titleX, y, size: lineSize,
+      font: isSub ? fontReg : fontBold,
+      color: rgb(0, 0, 0)
+    });
+
+    const pageWidth = fontBold.widthOfTextAtSize(pageText, lineSize);
+    page.drawText(pageText, {
+      x: width - 55 - pageWidth, y, size: lineSize, font: fontBold, color: rgb(0, 0, 0)
+    });
+
+    const titleWidth = (isSub ? fontReg : fontBold).widthOfTextAtSize(titleText, lineSize);
+    const titleEndX = titleX + titleWidth + 4;
+    const dotEndX = width - 55 - pageWidth - 4;
+    const dotW = fontReg.widthOfTextAtSize(dotChar, lineSize);
+    let dotX = titleEndX;
+    let dots = '';
+    while (dotX < dotEndX) {
+      dots += dotChar;
+      dotX += dotW * 1.8;
+    }
+    if (dots) {
+      page.drawText(dots, {
+        x: titleEndX, y, size: lineSize, font: fontReg, color: rgb(0.55, 0.55, 0.55)
+      });
+    }
+
+    y -= lineGap;
+  }
+}
+
+async function mergePdfBytes(target: PDFDocument, bytes: ArrayBuffer): Promise<number> {
+  const source = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const pages = await target.copyPages(source, source.getPageIndices());
+  pages.forEach(p => target.addPage(p));
+  return pages.length;
 }
 
 export async function consolidarProjeto(projetoId: string, options: PrintOptions = { projeto: true, pesquisa: true, documentosEntidade: false, certidoes: false, numerarRubricar: false }): Promise<void> {
@@ -988,261 +1348,171 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
   });
   }
 
-  // ========== CERTIFICADOS DE AUTENTICIDADE E COTAÇÃO (IN 65/2021) ==========
-  const itensPesquisados = itensProjeto.filter(it => it.pesquisado === true);
-
-  if (options.pesquisa) {
-    for (const it of itensPesquisados) {
+  // ========== CAPACIDADE TÉCNICA E OPERACIONAL (opcional) ==========
+  let capacidadeTecnicaStartPage: number | null = null;
+  if (options.capacidadeTecnica) {
     forceNewPage(state);
-    
-    // Título do Certificado em box elegante com borda e fundo cinza sutil
-    const boxY = state.y;
-    pdf.setFillColor(248, 250, 252);
-    pdf.rect(MARGIN, boxY, CONTENT_W, 25, 'F');
-    pdf.setDrawColor(...cor);
-    pdf.setLineWidth(0.4);
-    pdf.rect(MARGIN, boxY, CONTENT_W, 25, 'D');
-    
-    pdf.setFontSize(10.5);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(...cor);
-    pdf.text("CERTIFICADO DE AUTENTICIDADE E COTAÇÃO DE PREÇOS PÚBLICOS", PAGE_W / 2, boxY + 7.5, { align: 'center' });
-    
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
-    pdf.setTextColor(80, 80, 80);
-    pdf.text("JUSTIFICATIVA DE PREÇO DE MERCADO • INSTRUÇÃO NORMATIVA SEGES/ME Nº 65/2021", PAGE_W / 2, boxY + 13.5, { align: 'center' });
+    capacidadeTecnicaStartPage = (pdf as any).internal.getCurrentPageInfo().pageNumber;
 
-    pdf.setFontSize(7.5);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(110, 110, 110);
-    pdf.text(`REGISTRO DE VALIDAÇÃO: ${it.tokenPesquisa || 'N/A'}`, PAGE_W / 2, boxY + 19, { align: 'center' });
+    addChapterTitle(state, 'Capacidade Técnica e Operacional');
+    state.y += 2;
 
-    state.y = boxY + 30;
-
-    // Capa da Pesquisa: Comparativo Geral de Preços
-    addSubSection(state, "COMPARATIVO GERAL DE PREÇOS (PROPOSTO VS. REFERÊNCIAS)");
-    
-    const publicRefs = it.referencias?.filter((r: any) => r.fonte === 'compras.gov.br' || r.fonte === 'pncp') || [];
-    const manualRefs = it.referencias?.filter((r: any) => r.fonte === 'fomento') || [];
-
-    const avgPublic = publicRefs.length > 0
-      ? publicRefs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / publicRefs.length
-      : null;
-
-    const avgManual = manualRefs.length > 0
-      ? manualRefs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / manualRefs.length
-      : null;
-
-    const formatBrl = (val: number | null) => {
-      if (val === null) return '—';
-      return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    };
-
-    const compBody = [
-      ['Valor Estimado Proposto no Projeto', formatBrl(it.valorUnitario), 'Preço unitário sugerido no Plano de Trabalho'],
-      ['Média de Compras Públicas (Compras.gov.br/PNCP)', formatBrl(avgPublic), `${publicRefs.length} cotação(ões) pública(s) consultada(s)`],
-      ['Média de Parcerias e Fomentos (Upload Manual)', formatBrl(avgManual), `${manualRefs.length} documento(s) de fomento anexo(s)`],
-      ['Mediana Geral Homologada (Blindagem de Cesta)', formatBrl(it.medianaReferencia || null), 'Mediana linear de referência da cesta (IN 65)']
-    ];
-
-    autoTable(pdf, {
-      startY: state.y,
-      head: [['Origem da Cotação / Referência', 'Valor Unitário', 'Observação / Descrição da Fonte']],
-      body: compBody,
-      margin: { left: MARGIN, right: MARGIN },
-      headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255] }, // Slate 700
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      styles: { fontSize: 7.5, textColor: [0, 0, 0] },
-      columnStyles: {
-        0: { cellWidth: 65, fontStyle: 'bold' },
-        1: { cellWidth: 35, fontStyle: 'bold', halign: 'right' },
-        2: { cellWidth: 70 }
-      },
-      didDrawPage: (data) => {
-        if (data.doc.internal.getNumberOfPages() > 1) {
-          drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
-        }
-      }
-    });
-
-    state.y = (pdf as any).lastAutoTable.finalY + 8;
-
-    // Detalhes do Item
-    addSubSection(state, "DETALHAMENTO DO ITEM DO PROJETO");
-    addField(state, "Item", it.nome, MARGIN); state.y += 1.5;
-    if (it.descricao) {
-      addField(state, "Especificação", it.descricao, MARGIN); state.y += 1.5;
+    if ((entidade as any).historico) {
+      addSubTitle(state, 'Histórico Institucional');
+      addBodyText(state, (entidade as any).historico);
+      state.y += 4;
     }
-    if (it.ultimoCodigoVinculado) {
-      const matInfo = obterDetalheMaterialPorCodigo(it.ultimoCodigoVinculado, it.nome);
-      if (matInfo) {
-        addField(state, "Catálogo CATMAT/CATSER", `${matInfo.nome} (Código: ${matInfo.codigoItem})\nDescrição: ${matInfo.descricaoItem}`, MARGIN);
-        state.y += 1.5;
-      }
+
+    if ((entidade as any).capacidadeTecnica) {
+      addSubTitle(state, 'Capacidade Técnica e Operacional');
+      addBodyText(state, (entidade as any).capacidadeTecnica);
     }
-    addField(state, "Memorial Cálculo", it.memorialCalculo, MARGIN); state.y += 1.5;
-    addField(state, "Qtd / Unidade", `${it.quantidade} ${it.unidade}`, MARGIN); state.y += 1.5;
-    addField(state, "Valor Estimado Unitário", it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), MARGIN); state.y += 4;
 
-    // Cesta de referências
-    addSubSection(state, "CESTA DE PREÇOS PÚBLICOS DE REFERÊNCIA (IN 65/2021)");
-    
-    // Tabela de referências
-    const refRows = it.referencias?.map((r: any) => [
-      r.fonte.toUpperCase(),
-      r.orgaoLicitante,
-      r.identificadorCompra,
-      r.dataHomologacao,
-      r.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-    ]) || [];
-
-    autoTable(pdf, {
-      startY: state.y,
-      head: [['Fonte', 'Órgão Licitante / Compra', 'Identificador', 'Data', 'Unitário']],
-      body: refRows.length > 0 ? refRows : [['—', '—', '—', '—', '—']],
-      margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
-      headStyles: { fillColor: cor },
-      alternateRowStyles: { fillColor: corClara },
-      styles: { fontSize: 7.5 },
-      columnStyles: {
-        0: { cellWidth: 20 },
-        1: { cellWidth: 60 },
-        2: { cellWidth: 45 },
-        3: { cellWidth: 20 },
-        4: { cellWidth: 25 },
-      },
-      didDrawPage: (data) => {
-        const pageCount = data.doc.internal.getNumberOfPages();
-        if (pageCount > 1) {
-          drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
-        }
-      }
-    });
-
-    state.y = (pdf as any).lastAutoTable.finalY + 8;
-
-    // Resumo estatístico ocupando a largura total (sem QR Code)
-    checkPageSpace(state, 40);
-    const summaryY = state.y;
-
-    // Caixa estatística
-    pdf.setFillColor(248, 250, 252);
-    pdf.setDrawColor(220, 220, 220);
-    pdf.setLineWidth(0.3);
-    pdf.rect(MARGIN, summaryY, CONTENT_W, 36, 'DF');
-
-    pdf.setFontSize(8.5);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(80, 80, 80);
-    pdf.text("DECLARAÇÃO E ANÁLISE ESTATÍSTICA DE MERCADO", MARGIN + 6, summaryY + 6);
-
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
-    pdf.setTextColor(60, 60, 60);
-    // Média e Mediana
-    pdf.text(`Média da Cesta: R$ ${it.mediaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 6, summaryY + 13);
-    pdf.text(`Mediana da Cesta: R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 6, summaryY + 18);
-    
-    const declaracaoStr = `Declara-se que o preço unitário sugerido de R$ ${it.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} é economicamente viável e justificado perante o mercado público (IN 65/2021), encontrando-se abaixo da mediana linear de R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} praticada por órgãos federais e estaduais de fomento.`;
-    const splitDec = pdf.splitTextToSize(declaracaoStr, CONTENT_W - 12);
-    pdf.setFontSize(7.5);
-    pdf.text(splitDec, MARGIN + 6, summaryY + 24);
-
-    state.y = summaryY + 42;
+    if (!((entidade as any).historico) && !((entidade as any).capacidadeTecnica)) {
+      pdf.setFontSize(9.5);
+      pdf.setFont('helvetica', 'italic');
+      pdf.setTextColor(140, 140, 140);
+      pdf.text(
+        'A entidade ainda não cadastrou histórico institucional ou capacidade técnica/operacional.',
+        MARGIN, state.y
+      );
     }
   }
 
-  const gerouJsPdf = options.projeto || (options.pesquisa && itensPesquisados.length > 0);
+  // ========== PESQUISA agora é gerada como PDF separado e mergeada no fim (anexo final) ==========
+  const itensPesquisados = itensProjeto.filter(it => it.pesquisado === true);
 
-  if (gerouJsPdf) {
-    // ========== RODAPÉS em todas as páginas (exceto capa e sumário) ==========
-    const totalPages = (pdf as any).internal.getNumberOfPages();
+  const gerouJsPdf = options.projeto || options.capacidadeTecnica;
 
-    if (options.projeto) {
-      // Página 2 = sumário: desenhar o sumário agora que sabemos as páginas
-      drawToc(pdf, entidade, logoBase64, cor, toc);
-      // Rodapé do sumário (página 2)
-      pdf.setPage(2);
-      drawLetterheadFooter(pdf, entidade, 2, totalPages, rubricaUrl);
-    }
+  if (gerouJsPdf && options.projeto && capacidadeTecnicaStartPage !== null) {
+    toc.push({ num: '', title: 'Capacidade Técnica e Operacional', page: capacidadeTecnicaStartPage });
+  }
 
-    // Rodapés nas demais páginas geradas pelo jsPDF
-    if (!options.numerarRubricar) {
-      const startPage = options.projeto ? 3 : 1;
-      for (let i = startPage; i <= totalPages; i++) {
-        pdf.setPage(i);
-        drawLetterheadFooter(pdf, entidade, i, totalPages, rubricaUrl);
-      }
+  // Rodapés timbrados nas páginas geradas pelo jsPDF (exceto capa, sumário e quando vai numerar/rubricar)
+  if (gerouJsPdf && !options.numerarRubricar) {
+    const totalJsPages = (pdf as any).internal.getNumberOfPages();
+    const startPage = options.projeto ? 3 : 1;
+    for (let i = startPage; i <= totalJsPages; i++) {
+      pdf.setPage(i);
+      drawLetterheadFooter(pdf, entidade, i, totalJsPages, rubricaUrl);
     }
   }
 
   try {
     let mainPdfDoc: PDFDocument;
-    
+
     if (gerouJsPdf) {
       const jsPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
       mainPdfDoc = await PDFDocument.load(jsPdfBytes);
     } else {
       mainPdfDoc = await PDFDocument.create();
     }
-    
-    // Buscar todas as referências dos itens pesquisados e fazer a juntada física (manuais e públicas)
-    if (options.pesquisa) {
-      for (const it of itensPesquisados) {
-        if (it.referencias && Array.isArray(it.referencias)) {
-          for (const r of it.referencias) {
-            try {
-              if (r.fonte === 'fomento' && r.localizacaoUrl) {
-                console.log(`Efetuando a juntada de documento manual: ${r.arquivoNome || r.identificadorCompra} de ${r.orgaoLicitante}`);
-                const bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
-                if (bytes) {
-                  const docToMerge = await PDFDocument.load(bytes);
-                  const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
-                  copiedPages.forEach(page => mainPdfDoc.addPage(page));
-                }
-              } else if ((r.fonte === 'compras.gov.br' || r.fonte === 'pncp') && r.localizacaoUrl) {
-                console.log(`Efetuando a juntada de documento público (via URL): ${r.identificadorCompra} de ${r.orgaoLicitante}`);
-                const bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
-                if (bytes) {
-                  const docToMerge = await PDFDocument.load(bytes);
-                  const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
-                  copiedPages.forEach(page => mainPdfDoc.addPage(page));
-                }
-              } else if (r.fonte === 'compras.gov.br' || r.fonte === 'pncp') {
-                console.log(`Efetuando a juntada de documento público (via Cache): ${r.identificadorCompra} de ${r.orgaoLicitante}`);
-                const bytes = await obterPdfPublicoCacheado(r);
-                if (bytes) {
-                  const docToMerge = await PDFDocument.load(bytes);
-                  const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
-                  copiedPages.forEach(page => mainPdfDoc.addPage(page));
-                }
-              }
-            } catch (err) {
-              console.error(`Falha ao juntar documento de cotação de ${r.orgaoLicitante}:`, err);
-            }
+
+    const fontReg = await mainPdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await mainPdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const logoImg = await embedLogoPdfLib(mainPdfDoc, logoBase64);
+
+    // Helper: anota TocEntry pra grande seção e cada doc individual juntado
+    const addBlock = async (
+      titulo: string,
+      subtitulo: string,
+      docs: { nome: string; arquivoUrl: string }[]
+    ) => {
+      if (docs.length === 0) return;
+      await addSeparatorPage(mainPdfDoc, titulo, subtitulo, logoImg, cor, fontBold, fontReg);
+      toc.push({ num: '', title: titulo, page: mainPdfDoc.getPageCount() });
+
+      for (const d of docs) {
+        const docStartPage = mainPdfDoc.getPageCount() + 1;
+        try {
+          const bytes = await fetchPdfAsArrayBuffer(d.arquivoUrl);
+          if (bytes) {
+            await mergePdfBytes(mainPdfDoc, bytes);
+            toc.push({ num: '', title: '  • ' + d.nome, page: docStartPage });
           }
+        } catch (e) {
+          console.error(`Falha ao juntar doc ${d.nome}:`, e);
+        }
+      }
+    };
+
+    // Buscar documentos da entidade (uma única vez)
+    let docsEntidadeFiltrados: { nome: string; arquivoUrl: string }[] = [];
+    let certidoesFiltradas: { nome: string; arquivoUrl: string }[] = [];
+    if (options.documentosEntidade || options.certidoes) {
+      const entDocsSnap = await getDocs(collection(db, `entities/${projeto.entidadeId}/documentos`));
+      const entDocs = entDocsSnap.docs
+        .map(d => d.data() as any)
+        .sort((a: any, b: any) => (a.ordem || 0) - (b.ordem || 0));
+
+      for (const d of entDocs) {
+        if (!d.arquivoUrl) continue;
+        const isCertidao = d.tipo === 'Certidão';
+        const nome = d.nome || d.tipo || 'Documento';
+        if (isCertidao && options.certidoes) {
+          certidoesFiltradas.push({ nome, arquivoUrl: d.arquivoUrl });
+        } else if (!isCertidao && options.documentosEntidade) {
+          docsEntidadeFiltrados.push({ nome, arquivoUrl: d.arquivoUrl });
         }
       }
     }
 
-    if (options.documentosEntidade || options.certidoes) {
-      const entDocsSnap = await getDocs(collection(db, `entities/${projeto.entidadeId}/documentos`));
-      const entDocs = entDocsSnap.docs.map(d => d.data());
-      for (const d of entDocs) {
-        if (!d.arquivoUrl) continue;
-        const isCertidao = d.tipo === 'Certidão';
-        if ((options.certidoes && isCertidao) || (options.documentosEntidade && !isCertidao)) {
+    // Ordem: Documentos da Entidade → Certidões → Pesquisa
+    if (options.documentosEntidade) {
+      await addBlock(
+        'Documentos da Entidade',
+        'Estatuto, Atas, CNPJ e demais anexos institucionais',
+        docsEntidadeFiltrados
+      );
+    }
+
+    if (options.certidoes) {
+      await addBlock(
+        'Certidões da Entidade',
+        'Certidões ativas de regularidade fiscal e institucional',
+        certidoesFiltradas
+      );
+    }
+
+    // Pesquisa de Preços (anexo final): laudos jsPDF + PDFs externos das cotações
+    if (options.pesquisa && itensPesquisados.length > 0) {
+      await addSeparatorPage(
+        mainPdfDoc,
+        'Pesquisa de Preços (IN 65/2021)',
+        'Laudos estatísticos e juntada das cotações públicas e manuais',
+        logoImg, cor, fontBold, fontReg
+      );
+      toc.push({ num: '', title: 'Pesquisa de Preços (IN 65/2021)', page: mainPdfDoc.getPageCount() });
+
+      const pesquisaBytes = renderPesquisaCertificadosJsPdf(itensPesquisados, entidade, cor, logoBase64);
+      if (pesquisaBytes) {
+        const certStartPage = mainPdfDoc.getPageCount() + 1;
+        await mergePdfBytes(mainPdfDoc, pesquisaBytes.buffer as ArrayBuffer);
+        toc.push({ num: '', title: '  • Laudos e Análise Estatística', page: certStartPage });
+      }
+
+      for (const it of itensPesquisados) {
+        if (!it.referencias || !Array.isArray(it.referencias)) continue;
+        for (const r of it.referencias) {
+          const refNome = r.orgaoLicitante
+            ? `${r.orgaoLicitante} (${r.identificadorCompra || r.fonte})`
+            : (r.arquivoNome || r.identificadorCompra || 'Cotação');
+          const refStartPage = mainPdfDoc.getPageCount() + 1;
           try {
-            console.log(`Juntada de doc da entidade: ${d.nome}`);
-            const bytes = await fetchPdfAsArrayBuffer(d.arquivoUrl);
-            if (bytes) {
-              const docToMerge = await PDFDocument.load(bytes);
-              const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
-              copiedPages.forEach(page => mainPdfDoc.addPage(page));
+            let bytes: ArrayBuffer | null = null;
+            if (r.fonte === 'fomento' && r.localizacaoUrl) {
+              bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
+            } else if ((r.fonte === 'compras.gov.br' || r.fonte === 'pncp') && r.localizacaoUrl) {
+              bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
+            } else if (r.fonte === 'compras.gov.br' || r.fonte === 'pncp') {
+              bytes = await obterPdfPublicoCacheado(r);
             }
-          } catch(e) {
-             console.error(`Falha ao juntar doc ${d.nome}:`, e);
+            if (bytes) {
+              await mergePdfBytes(mainPdfDoc, bytes);
+              toc.push({ num: '', title: `  • ${it.nome} — ${refNome}`, page: refStartPage });
+            }
+          } catch (err) {
+            console.error(`Falha ao juntar cotação de ${r.orgaoLicitante}:`, err);
           }
         }
       }
@@ -1250,48 +1520,51 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
 
     if (mainPdfDoc.getPageCount() === 0) {
       const page = mainPdfDoc.addPage([595.276, 841.89]);
-      page.drawText('Nenhum documento ou conteudo selecionado para impressao.', {
-        x: 50,
-        y: 400,
-        size: 12
+      page.drawText('Nenhum documento ou conteúdo selecionado para impressão.', {
+        x: 50, y: 400, size: 12, font: fontReg
       });
     }
 
+    // Desenhar sumário na página 2 do PDF final (se houver Plano de Trabalho)
+    if (options.projeto && mainPdfDoc.getPageCount() >= 2) {
+      await drawTocOnPdfLib(mainPdfDoc, 1, toc, cor, fontReg, fontBold);
+    }
+
+    // Numerar e rubricar
     if (options.numerarRubricar) {
       const pages = mainPdfDoc.getPages();
       const totalMergedPages = pages.length;
-      
+
       let rubricaImage = null;
       if (rubricaUrl) {
         try {
-          const imgBytes = await fetchPdfAsArrayBuffer(rubricaUrl);
-          rubricaImage = await mainPdfDoc.embedPng(imgBytes);
-        } catch(e) { console.error('Falha ao embutir rubrica no pdf-lib', e); }
+          const parsedRub = dataUrlToBytes(rubricaUrl);
+          if (parsedRub) {
+            rubricaImage = parsedRub.format === 'png'
+              ? await mainPdfDoc.embedPng(parsedRub.bytes)
+              : await mainPdfDoc.embedJpg(parsedRub.bytes);
+          } else {
+            const imgBytes = await fetchPdfAsArrayBuffer(rubricaUrl);
+            rubricaImage = await mainPdfDoc.embedPng(imgBytes);
+          }
+        } catch (e) { console.error('Falha ao embutir rubrica no pdf-lib', e); }
       }
 
       const startIdx = options.projeto ? 2 : 0;
       for (let i = startIdx; i < totalMergedPages; i++) {
         const page = pages[i];
-        const { width, height } = page.getSize();
-        
-        page.drawText(`Página ${i + 1} de ${totalMergedPages}`, {
-          x: width / 2 - 30,
-          y: 20,
-          size: 9,
+        const { width } = page.getSize();
+        const pageStr = `Página ${i + 1} de ${totalMergedPages}`;
+        const w = fontReg.widthOfTextAtSize(pageStr, 9);
+        page.drawText(pageStr, {
+          x: (width - w) / 2, y: 20, size: 9, font: fontReg, color: rgb(0.3, 0.3, 0.3)
         });
-
         if (rubricaImage) {
-          page.drawImage(rubricaImage, {
-            x: 20,
-            y: 15,
-            width: 30,
-            height: 30
-          });
+          page.drawImage(rubricaImage, { x: 20, y: 15, width: 30, height: 30 });
         }
       }
     }
 
-    // Salvar o PDF consolidado com todas as páginas unificadas fisicamente
     const mergedPdfBytes = await mainPdfDoc.save();
     const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
     const downloadUrl = URL.createObjectURL(blob);
@@ -1304,7 +1577,6 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
     URL.revokeObjectURL(downloadUrl);
   } catch (pdfLibError) {
     console.error("Erro durante a unificação de PDFs com pdf-lib, baixando PDF básico como fallback:", pdfLibError);
-    // Fallback: baixar apenas o PDF básico sem anexos para evitar que o usuário fique sem o relatório
     pdf.save(`Projeto_${projeto.titulo.replace(/\s/g, '_')}.pdf`);
   }
 }

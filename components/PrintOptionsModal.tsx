@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { X, Upload, Printer, FileText, FileBadge, CheckSquare, Square } from 'lucide-react';
+import { X, Upload, Printer, FileText, FileBadge, CheckSquare, Square, Award } from 'lucide-react';
 import type { PrintOptions } from '../lib/consolidarProjeto';
 
 interface PrintOptionsModalProps {
@@ -11,10 +11,11 @@ interface PrintOptionsModalProps {
 
 export default function PrintOptionsModal({ isOpen, onClose, onConfirm, title }: PrintOptionsModalProps) {
   const [projeto, setProjeto] = useState(true);
-  const [pesquisa, setPesquisa] = useState(true);
+  const [capacidadeTecnica, setCapacidadeTecnica] = useState(false);
   const [documentosEntidade, setDocumentosEntidade] = useState(false);
   const [certidoes, setCertidoes] = useState(false);
-  
+  const [pesquisa, setPesquisa] = useState(true);
+
   const [numerarRubricar, setNumerarRubricar] = useState(false);
   const [rubricaUrl, setRubricaUrl] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,7 +43,7 @@ export default function PrintOptionsModal({ isOpen, onClose, onConfirm, title }:
   };
 
   const handleConfirm = () => {
-    if (!projeto && !pesquisa && !documentosEntidade && !certidoes) {
+    if (!projeto && !capacidadeTecnica && !pesquisa && !documentosEntidade && !certidoes) {
       alert('Selecione pelo menos uma opção para imprimir.');
       return;
     }
@@ -50,9 +51,10 @@ export default function PrintOptionsModal({ isOpen, onClose, onConfirm, title }:
       alert('Por favor, selecione uma imagem para a rubrica.');
       return;
     }
-    
+
     onConfirm({
       projeto,
+      capacidadeTecnica,
       pesquisa,
       documentosEntidade,
       certidoes,
@@ -60,8 +62,8 @@ export default function PrintOptionsModal({ isOpen, onClose, onConfirm, title }:
       rubricaUrl: numerarRubricar ? rubricaUrl : undefined
     });
 
-    // Reset state for next use
     setProjeto(true);
+    setCapacidadeTecnica(false);
     setPesquisa(true);
     setDocumentosEntidade(false);
     setCertidoes(false);
@@ -107,33 +109,40 @@ export default function PrintOptionsModal({ isOpen, onClose, onConfirm, title }:
           </div>
 
           <div className="space-y-3">
-            <OptionRow 
-              icon={FileText} 
-              label="Plano de Trabalho Completo" 
-              desc="Cronogramas, Metas, Resumo Financeiro e Dados Gerais" 
-              checked={projeto} 
-              onChange={setProjeto} 
+            <OptionRow
+              icon={FileText}
+              label="Plano de Trabalho Completo"
+              desc="Cronogramas, Metas, Resumo Financeiro e Dados Gerais"
+              checked={projeto}
+              onChange={setProjeto}
             />
-            <OptionRow 
-              icon={FileBadge} 
-              label="Pesquisa de Preços (IN 65/2021)" 
-              desc="Laudos estatísticos e juntada das cotações públicas/manuais" 
-              checked={pesquisa} 
-              onChange={setPesquisa} 
+            <OptionRow
+              icon={Award}
+              label="Capacidade Técnica e Operacional"
+              desc="Histórico institucional e capacidade técnica da entidade"
+              checked={capacidadeTecnica}
+              onChange={setCapacidadeTecnica}
             />
-            <OptionRow 
-              icon={FileText} 
-              label="Documentos da Entidade" 
-              desc="Estatuto, Atas, CNPJ e demais anexos institucionais" 
-              checked={documentosEntidade} 
-              onChange={setDocumentosEntidade} 
+            <OptionRow
+              icon={FileText}
+              label="Documentos da Entidade"
+              desc="Estatuto, Atas, CNPJ e demais anexos institucionais"
+              checked={documentosEntidade}
+              onChange={setDocumentosEntidade}
             />
-            <OptionRow 
-              icon={FileBadge} 
-              label="Certidões da Entidade" 
-              desc="Certidões ativas anexadas ao perfil da entidade" 
-              checked={certidoes} 
-              onChange={setCertidoes} 
+            <OptionRow
+              icon={FileBadge}
+              label="Certidões da Entidade"
+              desc="Certidões ativas anexadas ao perfil da entidade"
+              checked={certidoes}
+              onChange={setCertidoes}
+            />
+            <OptionRow
+              icon={FileBadge}
+              label="Pesquisa de Preços (IN 65/2021)"
+              desc="Laudos estatísticos e juntada das cotações públicas/manuais (anexo final)"
+              checked={pesquisa}
+              onChange={setPesquisa}
             />
           </div>
 
