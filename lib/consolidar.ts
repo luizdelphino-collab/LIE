@@ -82,74 +82,45 @@ function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, numb
   ];
 }
 
+/** Baixa imagem como dataURL. Pra URLs do Firebase Storage usa getBlob
+ *  nativo (depende do CORS configurado em cors.json). Pra URLs externas,
+ *  fetch direto. Sem gambiarra de proxy — se CORS não estiver no bucket,
+ *  nenhum proxy resolve mesmo (testado: corsproxy.io/AllOrigins falham). */
 async function fetchImageAsBase64(url: string): Promise<string | null> {
   if (!url) return null;
   if (url.startsWith('data:')) return url;
 
-  // 1. Tentar via Storage SDK (getBlob)
-  try {
+  const toDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+  // Firebase Storage → SDK nativo (precisa CORS configurado no bucket).
+  if (url.includes('firebasestorage.googleapis.com')) {
     const match = url.match(/\/o\/([^?]+)/);
     const path = match ? decodeURIComponent(match[1]) : null;
     if (path) {
-      const blob = await getBlob(ref(storage, path));
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
+      try {
+        const blob = await getBlob(ref(storage, path));
+        return await toDataUrl(blob);
+      } catch (e) {
+        console.error(`Falha ao baixar imagem do Storage (${path}). CORS configurado? Veja cors.json:`, e);
+        return null;
+      }
     }
-  } catch (e) {
-    console.warn('Erro ao carregar via Storage Blob, tentando fetch direto:', e);
   }
 
-  // 2. Tentar Fetch direto
+  // URL externa.
   try {
     const resp = await fetch(url);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await toDataUrl(await resp.blob());
   } catch (e) {
-    console.warn('Fetch direto bloqueado por CORS, tentando Proxy 1 (Weserv):', e);
+    console.error('Falha ao baixar imagem externa:', url, e);
+    return null;
   }
-
-  // 3. Tentar via Proxy Weserv
-  try {
-    const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png`;
-    const resp = await fetch(weservUrl);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
-  } catch (e) {
-    console.warn('Proxy Weserv falhou, tentando Proxy 2 (AllOrigins):', e);
-  }
-
-  // 4. Tentar via Proxy AllOrigins
-  try {
-    const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    const resp = await fetch(allOriginsUrl);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
-  } catch (e) {
-    console.error('Todos os métodos de carregamento de imagem falharam:', e);
-  }
-
-  return null;
 }
 
 function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {
