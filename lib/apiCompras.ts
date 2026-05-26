@@ -198,7 +198,7 @@ export async function consultarPrecosPraticados(codigoItemCatalogo: number, valo
           unidadeMedida: r.unidadeMedida || "unidade",
           valorUnitario: Number(r.valorUnitario) || 0,
           fonte: 'compras.gov.br',
-          localizacaoUrl: r.linkProcesso || `https://comprasnet.gov.br/livre/Pregao/ata2.asp?co_uasg=${r.uasg || '180001'}`
+          localizacaoUrl: r.linkProcesso || `https://pncp.gov.br/app/contratacoes?q=${r.uasg || '180001'}`
         }));
       }
     }
@@ -257,7 +257,7 @@ function gerarPrecosFallback(codigo: number, valorUnitarioEstimado?: number): Pr
       unidadeMedida: material?.unidade || "unidade",
       valorUnitario: Number(unitPrice.toFixed(2)),
       fonte: i % 3 === 0 ? 'pncp' : 'compras.gov.br',
-      localizacaoUrl: `https://comprasnet.gov.br/livre/Pregao/ata2.asp?co_uasg=${o.uasg}`
+      localizacaoUrl: `https://pncp.gov.br/app/contratacoes?q=${o.uasg}`
     });
   });
 

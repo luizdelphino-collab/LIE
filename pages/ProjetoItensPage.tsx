@@ -631,7 +631,7 @@ export default function ProjetoItensPage() {
                     </button>
                     {it.pesquisado && (
                       <a 
-                        href={`/validar?token=${it.tokenPesquisa}`}
+                        href={`/#/validar?token=${it.tokenPesquisa}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition flex items-center justify-center" 

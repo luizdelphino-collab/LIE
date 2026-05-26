@@ -57,39 +57,52 @@ function lightenRgb(rgb: [number, number, number], amount = 0.92): [number, numb
     Math.round(rgb[2] + (255 - rgb[2]) * amount),
   ];
 }
+const withTimeout = <T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
+  ]);
+};
 
 async function fetchImageAsBase64(url: string): Promise<string | null> {
   if (!url) return null;
   if (url.startsWith('data:')) return url;
 
-  try {
-    const match = url.match(/\/o\/([^?]+)/);
-    const path = match ? decodeURIComponent(match[1]) : null;
-    if (path) {
-      const blob = await getBlob(ref(storage, path));
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
+  // Se for Firebase Storage, usar Proxy direto para evitar os erros vermelhos de CORS no console do navegador
+  if (url.includes('firebasestorage.googleapis.com')) {
+    try {
+      const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png`;
+      const resp = await fetch(weservUrl);
+      if (resp.ok) {
+        const blob = await resp.blob();
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch (e) {
+      console.warn('Proxy Weserv falhou:', e);
     }
-  } catch (e) {
-    console.warn('Erro ao carregar via Storage Blob:', e);
+    
+    try {
+      const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      const resp = await fetch(allOriginsUrl);
+      if (resp.ok) {
+        const blob = await resp.blob();
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch (e) {
+      console.error('Todos os métodos de carregamento de imagem falharam:', e);
+    }
+    return null;
   }
 
-  try {
-    const resp = await fetch(url);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
-  } catch (e) {
-    console.warn('Fetch direto bloqueado por CORS:', e);
-  }
+  // Caso não seja Firebase, tenta o fluxo normal
 
   try {
     const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png`;
@@ -125,41 +138,54 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
 }
 
 async function fetchPdfAsArrayBuffer(url: string): Promise<ArrayBuffer> {
+  if (url.includes('firebasestorage.googleapis.com')) {
+    // Usar Proxy direto para evitar erros vermelhos de CORS no console
+    const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const respProxy = await fetch(proxiedUrl);
+    if (!respProxy.ok) {
+      throw new Error(`Falha ao baixar PDF (Proxy AllOrigins falhou): ${respProxy.statusText}`);
+    }
+    return await respProxy.arrayBuffer();
+  }
+
   const match = url.match(/\/o\/([^?]+)/);
   const path = match ? decodeURIComponent(match[1]) : null;
   if (path) {
     try {
-      const blob = await getBlob(ref(storage, path));
+      const blob = await withTimeout(getBlob(ref(storage, path)), 5000, "Timeout getBlob pdf");
       return await blob.arrayBuffer();
     } catch (e) {
       console.warn('Erro ao carregar PDF via getBlob:', e);
     }
   }
 
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    throw new Error(`Falha ao baixar PDF: ${resp.statusText}`);
+  try {
+    const resp = await fetch(url);
+    if (resp.ok) {
+      return await resp.arrayBuffer();
+    }
+  } catch (e) {
+    console.warn('Erro CORS no fetch do PDF, tentando proxy...', e);
   }
-  return await resp.arrayBuffer();
+
+  // Fallback para proxy AllOrigins para bypass de CORS
+  const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  const respProxy = await fetch(proxiedUrl);
+  if (!respProxy.ok) {
+    throw new Error(`Falha ao baixar PDF (CORS e Proxy falharam): ${respProxy.statusText}`);
+  }
+  return await respProxy.arrayBuffer();
 }
 
 async function obterPdfPublicoCacheado(r: any): Promise<ArrayBuffer | null> {
-  // Criar uma chave de arquivo única e limpa de caracteres especiais
   const fileKey = `${r.fonte}_${r.identificadorCompra.replace(/[^a-zA-Z0-9]/g, '_')}`;
   const cachePath = `public_quote_pdfs/${fileKey}.pdf`;
   
-  // 1. Tentar ler diretamente do cache no Storage (ultra-rápido se já capturado)
-  try {
-    const blob = await getBlob(ref(storage, cachePath));
-    return await blob.arrayBuffer();
-  } catch (e) {
-    console.log(`PDF público de ${r.identificadorCompra} não localizado em cache. Acionando serviço de captura backend...`);
-  }
-
-  // 2. Se não existir, chamamos a Cloud Function para capturar e gerar
+  // Como estamos no navegador, o getBlob causa erro no console se não tiver CORS
+  // Como as cotações públicas são abertas, vamos invocar o proxy imediatamente
   try {
     const projectId = storage.app.options.projectId;
-    const region = 'us-central1'; // Região padrão do Firebase
+    const region = 'us-central1';
     const funcUrl = `https://${region}-${projectId}.cloudfunctions.net/obterPdfContratacaoPublica`;
     
     const resp = await fetch(funcUrl, {
@@ -530,7 +556,17 @@ function drawToc(
   }
 }
 
-export async function consolidarProjeto(projetoId: string, rubricaUrl?: string): Promise<void> {
+export interface PrintOptions {
+  projeto: boolean;
+  pesquisa: boolean;
+  documentosEntidade: boolean;
+  certidoes: boolean;
+  numerarRubricar: boolean;
+  rubricaUrl?: string;
+}
+
+export async function consolidarProjeto(projetoId: string, options: PrintOptions = { projeto: true, pesquisa: true, documentosEntidade: false, certidoes: false, numerarRubricar: false }): Promise<void> {
+  const rubricaUrl = options.numerarRubricar ? options.rubricaUrl : undefined;
   const projSnap = await getDoc(doc(db, 'projects', projetoId));
   if (!projSnap.exists()) throw new Error('Projeto não encontrado');
   const projeto = { id: projSnap.id, ...projSnap.data() } as Projeto;
@@ -631,6 +667,8 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
 
   const toc: TocEntry[] = [];
 
+  if (options.projeto) {
+  if (options.projeto) {
   // ========== CAP 1: IDENTIFICAÇÃO DO PROJETO (página 3) ==========
   forceNewPage(state);
   const p1 = (pdf as any).internal.getCurrentPageInfo().pageNumber;
@@ -1160,7 +1198,6 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     pdf.setFontSize(8);
     pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(60, 60, 60);
-    
     // Média e Mediana
     pdf.text(`Média da Cesta: R$ ${it.mediaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 6, summaryY + 13);
     pdf.text(`Mediana da Cesta: R$ ${it.medianaReferencia?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, MARGIN + 6, summaryY + 18);
@@ -1176,17 +1213,23 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
   // ========== RODAPÉS em todas as páginas (exceto capa e sumário) ==========
   const totalPages = (pdf as any).internal.getNumberOfPages();
 
-  // Página 2 = sumário: desenhar o sumário agora que sabemos as páginas
-  drawToc(pdf, entidade, logoBase64, cor, toc);
-  // Rodapé do sumário (página 2)
-  pdf.setPage(2);
-  drawLetterheadFooter(pdf, entidade, 2, totalPages, rubricaUrl);
-
-  // Rodapés nas páginas 3 em diante
-  for (let i = 3; i <= totalPages; i++) {
-    pdf.setPage(i);
-    drawLetterheadFooter(pdf, entidade, i, totalPages, rubricaUrl);
+  if (options.projeto) {
+    // Página 2 = sumário: desenhar o sumário agora que sabemos as páginas
+    drawToc(pdf, entidade, logoBase64, cor, toc);
+    // Rodapé do sumário (página 2)
+    pdf.setPage(2);
+    drawLetterheadFooter(pdf, entidade, 2, totalPages, rubricaUrl);
   }
+
+  // Rodapés nas páginas 3 em diante (apenas no que foi gerado pelo jsPDF)
+  
+  if (!options.numerarRubricar && options.projeto) {
+    for (let i = 3; i <= totalPages; i++) {
+      pdf.setPage(i);
+      drawLetterheadFooter(pdf, entidade, i, totalPages, rubricaUrl);
+    }
+  }
+
 
   // Salvar o jsPDF em ArrayBuffer para manipulação com pdf-lib
   const jsPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
@@ -1196,35 +1239,99 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     const mainPdfDoc = await PDFDocument.load(jsPdfBytes);
     
     // Buscar todas as referências dos itens pesquisados e fazer a juntada física (manuais e públicas)
-    for (const it of itensPesquisados) {
-      if (it.referencias && Array.isArray(it.referencias)) {
-        for (const r of it.referencias) {
-          try {
-            if (r.fonte === 'fomento' && r.localizacaoUrl) {
-              console.log(`Efetuando a juntada de documento manual: ${r.arquivoNome || r.identificadorCompra} de ${r.orgaoLicitante}`);
-              const bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
-              const docToMerge = await PDFDocument.load(bytes);
-              const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
-              copiedPages.forEach(page => {
-                mainPdfDoc.addPage(page);
-              });
-            } else if (r.fonte === 'compras.gov.br' || r.fonte === 'pncp') {
-              console.log(`Efetuando a juntada de documento público: ${r.identificadorCompra} de ${r.orgaoLicitante}`);
-              const bytes = await obterPdfPublicoCacheado(r);
-              if (bytes) {
-                const docToMerge = await PDFDocument.load(bytes);
-                const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
-                copiedPages.forEach(page => {
-                  mainPdfDoc.addPage(page);
-                });
+    if (options.pesquisa) {
+      for (const it of itensPesquisados) {
+        if (it.referencias && Array.isArray(it.referencias)) {
+          for (const r of it.referencias) {
+            try {
+              if (r.fonte === 'fomento' && r.localizacaoUrl) {
+                console.log(`Efetuando a juntada de documento manual: ${r.arquivoNome || r.identificadorCompra} de ${r.orgaoLicitante}`);
+                const bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
+                if (bytes) {
+                  const docToMerge = await PDFDocument.load(bytes);
+                  const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
+                  copiedPages.forEach(page => mainPdfDoc.addPage(page));
+                }
+              } else if ((r.fonte === 'compras.gov.br' || r.fonte === 'pncp') && r.localizacaoUrl) {
+                console.log(`Efetuando a juntada de documento público (via URL): ${r.identificadorCompra} de ${r.orgaoLicitante}`);
+                const bytes = await fetchPdfAsArrayBuffer(r.localizacaoUrl);
+                if (bytes) {
+                  const docToMerge = await PDFDocument.load(bytes);
+                  const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
+                  copiedPages.forEach(page => mainPdfDoc.addPage(page));
+                }
+              } else if (r.fonte === 'compras.gov.br' || r.fonte === 'pncp') {
+                console.log(`Efetuando a juntada de documento público (via Cache): ${r.identificadorCompra} de ${r.orgaoLicitante}`);
+                const bytes = await obterPdfPublicoCacheado(r);
+                if (bytes) {
+                  const docToMerge = await PDFDocument.load(bytes);
+                  const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
+                  copiedPages.forEach(page => mainPdfDoc.addPage(page));
+                }
               }
+            } catch (err) {
+              console.error(`Falha ao juntar documento de cotação de ${r.orgaoLicitante}:`, err);
             }
-          } catch (err) {
-            console.error(`Falha ao juntar documento de cotação de ${r.orgaoLicitante}:`, err);
           }
         }
       }
     }
+
+    if (options.documentosEntidade || options.certidoes) {
+      const entDocsSnap = await getDocs(collection(db, `entities/${projeto.entidadeId}/documentos`));
+      const entDocs = entDocsSnap.docs.map(d => d.data());
+      for (const d of entDocs) {
+        if (!d.arquivoUrl) continue;
+        const isCertidao = d.tipo === 'Certidão';
+        if ((options.certidoes && isCertidao) || (options.documentosEntidade && !isCertidao)) {
+          try {
+            console.log(`Juntada de doc da entidade: ${d.nome}`);
+            const bytes = await fetchPdfAsArrayBuffer(d.arquivoUrl);
+            if (bytes) {
+              const docToMerge = await PDFDocument.load(bytes);
+              const copiedPages = await mainPdfDoc.copyPages(docToMerge, docToMerge.getPageIndices());
+              copiedPages.forEach(page => mainPdfDoc.addPage(page));
+            }
+          } catch(e) {
+             console.error(`Falha ao juntar doc ${d.nome}:`, e);
+          }
+        }
+      }
+    }
+
+    if (options.numerarRubricar) {
+      const pages = mainPdfDoc.getPages();
+      const totalMergedPages = pages.length;
+      
+      let rubricaImage = null;
+      if (rubricaUrl) {
+        try {
+          const imgBytes = await fetch(rubricaUrl).then(res => res.arrayBuffer());
+          rubricaImage = await mainPdfDoc.embedPng(imgBytes);
+        } catch(e) { console.error('Falha ao embutir rubrica no pdf-lib', e); }
+      }
+
+      for (let i = 2; i < totalMergedPages; i++) {
+        const page = pages[i];
+        const { width, height } = page.getSize();
+        
+        page.drawText(`Página ${i + 1} de ${totalMergedPages}`, {
+          x: width / 2 - 30,
+          y: 20,
+          size: 9,
+        });
+
+        if (rubricaImage) {
+          page.drawImage(rubricaImage, {
+            x: 20,
+            y: 15,
+            width: 30,
+            height: 30
+          });
+        }
+      }
+    }
+
 
     // Salvar o PDF consolidado com todas as páginas unificadas fisicamente
     const mergedPdfBytes = await mainPdfDoc.save();
@@ -1242,4 +1349,6 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     // Fallback: baixar apenas o PDF básico sem anexos para evitar que o usuário fique sem o relatório
     pdf.save(`Projeto_${projeto.titulo.replace(/\s/g, '_')}.pdf`);
   }
+}
+}
 }

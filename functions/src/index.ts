@@ -6,7 +6,7 @@ admin.initializeApp();
 
 export const obterPdfContratacaoPublica = functions
   .runWith({ timeoutSeconds: 300, memory: '1GB' })
-  .https.onCall(async (data, context) => {
+  .https.onCall(async (data: any, context: functions.https.CallableContext) => {
     const { url, token } = data;
     if (!url) {
       throw new functions.https.HttpsError('invalid-argument', 'A URL é obrigatória.');
@@ -41,7 +41,11 @@ export const obterPdfContratacaoPublica = functions
       await page.setViewport({ width: 1200, height: 800 });
       
       // Abre a página governamental da Ata ou Edital
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+      const response = await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+      const status = response ? response.status() : 200;
+      if (status >= 400) {
+        throw new Error(`O servidor governamental respondeu com status HTTP ${status}.`);
+      }
 
       // Otimização: Forçar quebras de linha limpas para impressão
       await page.addStyleTag({
