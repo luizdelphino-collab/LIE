@@ -1350,7 +1350,13 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
 
   // ========== CAPACIDADE TÉCNICA E OPERACIONAL (opcional) ==========
   let capacidadeTecnicaStartPage: number | null = null;
+  let capacidadeDocs: { id: string; nome: string; tipo: string; ano: number; orgaoEmitente?: string; arquivoUrl: string }[] = [];
   if (options.capacidadeTecnica) {
+    const capDocsSnap = await getDocs(collection(db, `entities/${projeto.entidadeId}/capacidadeDocumentos`));
+    capacidadeDocs = capDocsSnap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .sort((a, b) => (b.ano || 0) - (a.ano || 0));
+
     forceNewPage(state);
     capacidadeTecnicaStartPage = (pdf as any).internal.getCurrentPageInfo().pageNumber;
 
@@ -1364,16 +1370,68 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
     }
 
     if ((entidade as any).capacidadeTecnica) {
-      addSubTitle(state, 'Capacidade Técnica e Operacional');
+      addSubTitle(state, 'Descritivo da Capacidade Técnica');
       addBodyText(state, (entidade as any).capacidadeTecnica);
+      state.y += 4;
     }
 
-    if (!((entidade as any).historico) && !((entidade as any).capacidadeTecnica)) {
+    if (capacidadeDocs.length > 0) {
+      checkPageSpace(state, 40);
+      addSubTitle(state, 'Documentos Comprobatórios');
+      state.y += 1;
+
+      const tipoLabel = (t: string) => {
+        if (t === 'portfolio') return 'Portfólio';
+        if (t === 'atestado') return 'Atestado';
+        if (t === 'contrato') return 'Contrato Vigente';
+        return 'Outro';
+      };
+
+      const rows = capacidadeDocs.map((d, i) => [
+        toRoman(i + 1),
+        String(d.ano || '-'),
+        tipoLabel(d.tipo),
+        d.nome || '-',
+        d.orgaoEmitente || '-'
+      ]);
+
+      autoTable(pdf, {
+        startY: state.y,
+        head: [['Nº', 'Ano', 'Tipo', 'Documento', 'Órgão Emitente']],
+        body: rows,
+        margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
+        headStyles: { fillColor: cor, textColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: corClara },
+        styles: { fontSize: 9, textColor: [0, 0, 0] },
+        columnStyles: {
+          0: { cellWidth: 12, halign: 'center' },
+          1: { cellWidth: 15, halign: 'center' },
+          2: { cellWidth: 28 },
+          3: { cellWidth: 75 },
+          4: { cellWidth: 45 },
+        },
+        didDrawPage: (data) => {
+          if (data.doc.internal.getNumberOfPages() > 1)
+            drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+        }
+      });
+      state.y = (pdf as any).lastAutoTable.finalY + 6;
+
+      pdf.setFontSize(8);
+      pdf.setFont('helvetica', 'italic');
+      pdf.setTextColor(100, 100, 100);
+      pdf.text(
+        'Os documentos listados acima seguem em anexo, integralmente reproduzidos, nas próximas páginas.',
+        MARGIN, state.y
+      );
+    }
+
+    if (!((entidade as any).historico) && !((entidade as any).capacidadeTecnica) && capacidadeDocs.length === 0) {
       pdf.setFontSize(9.5);
       pdf.setFont('helvetica', 'italic');
       pdf.setTextColor(140, 140, 140);
       pdf.text(
-        'A entidade ainda não cadastrou histórico institucional ou capacidade técnica/operacional.',
+        'A entidade ainda não cadastrou histórico, descritivo de capacidade técnica nem documentos comprobatórios.',
         MARGIN, state.y
       );
     }
@@ -1457,7 +1515,29 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
       }
     }
 
-    // Ordem: Documentos da Entidade → Certidões → Pesquisa
+    // Ordem: Comprobatórios da Capacidade Técnica → Documentos da Entidade → Certidões → Pesquisa
+    if (options.capacidadeTecnica && capacidadeDocs.length > 0) {
+      const tipoLabel = (t: string) => {
+        if (t === 'portfolio') return 'Portfólio';
+        if (t === 'atestado') return 'Atestado';
+        if (t === 'contrato') return 'Contrato Vigente';
+        return 'Outro';
+      };
+      for (const d of capacidadeDocs) {
+        const docStartPage = mainPdfDoc.getPageCount() + 1;
+        try {
+          const bytes = await fetchPdfAsArrayBuffer(d.arquivoUrl);
+          if (bytes) {
+            await mergePdfBytes(mainPdfDoc, bytes);
+            const label = `  • [${d.ano}] ${tipoLabel(d.tipo)} — ${d.nome}`;
+            toc.push({ num: '', title: label, page: docStartPage });
+          }
+        } catch (e) {
+          console.error(`Falha ao juntar comprobatório ${d.nome}:`, e);
+        }
+      }
+    }
+
     if (options.documentosEntidade) {
       await addBlock(
         'Documentos da Entidade',
