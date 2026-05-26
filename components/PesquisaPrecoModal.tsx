@@ -60,7 +60,33 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         setMateriaisSemente(localResults);
         if (localResults.length > 0) {
           // Auto-seleciona o primeiro se houver correspondência direta
-          setMaterialSelecionado(localResults[0]);
+          const selected = localResults[0];
+          setMaterialSelecionado(selected);
+          
+          // Disparar a consulta de preços imediatamente para carregar todas as cotações públicas
+          setLoading(true);
+          consultarPrecosPraticados(selected.codigoItem, item.valorUnitario)
+            .then(resultados => {
+              resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
+              setPrecosGoverno(resultados);
+              
+              // Auto-selecionar todas as referências que são superiores ou iguais ao estimado do projeto
+              const elegiveis = resultados.filter(p => p.valorUnitario >= item.valorUnitario);
+              if (elegiveis.length > 0) {
+                setCestaReferencias(prev => {
+                  const novas = elegiveis.filter(e => 
+                    !prev.some(p => `${p.fonte}-${p.identificadorCompra}-${p.valorUnitario}` === `${e.fonte}-${e.identificadorCompra}-${e.valorUnitario}`)
+                  );
+                  return [...prev, ...novas];
+                });
+              }
+            })
+            .catch(err => {
+              console.error("Erro ao carregar preços praticados automaticamente:", err);
+            })
+            .finally(() => {
+              setLoading(false);
+            });
         }
       }
       
