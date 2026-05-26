@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileDown, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Search, FileDown, Loader2, Trash2, Award } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { consolidarEntidade } from '../lib/consolidar';
@@ -172,6 +172,13 @@ export default function EntidadesPage() {
                   </td>
                   <td className="px-4 py-3 text-center" onClick={(ev) => ev.stopPropagation()}>
                     <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => navigate(`/entidades/${e.id}/capacidade-tecnica`)}
+                        title="Capacidade Técnica e Operacional"
+                        className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                      >
+                        <Award className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={(ev) => handleConsolidar(ev, e.id)}
                         disabled={!!consolidando}
