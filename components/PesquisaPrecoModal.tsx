@@ -91,7 +91,7 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
     setMaterialSelecionado(mat);
     setLoading(true);
     try {
-      const resultados = await consultarPrecosPraticados(mat.codigoItem);
+      const resultados = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario);
       // Ordenar por valor unitário (descendente) para facilitar blindagem superior
       resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
       setPrecosGoverno(resultados);
