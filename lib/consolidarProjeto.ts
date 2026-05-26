@@ -922,11 +922,15 @@ export async function consolidarProjeto(projetoId: string, rubricaUrl?: string):
     margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: corClara },
-     // ========== CERTIFICADOS DE AUTENTICIDADE E COTAÇÃO (IN 65/2021) ==========
-  const itemsSnap = await getDocs(collection(db, `projects/${projetoId}/items`));
-  const itensPesquisados = itemsSnap.docs
-    .map(d => ({ id: d.id, ...d.data() } as ItemProjeto))
-    .filter(it => it.pesquisado === true);
+    styles: { fontSize: 9, textColor: [0, 0, 0] },
+    didDrawPage: (data) => {
+      if (data.doc.internal.getNumberOfPages() > 1)
+        drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+    }
+  });
+
+  // ========== CERTIFICADOS DE AUTENTICIDADE E COTAÇÃO (IN 65/2021) ==========
+  const itensPesquisados = itensProjeto.filter(it => it.pesquisado === true);
 
   for (const it of itensPesquisados) {
     forceNewPage(state);
