@@ -609,25 +609,27 @@ function renderPesquisaCertificadosJsPdf(
     const refRows = it.referencias?.map((r: any) => [
       r.fonte.toUpperCase(),
       r.orgaoLicitante,
-      r.identificadorCompra,
-      r.dataHomologacao,
+      r.identificadorCompra || '-',
+      r.uasg || '-',
+      r.dataHomologacao || '-',
       r.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
     ]) || [];
 
     autoTable(pdf, {
       startY: state.y,
-      head: [['Fonte', 'Órgão Licitante / Compra', 'Identificador', 'Data', 'Unitário']],
-      body: refRows.length > 0 ? refRows : [['—', '—', '—', '—', '—']],
+      head: [['Fonte', 'Órgão Licitante / Compra', 'Identificador', 'UASG', 'Data', 'Unitário']],
+      body: refRows.length > 0 ? refRows : [['—', '—', '—', '—', '—', '—']],
       margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
       headStyles: { fillColor: cor },
       alternateRowStyles: { fillColor: corClara },
       styles: { fontSize: 7.5 },
       columnStyles: {
-        0: { cellWidth: 20 },
-        1: { cellWidth: 60 },
-        2: { cellWidth: 45 },
-        3: { cellWidth: 20 },
-        4: { cellWidth: 25 },
+        0: { cellWidth: 22 },
+        1: { cellWidth: 55 },
+        2: { cellWidth: 35 },
+        3: { cellWidth: 18, halign: 'center' },
+        4: { cellWidth: 18, halign: 'center' },
+        5: { cellWidth: 22, halign: 'right' },
       },
       didDrawPage: (data) => {
         if (data.doc.internal.getNumberOfPages() > 1) {
@@ -636,7 +638,36 @@ function renderPesquisaCertificadosJsPdf(
       }
     });
 
-    state.y = (pdf as any).lastAutoTable.finalY + 8;
+    state.y = (pdf as any).lastAutoTable.finalY + 4;
+
+    // Lista de links rastreáveis (URLs reais pra auditoria pelo parecerista)
+    const refsComLink = (it.referencias || []).filter((r: any) => r.localizacaoUrl);
+    if (refsComLink.length > 0) {
+      checkPageSpace(state, 8 + refsComLink.length * 5);
+      pdf.setFontSize(8);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(80, 80, 80);
+      pdf.text('Links de comprovação (rastreabilidade pública):', MARGIN, state.y);
+      state.y += 4;
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7);
+      for (let i = 0; i < refsComLink.length; i++) {
+        const r = refsComLink[i];
+        const label = `[${i + 1}] ${r.orgaoLicitante.substring(0, 50)} — ${r.identificadorCompra || r.uasg || ''}: `;
+        pdf.setTextColor(80, 80, 80);
+        pdf.text(label, MARGIN, state.y);
+        const labelWidth = pdf.getTextWidth(label);
+        const maxUrlWidth = CONTENT_W - labelWidth - 2;
+        const urlLines = pdf.splitTextToSize(r.localizacaoUrl, maxUrlWidth);
+        pdf.setTextColor(0, 102, 204);
+        pdf.textWithLink(urlLines[0], MARGIN + labelWidth, state.y, { url: r.localizacaoUrl });
+        state.y += 4;
+      }
+      state.y += 2;
+    }
+
+    state.y += 4;
 
     checkPageSpace(state, 40);
     const summaryY = state.y;

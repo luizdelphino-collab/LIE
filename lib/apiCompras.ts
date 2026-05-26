@@ -184,113 +184,56 @@ export function obterDetalheMaterialPorCodigo(codigo: number, termoFallback?: st
   return null;
 }
 
-// 2. Consulta de Preços Praticados no Compras.gov.br com fallback resiliente para offline/timeouts
-// Passa pela Cloud Function 'consultarPrecosCompras' pra contornar o CORS bloqueado pela API gov.
-export async function consultarPrecosPraticados(codigoItemCatalogo: number, valorUnitarioEstimado?: number): Promise<PrecoReferencia[]> {
+// 2. Consulta de Preços Praticados — APENAS DADOS REAIS DO COMPRAS.GOV.BR/PNCP
+//
+// IMPORTANTE: este método NÃO gera mais cotações simuladas. Se a API real falhar
+// ou retornar vazio, devolve array vazio — cabe ao usuário cadastrar manualmente
+// uma cotação de fomento (upload do PDF) ou aceitar que o item fique sem cesta
+// estatística. Cotações inventadas em documento oficial (IN 65/2021) podem ser
+// interpretadas como declaração falsa.
+//
+// Passa pela Cloud Function 'consultarPrecosCompras' pra contornar o CORS
+// bloqueado pela API governamental.
+export async function consultarPrecosPraticados(
+  codigoItemCatalogo: number,
+  _valorUnitarioEstimado?: number
+): Promise<PrecoReferencia[]> {
   const url = consultarPrecosComprasUrl(codigoItemCatalogo);
 
   try {
     const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
 
-    if (response.ok) {
-      const data = await response.json();
-      const registros = data.resultado || data.data || [];
-      if (Array.isArray(registros) && registros.length > 0) {
-        return registros.map((r: any) => ({
-          orgaoLicitante: r.orgaoLicitante || r.nomeOrgao || "ÓRGÃO PÚBLICO NÃO DETALHADO",
-          uasg: r.uasg || r.codigoUasg || "180001",
-          identificadorCompra: r.idCompra || r.processo || "Pregão Eletrônico",
-          dataHomologacao: r.dataCompra || r.dataResultado || new Date().toISOString().split('T')[0],
-          quantidade: r.quantidade || 10,
-          unidadeMedida: r.unidadeMedida || "unidade",
-          valorUnitario: Number(r.valorUnitario) || 0,
-          fonte: 'compras.gov.br',
-          localizacaoUrl: r.linkProcesso || `https://pncp.gov.br/app/contratacoes?q=${r.uasg || '180001'}`
-        }));
-      }
-    } else {
-      console.warn(`Cloud Function consultarPrecosCompras retornou HTTP ${response.status}, usando fallback.`);
+    if (!response.ok) {
+      console.warn(`API Compras.gov.br retornou HTTP ${response.status}.`);
+      return [];
     }
+
+    const data = await response.json();
+    const registros = data.resultado || data.data || [];
+    if (!Array.isArray(registros) || registros.length === 0) {
+      return [];
+    }
+
+    return registros
+      .map((r: any) => {
+        const uasg = r.uasg || r.codigoUasg || '';
+        const linkProcesso = r.linkProcesso
+          || (uasg ? `https://pncp.gov.br/app/contratacoes?q=${uasg}` : '');
+        return {
+          orgaoLicitante: r.orgaoLicitante || r.nomeOrgao || 'ÓRGÃO PÚBLICO',
+          uasg,
+          identificadorCompra: r.idCompra || r.processo || r.numeroProcesso || '',
+          dataHomologacao: r.dataCompra || r.dataResultado || '',
+          quantidade: r.quantidade || 0,
+          unidadeMedida: r.unidadeMedida || '',
+          valorUnitario: Number(r.valorUnitario) || 0,
+          fonte: 'compras.gov.br' as const,
+          localizacaoUrl: linkProcesso
+        };
+      })
+      .filter((r: PrecoReferencia) => r.valorUnitario > 0);
   } catch (err) {
-    console.warn("Proxy de pesquisa de preços inoperante, aplicando cotações de fallback seguras:", err);
-  }
-
-  // Fallback Resiliente (dados plausíveis baseados no valor estimado)
-  return gerarPrecosFallback(codigoItemCatalogo, valorUnitarioEstimado);
-}
-
-function gerarPrecosFallback(codigo: number, valorUnitarioEstimado?: number): PrecoReferencia[] {
-  const material = CATMAT_SPORTS_SEED.find(m => m.codigoItem === codigo);
-  const baseName = material ? material.nome : "BEM DO PROJETO";
-  
-  // Usar valor estimado sugerido no projeto se fornecido (blindagem automática 100% garantida superior)
-  // Caso contrário, recorre ao mock base
-  const baseMockPrice = valorUnitarioEstimado || obterPrecoBaseMock(codigo);
-  
-  const ORGAOS = [
-    { nome: "MINISTÉRIO DO ESPORTE - SECRETARIA NACIONAL", uasg: "180001", compra: "Pregão Eletrônico nº 14/2025" },
-    { nome: "SECRETARIA DE ESPORTES DO ESTADO DE SÃO PAULO", uasg: "925001", compra: "Ata de Registro de Preços nº 45/2025" },
-    { nome: "PREFEITURA MUNICIPAL DE SÃO PAULO - SEME", uasg: "250003", compra: "Pregão Eletrônico nº 08/2026" },
-    { nome: "SECRETARIA DE ESTADO DE ESPORTE E LAZER DO RIO DE JANEIRO", uasg: "926002", compra: "Pregão Eletrônico nº 22/2025" },
-    { nome: "PREFEITURA MUNICIPAL DE BELO HORIZONTE - COPASA/SMEL", uasg: "253002", compra: "Ata de Registro de Preços nº 102/2025" },
-    { nome: "SECRETARIA DE ESTADO DA EDUCAÇÃO DO PARANÁ - SEED", uasg: "925007", compra: "Pregão Eletrônico nº 89/2025" },
-    { nome: "PREFEITURA MUNICIPAL DE CURITIBA - SMELJ", uasg: "250012", compra: "Pregão Eletrônico nº 41/2026" },
-    { nome: "MINISTÉRIO DA DEFESA - EXÉRCITO BRASILEIRO - DECEX", uasg: "160002", compra: "Pregão Eletrônico nº 55/2025" },
-    { nome: "SECRETARIA DE ESPORTES E LAZER DO RIO GRANDE DO SUL", uasg: "925012", compra: "Ata de Registro de Preços nº 12/2026" },
-    { nome: "PREFEITURA MUNICIPAL DE PORTO ALEGRE - SME", uasg: "250018", compra: "Pregão Eletrônico nº 33/2026" },
-    { nome: "SECRETARIA DE ESTADO DE JUVENTUDE, ESPORTE E LAZER DO AMAZONAS", uasg: "925032", compra: "Pregão Eletrônico nº 74/2025" },
-    { nome: "PREFEITURA MUNICIPAL DE MANAUS - SEMJEL", uasg: "250035", compra: "Ata de Registro de Preços nº 88/2025" },
-    { nome: "SECRETARIA DE ESTADO DE ESPORTE E LAZER DO DISTRITO FEDERAL", uasg: "970001", compra: "Pregão Eletrônico nº 104/2025" },
-    { nome: "PREFEITURA MUNICIPAL DE SALVADOR - SMEL", uasg: "250055", compra: "Pregão Eletrônico nº 19/2026" },
-    { nome: "SECRETARIA DE ESTADO DA EDUCAÇÃO E DO ESPORTE DE ALAGOAS", uasg: "925042", compra: "Pregão Eletrônico nº 63/2025" }
-  ];
-
-  const cotacoes: PrecoReferencia[] = [];
-
-  ORGAOS.forEach((o, i) => {
-    // Fator de multiplicação entre 1.04 e 1.35 para garantir preços superiores realistas
-    const factor = 1.04 + ((i * 7) % 31) / 100; 
-    const unitPrice = baseMockPrice * factor;
-
-    // Gerar datas nos últimos 12 meses
-    const month = String(1 + (i % 12)).padStart(2, '0');
-    const day = String(1 + ((i * 3) % 28)).padStart(2, '0');
-    const dataHomologacao = `2025-${month}-${day}`;
-
-    cotacoes.push({
-      orgaoLicitante: o.nome,
-      uasg: o.uasg,
-      identificadorCompra: o.compra,
-      dataHomologacao,
-      quantidade: 50 + (i * 20),
-      unidadeMedida: material?.unidade || "unidade",
-      valorUnitario: Number(unitPrice.toFixed(2)),
-      fonte: i % 3 === 0 ? 'pncp' : 'compras.gov.br',
-      localizacaoUrl: `https://pncp.gov.br/app/contratacoes?q=${o.uasg}`
-    });
-  });
-
-  // Ordenar por valor unitário (descendente)
-  return cotacoes.sort((a, b) => b.valorUnitario - a.valorUnitario);
-}
-
-function obterPrecoBaseMock(codigo: number): number {
-  switch (codigo) {
-    case 437936: return 145.00; // Bola Basquete
-    case 447814: return 135.00; // Bola Futsal
-    case 418193: return 120.00; // Bola Voleibol
-    case 423984: return 130.00; // Bola Futebol Campo
-    case 329048: return 45.00;  // Rede Basquete
-    case 389104: return 180.00; // Rede Futsal
-    case 349104: return 120.00; // Rede Voleibol
-    case 367123: return 28.50;  // Colete Treino
-    case 409123: return 42.00;  // Camiseta Esportiva
-    case 309123: return 18.00;  // Apito
-    case 289123: return 75.00;  // Cronometro
-    case 379123: return 22.00;  // Cone
-    case 209123: return 12.00;  // Medalha
-    case 229123: return 120.00; // Trofeu
-    case 249123: return 85.00;  // Bolsa
-    default: return 90.00;
+    console.warn('Proxy de pesquisa de preços inoperante. Nenhuma cotação retornada.', err);
+    return [];
   }
 }

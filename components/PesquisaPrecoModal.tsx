@@ -624,8 +624,20 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                       })}
                     </div>
                   ) : materialSelecionado ? (
-                    <div className="p-8 text-center text-gray-400 bg-white border border-dashed rounded-xl italic text-xs">
-                      Nenhum preço homologado localizado na API. Tente buscar por outro termo semente.
+                    <div className="p-6 bg-amber-50 border border-amber-200 rounded-xl text-xs leading-relaxed space-y-2">
+                      <p className="font-bold text-amber-900 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4" />
+                        Nenhuma cotação real localizada na API pública (Compras.gov.br/PNCP).
+                      </p>
+                      <p className="text-amber-800">
+                        O sistema <strong>não inventa cotações</strong> — pra atender a IN 65/2021,
+                        cadastre uma cotação real usando a aba <strong>Registro Manual</strong> (anexe
+                        o PDF do Termo de Fomento, Ata de Registro ou contrato).
+                      </p>
+                      <p className="text-amber-700 text-[11px]">
+                        Você também pode tentar trocar o material semente acima pra buscar por outro
+                        código CATMAT/CATSER mais específico.
+                      </p>
                     </div>
                   ) : (
                     <div className="p-8 text-center text-gray-400 bg-white border border-dashed rounded-xl italic text-xs">
