@@ -66,7 +66,7 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
           
           // Disparar a consulta de preços imediatamente para carregar todas as cotações públicas
           setLoading(true);
-          consultarPrecosPraticados(selected.codigoItem, item.valorUnitario)
+          consultarPrecosPraticados(selected.codigoItem, item.valorUnitario, item.nome)
             .then(resultados => {
               resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
               setPrecosGoverno(resultados);
@@ -118,7 +118,7 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
     setMaterialSelecionado(mat);
     setLoading(true);
     try {
-      const resultados = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario);
+      const resultados = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario, item.nome);
       // Ordenar por valor unitário (descendente) para facilitar blindagem superior
       resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
       setPrecosGoverno(resultados);

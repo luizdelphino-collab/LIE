@@ -233,28 +233,42 @@ export const consultarPrecosMulti = functions
       res.status(400).json({ error: 'Query param "codigoItemCatalogo" obrigatório e numérico.' });
       return;
     }
+    const descricao = String(req.query.descricao || '').trim();
 
-    const tamanhoPagina = String(req.query.tamanhoPagina || '50');
+    const tamanhoPagina = String(req.query.tamanhoPagina || '500');
     const base = 'https://dadosabertos.compras.gov.br';
     const headers = {
       'Accept': 'application/json',
       'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
     };
 
-    const fontes = [
+    const fontes: { nome: string; url: string; tipo: 'compras' | 'tce-pe' }[] = [
       {
         nome: 'compras.gov.br',
-        url: `${base}/modulo-pesquisa-preco/1_consultarMaterial?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`
+        url: `${base}/modulo-pesquisa-preco/1_consultarMaterial?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`,
+        tipo: 'compras'
       },
       {
         nome: 'pncp-contratacao',
-        url: `${base}/modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`
+        url: `${base}/modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`,
+        tipo: 'compras'
       },
       {
         nome: 'pncp-ata',
-        url: `${base}/modulo-arp/2_consultarARPItem?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`
+        url: `${base}/modulo-arp/2_consultarARPItem?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`,
+        tipo: 'compras'
       }
     ];
+
+    // TCE-PE: única API estadual viável que aceita filtro por descrição textual.
+    // Adicionada apenas quando o frontend passa a descricao do item.
+    if (descricao && descricao.length >= 3) {
+      fontes.push({
+        nome: 'tce-pe',
+        url: `https://sistemas.tce.pe.gov.br/DadosAbertos/ContratoItemObjeto!json?Descricao=${encodeURIComponent(descricao)}`,
+        tipo: 'tce-pe'
+      });
+    }
 
     const montarLinkPncp = (numeroControle: string | undefined, tipo: 'editais' | 'atas' | 'contratos'): string | undefined => {
       if (!numeroControle) return undefined;
@@ -266,6 +280,28 @@ export const consultarPrecosMulti = functions
     };
 
     const normalizar = (r: any, fonteNome: string): any => {
+      // TCE-PE: estrutura própria, sem órgão/data, link via ContratoOriginal
+      if (fonteNome === 'tce-pe') {
+        const codContrato = r.CodigoContratoOriginal || '';
+        const linkContrato = codContrato
+          ? `https://sistemas.tce.pe.gov.br/DadosAbertos/Contratos!json?CodigoContratoOriginal=${encodeURIComponent(codContrato)}`
+          : 'https://sistemas.tce.pe.gov.br/DadosAbertos/';
+        return {
+          fonte: fonteNome,
+          orgaoLicitante: 'TCE-PE (Contrato Estadual)',
+          uasg: '',
+          cnpjOrgao: '',
+          identificadorCompra: codContrato || r.CodigoItem || '',
+          numeroControlePNCP: '',
+          dataHomologacao: '',
+          quantidade: Number(r.Quantidade) || 0,
+          unidadeMedida: r.Unidade || '',
+          descricaoItem: r.Descricao || '',
+          valorUnitario: Number(r.PrecoUnitario) || 0,
+          localizacaoUrl: linkContrato
+        };
+      }
+
       const numeroControle = r.numeroControlePNCP || r.numeroControlePNCPCompra || r.numeroControlePNCPAta;
       const tipoLink: 'editais' | 'atas' | 'contratos' =
         fonteNome === 'pncp-ata' ? 'atas' :
@@ -289,14 +325,15 @@ export const consultarPrecosMulti = functions
       };
     };
 
-    const fetchFonte = async (f: { nome: string; url: string }) => {
+    const fetchFonte = async (f: { nome: string; url: string; tipo: 'compras' | 'tce-pe' }) => {
       try {
         const resp = await fetch(f.url, { headers });
         if (!resp.ok) {
           return { fonte: f.nome, ok: false, status: resp.status, registros: [] as any[] };
         }
         const data = await resp.json();
-        const arr = data.resultado || data.data || data || [];
+        // TCE-PE devolve array direto; compras.gov.br envelopa em {resultado: [...]}
+        const arr = f.tipo === 'tce-pe' ? data : (data.resultado || data.data || data || []);
         const lista = Array.isArray(arr) ? arr : [];
         return {
           fonte: f.nome,

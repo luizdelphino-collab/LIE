@@ -5,6 +5,26 @@ import { db, storage } from './firebase';
 import type { Projeto, Entidade, ItemProjeto } from '../types';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFImage } from 'pdf-lib';
 import { obterDetalheMaterialPorCodigo } from './apiCompras';
+import QRCode from 'qrcode';
+
+async function gerarQrCodes(urls: string[]): Promise<Record<string, string>> {
+  const cache: Record<string, string> = {};
+  await Promise.all(
+    urls.map(async (url) => {
+      if (!url || cache[url]) return;
+      try {
+        cache[url] = await QRCode.toDataURL(url, {
+          margin: 0,
+          width: 96,
+          errorCorrectionLevel: 'M'
+        });
+      } catch (e) {
+        console.warn('Falha ao gerar QR code para', url, e);
+      }
+    })
+  );
+  return cache;
+}
 
 function downloadStorageFileUrl(path: string): string {
   const projectId = storage.app.options.projectId;
@@ -494,13 +514,19 @@ function drawToc(
   }
 }
 
-function renderPesquisaCertificadosJsPdf(
+async function renderPesquisaCertificadosJsPdf(
   itensPesquisados: ItemProjeto[],
   entidade: Entidade,
   cor: [number, number, number],
   logoBase64: string | null
-): Uint8Array | null {
+): Promise<Uint8Array | null> {
   if (itensPesquisados.length === 0) return null;
+
+  // Pre-gera todos os QR codes em paralelo
+  const todasUrls = itensPesquisados.flatMap(it =>
+    (it.referencias || []).map((r: any) => r.localizacaoUrl).filter(Boolean)
+  );
+  const qrCache = await gerarQrCodes(todasUrls);
 
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
   const corClara = lightenRgb(cor, 0.88);
@@ -641,28 +667,63 @@ function renderPesquisaCertificadosJsPdf(
     state.y = (pdf as any).lastAutoTable.finalY + 4;
 
     // Lista de links rastreáveis (URLs reais pra auditoria pelo parecerista)
+    // + QR code de cada link pra validação rápida via celular
     const refsComLink = (it.referencias || []).filter((r: any) => r.localizacaoUrl);
     if (refsComLink.length > 0) {
-      checkPageSpace(state, 8 + refsComLink.length * 5);
+      const QR_SIZE = 13; // mm
+      const QR_GAP = 3;
+      const ROW_H = QR_SIZE + 2;
+
+      checkPageSpace(state, 8 + refsComLink.length * ROW_H);
       pdf.setFontSize(8);
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(80, 80, 80);
-      pdf.text('Links de comprovação (rastreabilidade pública):', MARGIN, state.y);
+      pdf.text('Links de comprovação (rastreabilidade pública — escaneie o QR ou clique no link):', MARGIN, state.y);
       state.y += 4;
 
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(7);
       for (let i = 0; i < refsComLink.length; i++) {
         const r = refsComLink[i];
-        const label = `[${i + 1}] ${r.orgaoLicitante.substring(0, 50)} — ${r.identificadorCompra || r.uasg || ''}: `;
-        pdf.setTextColor(80, 80, 80);
-        pdf.text(label, MARGIN, state.y);
-        const labelWidth = pdf.getTextWidth(label);
-        const maxUrlWidth = CONTENT_W - labelWidth - 2;
-        const urlLines = pdf.splitTextToSize(r.localizacaoUrl, maxUrlWidth);
+        checkPageSpace(state, ROW_H + 2);
+        const rowY = state.y;
+        const qrData = qrCache[r.localizacaoUrl];
+
+        // QR code à esquerda (se disponível)
+        if (qrData) {
+          try {
+            pdf.addImage(qrData, 'PNG', MARGIN, rowY, QR_SIZE, QR_SIZE);
+          } catch (e) {
+            console.warn('Falha ao desenhar QR no PDF', e);
+          }
+        }
+
+        const textX = MARGIN + QR_SIZE + QR_GAP;
+        const textMaxW = CONTENT_W - QR_SIZE - QR_GAP;
+
+        // Linha 1: numeração + órgão + identificador
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(7.5);
+        pdf.setTextColor(60, 60, 60);
+        const header = `[${i + 1}] ${r.orgaoLicitante.substring(0, 70)}`;
+        pdf.text(header, textX, rowY + 3);
+
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(7);
+        pdf.setTextColor(110, 110, 110);
+        const meta: string[] = [];
+        if (r.identificadorCompra) meta.push(`Compra: ${r.identificadorCompra}`);
+        if (r.uasg) meta.push(`UASG: ${r.uasg}`);
+        if (r.dataHomologacao) meta.push(`Data: ${r.dataHomologacao}`);
+        if (meta.length > 0) {
+          pdf.text(meta.join(' • ').substring(0, 100), textX, rowY + 7);
+        }
+
+        // Linha 3: URL clicável
         pdf.setTextColor(0, 102, 204);
-        pdf.textWithLink(urlLines[0], MARGIN + labelWidth, state.y, { url: r.localizacaoUrl });
-        state.y += 4;
+        pdf.setFontSize(6.5);
+        const urlLines = pdf.splitTextToSize(r.localizacaoUrl, textMaxW);
+        pdf.textWithLink(urlLines[0], textX, rowY + 11, { url: r.localizacaoUrl });
+
+        state.y += ROW_H;
       }
       state.y += 2;
     }
@@ -1595,7 +1656,7 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
       );
       toc.push({ num: '', title: 'Pesquisa de Preços (IN 65/2021)', page: mainPdfDoc.getPageCount() });
 
-      const pesquisaBytes = renderPesquisaCertificadosJsPdf(itensPesquisados, entidade, cor, logoBase64);
+      const pesquisaBytes = await renderPesquisaCertificadosJsPdf(itensPesquisados, entidade, cor, logoBase64);
       if (pesquisaBytes) {
         const certStartPage = mainPdfDoc.getPageCount() + 1;
         await mergePdfBytes(mainPdfDoc, pesquisaBytes.buffer as ArrayBuffer);

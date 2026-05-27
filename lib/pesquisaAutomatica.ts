@@ -208,7 +208,7 @@ export async function pesquisarItemAutomatico(
     }
     const mat = matches[0];
 
-    const precos = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario);
+    const precos = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario, item.nome);
     const elegiveis = precos
       .filter(p => p.valorUnitario >= item.valorUnitario)
       .sort((a, b) => b.valorUnitario - a.valorUnitario);

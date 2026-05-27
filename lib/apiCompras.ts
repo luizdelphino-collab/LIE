@@ -5,12 +5,15 @@
 import { PrecoReferencia } from '../types';
 import { storage } from './firebase';
 
-function consultarPrecosMultiUrl(codigoItemCatalogo: number, tamanhoPagina = 50): string {
+function consultarPrecosMultiUrl(codigoItemCatalogo: number, descricao?: string, tamanhoPagina = 500): string {
   const projectId = storage.app.options.projectId;
   const params = new URLSearchParams({
     codigoItemCatalogo: String(codigoItemCatalogo),
     tamanhoPagina: String(tamanhoPagina)
   });
+  if (descricao && descricao.trim().length >= 3) {
+    params.set('descricao', descricao.trim());
+  }
   return `https://us-central1-${projectId}.cloudfunctions.net/consultarPrecosMulti?${params}`;
 }
 
@@ -200,9 +203,10 @@ export function obterDetalheMaterialPorCodigo(codigo: number, termoFallback?: st
 // possível (rastreabilidade pública pra auditoria do parecerista).
 export async function consultarPrecosPraticados(
   codigoItemCatalogo: number,
-  _valorUnitarioEstimado?: number
+  _valorUnitarioEstimado?: number,
+  descricao?: string
 ): Promise<PrecoReferencia[]> {
-  const url = consultarPrecosMultiUrl(codigoItemCatalogo);
+  const url = consultarPrecosMultiUrl(codigoItemCatalogo, descricao);
 
   try {
     const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
