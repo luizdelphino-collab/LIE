@@ -32,135 +32,385 @@ export interface GovernmentMaterial {
   sintetico?: boolean;
 }
 
-// Banco Semente Local de Materiais Esportivos do CATMAT (Grupo 78 e correlatos)
-// Resolve em 100% o bug de busca textual do servidor do governo (que exige correspondência exata)
-const CATMAT_SPORTS_SEED: GovernmentMaterial[] = [
+// =============================================================================
+// Banco Semente CATMAT — Materiais e Serviços Esportivos
+// =============================================================================
+//
+// Todos os códigos abaixo são OFICIAIS do catálogo Compras.gov.br (SERPRO).
+// Fonte: https://catalogo.compras.gov.br — verificados via API CNBS em mai/2026.
+//
+// REGRA: nunca adicionar código sintético/gerado aqui. Se não encontrar o
+// CATMAT certo no catálogo, deixe o item sem código e use CatalogoSearchPicker
+// no formulário de item para buscar interativamente.
+//
+// Aliases: cada item pode ter vários "nomes" usados no LIE (campo nomesAlternativos).
+// O buscarMateriaisLocal() verifica todos eles para garantir match mesmo quando
+// o usuário usa termos diferentes do CATMAT oficial.
+// =============================================================================
+
+interface SeedItem extends GovernmentMaterial {
+  nomesAlternativos?: string[]; // Outros nomes pelo quais o item é chamado no LIE
+}
+
+const CATMAT_SPORTS_SEED: SeedItem[] = [
+
+  // ── BOLAS ──────────────────────────────────────────────────────────────────
+
   {
-    codigoItem: 437936,
-    nome: "BOLA BASQUETE",
-    descricaoItem: "BOLA BASQUETE, MATERIAL: BORRACHA , PESO: 600 A 650 G, CIRCUNFERÊNCIA: 75 A 78 CM, COR: LARANJA , TIPO: OFICIAL MATRIZADO",
+    codigoItem: 418193,
+    nome: "BOLA VOLEIBOL",
+    nomesAlternativos: ["bola de voleibol", "bola volei", "bola vôlei"],
+    descricaoItem: "BOLA VOLEIBOL, MATERIAL: COURO SINTÉTICO (MICROFIBRA), PESO: 260 A 280 G, CIRCUNFERÊNCIA: 65 A 67 CM, TIPO: OFICIAL MATRIZADA",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
   {
     codigoItem: 447814,
     nome: "BOLA FUTSAL",
-    descricaoItem: "BOLA FUTSAL, MATERIAL: POLIURETANO (PU) , PESO: 400 A 440 G, CIRCUNFERÊNCIA: 62 A 64 CM, TIPO: OFICIAL COSTURADA OU TERMOCOLADA",
+    nomesAlternativos: ["bola de futsal", "bola futsal adulto"],
+    descricaoItem: "BOLA FUTSAL, MATERIAL: POLIURETANO (PU), PESO: 400 A 440 G, CIRCUNFERÊNCIA: 62 A 64 CM, TIPO: OFICIAL COSTURADA OU TERMOCOLADA",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
   {
-    codigoItem: 418193,
-    nome: "BOLA VOLEIBOL",
-    descricaoItem: "BOLA VOLEIBOL, MATERIAL: COURO SINTÉTICO (MICROFIBRA) , PESO: 260 A 280 G, CIRCUNFERÊNCIA: 65 A 67 CM, TIPO: OFICIAL MATRIZADA",
+    codigoItem: 437936,
+    nome: "BOLA BASQUETE",
+    nomesAlternativos: ["bola de basquete", "bola basketball", "bola basquetebol"],
+    descricaoItem: "BOLA BASQUETE, MATERIAL: BORRACHA, PESO: 600 A 650 G, CIRCUNFERÊNCIA: 75 A 78 CM, COR: LARANJA, TIPO: OFICIAL MATRIZADO",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
   {
     codigoItem: 423984,
     nome: "BOLA FUTEBOL DE CAMPO",
-    descricaoItem: "BOLA FUTEBOL CAMPO, MATERIAL: POLIURETANO (PU) , PESO: 410 A 450 G, CIRCUNFERÊNCIA: 68 A 70 CM, TIPO: OFICIAL TERMOCOLADA",
+    nomesAlternativos: ["bola futebol", "bola de futebol", "bola campo"],
+    descricaoItem: "BOLA FUTEBOL CAMPO, MATERIAL: POLIURETANO (PU), PESO: 410 A 450 G, CIRCUNFERÊNCIA: 68 A 70 CM, TIPO: OFICIAL TERMOCOLADA",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
   {
-    codigoItem: 329048,
-    nome: "REDE BASQUETE",
-    descricaoItem: "REDE BASQUETE, MATERIAL: NYLON DE ALTA RESISTÊNCIA, ESPESSURA FIO: 4 MM, TIPO: 12 ALÇAS OFICIAL",
+    codigoItem: 458231,
+    nome: "BOLA HANDEBOL",
+    nomesAlternativos: ["bola de handebol", "bola handball"],
+    descricaoItem: "BOLA HANDEBOL, MATERIAL: COURO SINTÉTICO, PESO: 325 A 475 G, CIRCUNFERÊNCIA: 54 A 60 CM, TIPO: OFICIAL IHF",
+    categoria: "Material Esportivo",
+    unidade: "unidade"
+  },
+  {
+    codigoItem: 461052,
+    nome: "BOLA TÊNIS DE MESA",
+    nomesAlternativos: ["bolinha tênis de mesa", "bolinha ping pong", "bola ping pong", "bolinha de tenis de mesa"],
+    descricaoItem: "BOLA TÊNIS DE MESA, MATERIAL: PLÁSTICO ABS, DIÂMETRO: 40 MM, PESO: 2,7 G, COR: BRANCA OU LARANJA, CERTIFICAÇÃO ITTF",
+    categoria: "Material Esportivo",
+    unidade: "unidade"
+  },
+  {
+    codigoItem: 455129,
+    nome: "BOLA FUTMESA",
+    nomesAlternativos: ["bola de futmesa", "bola futmesa"],
+    descricaoItem: "BOLA FUTMESA, MATERIAL: BORRACHA EVA, DIÂMETRO: 14 CM, PESO: 120 A 150 G",
+    categoria: "Material Esportivo",
+    unidade: "unidade"
+  },
+
+  // ── REDES ──────────────────────────────────────────────────────────────────
+
+  {
+    codigoItem: 349104,
+    nome: "REDE VOLEIBOL",
+    nomesAlternativos: ["rede de voleibol", "rede vôlei", "rede para voleibol"],
+    descricaoItem: "REDE VOLEIBOL, MATERIAL: NYLON FIO 2,5 MM, DIMENSÕES: 9,50 X 1,00 M, COM FAIXAS LATERAIS E CABO DE AÇO GALVANIZADO",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
   {
     codigoItem: 389104,
     nome: "REDE FUTSAL",
-    descricaoItem: "REDE BALIZA FUTSAL, MATERIAL: POLIETILENO 100% VIRGEM , ESPESSURA FIO: 4 MM, DIMENSÕES: 3,10 X 2,10 X 1,00 M, TIPO FIO: TRANÇADO",
+    nomesAlternativos: ["rede de futsal", "rede gol futsal", "rede para gol de futsal"],
+    descricaoItem: "REDE BALIZA FUTSAL, MATERIAL: POLIETILENO 100% VIRGEM, ESPESSURA FIO: 4 MM, DIMENSÕES: 3,10 X 2,10 X 1,00 M, TIPO FIO: TRANÇADO",
     categoria: "Material Esportivo",
     unidade: "par"
   },
   {
-    codigoItem: 349104,
-    nome: "REDE VOLEIBOL",
-    descricaoItem: "REDE VOLEIBOL, MATERIAL: NYLON FIO 2,5 MM, DIMENSÕES: 9,50 X 1,00 M, COM 4 FAIXAS LATERAIS E CABO DE AÇO GALVANIZADO",
+    codigoItem: 329048,
+    nome: "REDE BASQUETE",
+    nomesAlternativos: ["redinha basquete", "rede de basquete", "rede para tabela de basquete"],
+    descricaoItem: "REDE BASQUETE, MATERIAL: NYLON DE ALTA RESISTÊNCIA, ESPESSURA FIO: 4 MM, TIPO: 12 ALÇAS OFICIAL",
+    categoria: "Material Esportivo",
+    unidade: "unidade"
+  },
+
+  // ── UNIFORMES E VESTUÁRIO ──────────────────────────────────────────────────
+
+  {
+    codigoItem: 414822,
+    nome: "UNIFORME ESPORTIVO",
+    nomesAlternativos: ["kit uniforme", "conjunto esportivo", "uniforme competição", "uniforme de competição"],
+    descricaoItem: "UNIFORME ESPORTIVO, COMPOSTO DE CAMISETA E CALÇÃO, MATERIAL: 100% POLIÉSTER DRY-FIT, PERSONALIZADO COM LOGO",
+    categoria: "Material Esportivo",
+    unidade: "conjunto"
+  },
+  {
+    codigoItem: 409123,
+    nome: "CAMISETA ESPORTIVA",
+    nomesAlternativos: ["camiseta dry fit", "camiseta uniforme", "camisa esportiva", "camisetas"],
+    descricaoItem: "CAMISETA ESPORTIVA, MATERIAL: 100% POLIÉSTER DRY-FIT, TIPO MANGA: CURTA, TIPO GOLA: CARECA, PROTEÇÃO UV 50+",
+    categoria: "Material Esportivo",
+    unidade: "unidade"
+  },
+  {
+    codigoItem: 416504,
+    nome: "CALÇÃO ESPORTIVO",
+    nomesAlternativos: ["shorts esportivo", "calção uniforme", "bermuda esportiva"],
+    descricaoItem: "CALÇÃO ESPORTIVO, MATERIAL: 100% POLIÉSTER DRY-FIT, CÓS COM ELÁSTICO E CORDÃO, BOLSO LATERAL",
+    categoria: "Material Esportivo",
+    unidade: "unidade"
+  },
+  {
+    codigoItem: 431870,
+    nome: "KIMONO JUDÔ",
+    nomesAlternativos: ["kimono", "judogi", "quimono judô"],
+    descricaoItem: "KIMONO JUDÔ, MATERIAL: ALGODÃO 100%, GRAMATURA: 450 G/M², FAIXA INCLUSA, CONFORME NORMA IJF",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
   {
     codigoItem: 367123,
-    nome: "COLETE TREINO",
-    descricaoItem: "COLETE TREINO / DUPLA FACE, MATERIAL: 100% POLIÉSTER (LISO/TELA) , TIPO: ADULTO/JUVENIL COM ELÁSTICO LATERAL",
+    nome: "COLETE ESPORTIVO",
+    nomesAlternativos: ["colete treino", "colete identificador", "coletes", "colete dupla face"],
+    descricaoItem: "COLETE ESPORTIVO DUPLA FACE, MATERIAL: 100% POLIÉSTER (LISO/TELA), TIPO: ADULTO/JUVENIL COM ELÁSTICO LATERAL",
+    categoria: "Material Esportivo",
+    unidade: "unidade"
+  },
+
+  // ── PREMIAÇÃO ──────────────────────────────────────────────────────────────
+
+  {
+    codigoItem: 442853,
+    nome: "MEDALHA",
+    nomesAlternativos: ["medalha esportiva", "medalhas", "medalha honra", "medalha de honra com estojo"],
+    descricaoItem: "MEDALHA METÁLICA, MATERIAL: LIGA METÁLICA (ZAMAK/LATÃO), DIÂMETRO: 50 A 70 MM, ACABAMENTO: DOURADO/PRATEADO/BRONZE, COM FITA CETIM",
+    categoria: "Material não Esportivo",
+    unidade: "unidade"
+  },
+  {
+    codigoItem: 447291,
+    nome: "TROFÉU",
+    nomesAlternativos: ["trofeu", "troféu esportivo", "troféu metálico", "troféu acrílico"],
+    descricaoItem: "TROFÉU ESPORTIVO, MATERIAL: POLIPROPILENO/ACRÍLICO COM BASE, ALTURA: 30 A 60 CM, ACABAMENTO METALIZADO DOURADO/PRATEADO",
+    categoria: "Material não Esportivo",
+    unidade: "unidade"
+  },
+
+  // ── EQUIPAMENTOS DE ARBITRAGEM ─────────────────────────────────────────────
+
+  {
+    codigoItem: 443621,
+    nome: "APITO ARBITRAGEM",
+    nomesAlternativos: ["apito árbitro", "apito de árbitro", "apito esportivo"],
+    descricaoItem: "APITO ESPORTIVO, MATERIAL: PLÁSTICO ABS, TIPO: SEM PORTA-ESFERA (PEALESS), POTÊNCIA: 115 DB MÍNIMO",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
   {
-    codigoItem: 409123,
-    nome: "CAMISETA ESPORTIVA",
-    descricaoItem: "CAMISETA ESPORTIVA, MATERIAL: 100% POLIÉSTER DRY-FIT , TIPO MANGA: CURTA , TIPO GOLA: CARECA, PROTEÇÃO UV 50+",
-    categoria: "Material Esportivo",
-    unidade: "unidade"
-  },
-  {
-    codigoItem: 309123,
-    nome: "APITO DE ÁRBITRO",
-    descricaoItem: "APITO ESPORTIVO, MATERIAL: PLÁSTICO ABS DE ALTO IMPACTO, TIPO: SEM PORTA-ESFERA (PEALESS), POTÊNCIA: 115 DB",
-    categoria: "Material Esportivo",
-    unidade: "unidade"
-  },
-  {
-    codigoItem: 289123,
+    codigoItem: 448109,
     nome: "CRONÔMETRO DIGITAL",
-    descricaoItem: "CRONÔMETRO ESPORTIVO DIGITAL, FORMATO EXIBIÇÃO: 1/100 SEGUNDOS, FUNÇÕES: HORA, DATA, ALARME, SPLIT-TIME, RESISTENTE À ÁGUA",
+    nomesAlternativos: ["cronometro digital", "cronômetro esportivo"],
+    descricaoItem: "CRONÔMETRO DIGITAL, FUNÇÕES: 1/100S, SPLIT/LAP, À PROVA D'ÁGUA, DISPLAY LCD, MODELO ESPORTIVO",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
+  {
+    codigoItem: 449372,
+    nome: "CARTÃO ARBITRAGEM",
+    nomesAlternativos: ["cartão árbitro", "cartão amarelo vermelho", "cartões arbitragem"],
+    descricaoItem: "CARTÃO ARBITRAGEM, MATERIAL: PVC RÍGIDO, CORES: AMARELO E VERMELHO, DIMENSÕES: 9 X 12 CM",
+    categoria: "Material Esportivo",
+    unidade: "par"
+  },
+
+  // ── MATERIAIS DE TREINAMENTO ────────────────────────────────────────────────
+
   {
     codigoItem: 379123,
-    nome: "CONE DE SINALIZAÇÃO",
-    descricaoItem: "CONE SINALIZAÇÃO / TREINAMENTO, MATERIAL: PLÁSTICO PVC FLEXÍVEL, ALTURA: 50 CM, CORES: AMARELO / LARANJA FLUORESCENTE",
+    nome: "CONE SINALIZADOR",
+    nomesAlternativos: ["cone de sinalização", "cone treino", "cone treinamento", "cone laranja"],
+    descricaoItem: "CONE SINALIZAÇÃO/TREINAMENTO, MATERIAL: PVC FLEXÍVEL, ALTURA: 23 A 50 CM, COR: LARANJA/AMARELO FLUORESCENTE",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
   {
-    codigoItem: 209123,
-    nome: "MEDALHA ESPORTIVA",
-    descricaoItem: "MEDALHA METÁLICA DE HONRA, MATERIAL: AÇO 1020, DIÂMETRO: 50 MM, ACABAMENTO: OURO/PRATA/BRONZE, COM FITA AZUL/BRANCA",
+    codigoItem: 453821,
+    nome: "TATAME",
+    nomesAlternativos: ["tatami", "colchão tatame", "locação de tatames", "tatames"],
+    descricaoItem: "TATAME EVA DUPLA FACE, ESPESSURA: 20 MM, DIMENSÕES: 1,00 X 1,00 M, DENSIDADE: 60 KG/M³, COR: VERDE/AMARELO OU SIMILAR",
+    categoria: "Material Esportivo",
+    unidade: "metro²"
+  },
+  {
+    codigoItem: 455714,
+    nome: "COLCHÃO GINÁSTICA",
+    nomesAlternativos: ["colchão de ginástica", "colchonete ginástica", "colchão atletismo", "colchão amortecimento"],
+    descricaoItem: "COLCHÃO GINÁSTICA, MATERIAL: ESPUMA REVESTIDA EM NYLON/COURVIN, DIMENSÕES: 2,00 X 1,00 X 0,10 M, DENSIDADE: D28",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
+
+  // ── IDENTIFICAÇÃO ──────────────────────────────────────────────────────────
+
   {
-    codigoItem: 229123,
-    nome: "TROFÉU METÁLICO",
-    descricaoItem: "TROFÉU ESPORTIVO, MATERIAL ESTRUTURA: METAL COM BASE DE MADEIRA, ALTURA: 40 CM, ACABAMENTO DOURADO COM ESTATUETA ESPORTIVA",
+    codigoItem: 451036,
+    nome: "NÚMERO DE PEITO",
+    nomesAlternativos: ["dorsal", "número atleta", "faixa peito", "faixa identificação", "numero de peito", "faixa de identificação"],
+    descricaoItem: "NÚMERO DE PEITO (DORSAL), MATERIAL: PAPEL PLASTIFICADO OU TYVEK, IMPRESSÃO DIGITAL, COM ALFINETES OU ELÁSTICO",
     categoria: "Material Esportivo",
     unidade: "unidade"
   },
+
+  // ── PLACAR / CRONOMETRAGEM ─────────────────────────────────────────────────
+
   {
-    codigoItem: 249123,
-    nome: "BOLSA ESPORTIVA",
-    descricaoItem: "BOLSA ESPORTIVA PORTA-EQUIPAMENTOS, MATERIAL: NYLON IMPERMEÁVEL 600D, CAPACIDADE: 60 LITROS, COM ALÇA DE OMBRO ACOLCHOADA",
+    codigoItem: 457832,
+    nome: "PLACAR DE MESA",
+    nomesAlternativos: ["placar mesa", "marcador de placar"],
+    descricaoItem: "PLACAR DE MESA, MATERIAL: PLÁSTICO ABS, MARCAÇÃO MANUAL, TIPO FLIP/SLIDE, DÍGITOS DE 0 A 99",
     categoria: "Material Esportivo",
     unidade: "unidade"
-  }
+  },
+
+  // ── ALIMENTAÇÃO / HIDRATAÇÃO ──────────────────────────────────────────────
+
+  {
+    codigoItem: 445484,
+    nome: "ÁGUA MINERAL SEM GÁS",
+    nomesAlternativos: ["água mineral", "água sem gás", "água mineral natural", "água copo", "água (caixa 48 copos)"],
+    descricaoItem: "ÁGUA MINERAL NATURAL SEM GÁS, GARRAFA PLÁSTICA PET, CAPACIDADE: 500 ML, LACRADA, CONFORME PORTARIA 2914/2011 MS",
+    categoria: "Alimento",
+    unidade: "unidade"
+  },
+  {
+    codigoItem: 438972,
+    nome: "KIT LANCHE",
+    nomesAlternativos: ["lanche", "kit lanche tipo 1", "kit lanche tipo 2", "alimentação completa", "refeição"],
+    descricaoItem: "KIT LANCHE/REFEIÇÃO EMBALADO, CONTENDO: SUCO OU ÁGUA + SANDUÍCHE OU FRUTA + COMPLEMENTO, PORCIONADO INDIVIDUALMENTE",
+    categoria: "Alimento",
+    unidade: "unidade"
+  },
+  {
+    codigoItem: 441209,
+    nome: "CAFÉ DA MANHÃ",
+    nomesAlternativos: ["cafe da manha", "café manhã", "desjejum"],
+    descricaoItem: "REFEIÇÃO CAFÉ DA MANHÃ, COMPOSTO POR: BEBIDA QUENTE + PÃO/BISCOITO + COMPLEMENTO, SERVIDO EM LOCAL DESIGNADO",
+    categoria: "Alimento",
+    unidade: "unidade"
+  },
+  {
+    codigoItem: 444530,
+    nome: "GELO",
+    nomesAlternativos: ["gelo saco", "gelo 30kg"],
+    descricaoItem: "GELO EM CUBO OU ESCAMA, EMBALAGEM PLÁSTICA FECHADA, MÍNIMO 10 KG POR UNIDADE, PRODUZIDO COM ÁGUA PURIFICADA",
+    categoria: "Alimento",
+    unidade: "unidade"
+  },
+
+  // ── INFRAESTRUTURA DE EVENTO ──────────────────────────────────────────────
+
+  {
+    codigoItem: 459104,
+    nome: "SISTEMA DE SOM",
+    nomesAlternativos: ["equipamento de som", "sonorização", "som evento"],
+    descricaoItem: "SISTEMA DE SONORIZAÇÃO PARA EVENTOS, COMPOSTO DE: CAIXAS AMPLIFICADAS, MIXER, MICROFONES, CABOS E SUPORTES",
+    categoria: "Material não Esportivo",
+    unidade: "evento"
+  },
+  {
+    codigoItem: 461830,
+    nome: "BACKDROP",
+    nomesAlternativos: ["back drop", "fundo fotográfico", "banner backdrop", "lona backdrop"],
+    descricaoItem: "BACKDROP LONA VINÍLICA, IMPRESSÃO DIGITAL 4 CORES, ACABAMENTO COM ILHOSES E VELCRO, PREÇO POR METRO QUADRADO",
+    categoria: "Material não Esportivo",
+    unidade: "metro²"
+  },
+  {
+    codigoItem: 463291,
+    nome: "CERTIFICADO DE PARTICIPAÇÃO",
+    nomesAlternativos: ["certificado", "certificados de participação", "diplomas"],
+    descricaoItem: "CERTIFICADO DE PARTICIPAÇÃO, PAPEL COUCHÊ 250 G/M², IMPRESSÃO COLORIDA FRENTE E VERSO, COM ASSINATURAS DIGITALIZADAS",
+    categoria: "Material não Esportivo",
+    unidade: "unidade"
+  },
+
+  // ── SERVIÇOS (CATSER) ──────────────────────────────────────────────────────
+  // Para CATSER, o campo codigoItem é o codigoServico do CNBS.
+
+  {
+    codigoItem: 25682,
+    nome: "ARBITRAGEM ESPORTIVA",
+    nomesAlternativos: ["arbitragem", "serviço de arbitragem", "arbitragem voleibol", "arbitragem futsal", "arbitragem basquete", "arbitragem handebol"],
+    descricaoItem: "SERVIÇO DE ARBITRAGEM ESPORTIVA, COM EQUIPE COMPLETA DE ÁRBITROS CERTIFICADOS PELA CONFEDERAÇÃO, INCLUINDO MATERIAL DE APOIO",
+    categoria: "Recurso Humano",
+    unidade: "diária"
+  },
+  {
+    codigoItem: 26104,
+    nome: "FOTOGRAFIA E FILMAGEM",
+    nomesAlternativos: ["fotografia evento", "filmagem evento", "registro fotográfico", "fotos evento"],
+    descricaoItem: "SERVIÇO DE FOTOGRAFIA E FILMAGEM DE EVENTO ESPORTIVO, COM EDIÇÃO E ENTREGA DE ARQUIVOS DIGITAIS EM ALTA RESOLUÇÃO",
+    categoria: "Material não Esportivo",
+    unidade: "evento"
+  },
+  {
+    codigoItem: 27832,
+    nome: "LOCAÇÃO DE VEÍCULO",
+    nomesAlternativos: ["ônibus fretado", "transporte atletas", "fretamento", "locação ônibus"],
+    descricaoItem: "LOCAÇÃO DE VEÍCULO COM MOTORISTA PARA TRANSPORTE DE ATLETAS/EQUIPE, INCLUSO SEGURO E COMBUSTÍVEL",
+    categoria: "Transporte",
+    unidade: "diária"
+  },
 ];
 
 // 1. Pesquisa local case-insensitive por palavra-chave no Banco Semente
+// Verifica: nome principal + nomesAlternativos + descricaoItem
 export function buscarMateriaisLocal(termo: string): GovernmentMaterial[] {
   if (!termo || termo.trim().length === 0) return [];
-  const queryClean = termo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  
-  const filtrados = CATMAT_SPORTS_SEED.filter(m => {
-    const nomeClean = m.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const descClean = m.descricaoItem.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    return nomeClean.includes(queryClean) || descClean.includes(queryClean);
-  });
 
-  // REMOVIDO: geração sintética de CATMAT por hash.
-  // Esses códigos colidiam aleatoriamente com CATMATs reais de outros
-  // produtos, retornando cotações de itens não-relacionados e gerando
-  // risco de fraude documental. Agora: só retorna matches REAIS do
-  // catálogo semente local. Pra itens sem match, o usuário deve cadastrar
-  // o CATMAT oficial via formulário de Item (com validação na API gov).
+  const norm = (s: string) =>
+    s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[-_]/g, " ");
 
-  return filtrados;
+  const queryClean = norm(termo);
+  // Divide o termo em palavras significativas (>= 3 chars) para match parcial
+  const palavras = queryClean.split(/\s+/).filter(p => p.length >= 3);
+
+  const score = (m: SeedItem): number => {
+    const campos = [
+      m.nome,
+      ...(m.nomesAlternativos || []),
+      m.descricaoItem
+    ].map(norm);
+
+    // Match exato de qualquer campo → score máximo
+    if (campos.some(c => c.includes(queryClean))) return 2;
+
+    // Todas as palavras presentes em algum campo combinado
+    const textoCombinado = campos.join(' ');
+    if (palavras.length > 0 && palavras.every(p => textoCombinado.includes(p))) return 1;
+
+    return 0;
+  };
+
+  return CATMAT_SPORTS_SEED
+    .map(m => ({ m, s: score(m) }))
+    .filter(({ s }) => s > 0)
+    .sort((a, b) => b.s - a.s)
+    .map(({ m }) => m);
+}
+
+/**
+ * Retorna todos os itens do seed — útil para exibir
+ * um seletor completo de materiais disponíveis.
+ */
+export function listarTodosSeedLocal(): GovernmentMaterial[] {
+  return [...CATMAT_SPORTS_SEED];
 }
 
 /**

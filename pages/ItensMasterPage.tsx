@@ -6,6 +6,7 @@ import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
 import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/CatalogoSearchPicker';
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
+import CatmatDiagnostico from '../components/CatmatDiagnostico';
 import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 
@@ -546,6 +547,9 @@ export default function ItensMasterPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
+      {/* Diagnóstico CATMAT — mostra cobertura e permite vincular em lote */}
+      <CatmatDiagnostico items={items} onAtualizado={carregarItens} />
+
       <header className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-lie-ink">Banco de Dados de Itens</h1>
