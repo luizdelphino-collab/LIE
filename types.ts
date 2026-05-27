@@ -320,6 +320,12 @@ export interface ItemMaster {
   tipoCatmat?: 'material' | 'servico';
   nomeCatmatOficial?: string;
   descricaoCatmatOficial?: string;
+  // Conversão de embalagem pra unidade base — permite comparação justa
+  // Ex: "caixa com 48 copos de 200ml" → fatorConversao=9600, unidadeBase='ML'
+  // Sistema calcula preço base = valorUnitario / fatorConversao (R$/ml)
+  fatorConversao?: number;
+  unidadeBase?: string; // ML, G, L, UN, M, M², KG
+  embalagemDescricao?: string; // texto livre p/ humano (ex: "Caixa com 48 copos de 200ml")
 }
 
 export interface PrecoReferencia {
@@ -375,6 +381,10 @@ export interface ItemProjeto {
   tipoCatmat?: 'material' | 'servico';
   nomeCatmatOficial?: string;
   descricaoCatmatOficial?: string;
+  // Conversão de embalagem (herdada do master)
+  fatorConversao?: number;
+  unidadeBase?: string;
+  embalagemDescricao?: string;
 
   // Campos de Pesquisa de Preço Público (IN 65/2021)
   pesquisado?: boolean;

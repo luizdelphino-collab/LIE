@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, TrendingUp, ExternalLink, RefreshCw, Loader2, Package, Wrench, Award, Calendar, Building2, AlertCircle } from 'lucide-react';
+import { X, TrendingUp, ExternalLink, RefreshCw, Loader2, Package, Wrench, Award, Calendar, Building2, AlertCircle, CheckCircle2, XCircle, FlaskConical } from 'lucide-react';
 import { coletarMercadoItem, type MercadoResposta } from '../lib/mercadoApi';
 import type { ItemMaster } from '../types';
 
@@ -155,6 +155,99 @@ export default function MercadoDetalheModal({ item, dados, onClose, onAtualizar 
             </div>
           )}
 
+          {/* === Saneamento Estatístico TCU === */}
+          {dadosAtuais.saneamento && (
+            <div className="border-2 border-blue-200 rounded-lg overflow-hidden">
+              <div className="bg-blue-50 px-3 py-2 border-b border-blue-200 flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <FlaskConical className="w-4 h-4 text-blue-700" />
+                  <span className="text-xs font-bold uppercase text-blue-900 tracking-wider">
+                    Saneamento Estatístico (Método TCU)
+                  </span>
+                </div>
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                  dadosAtuais.saneamento.metodo === 'media-saneada' ? 'bg-green-100 text-green-800' :
+                  dadosAtuais.saneamento.metodo === 'media-original' ? 'bg-blue-100 text-blue-800' :
+                  'bg-amber-100 text-amber-800'
+                }`}>
+                  {dadosAtuais.saneamento.metodo === 'media-saneada' && '✓ Média saneada'}
+                  {dadosAtuais.saneamento.metodo === 'media-original' && '✓ Média original (CV inicial ≤ 25%)'}
+                  {dadosAtuais.saneamento.metodo === 'mediana-fallback' && '⚠ Fallback mediana (não convergiu)'}
+                </span>
+              </div>
+
+              <div className="p-3 space-y-2 text-xs">
+                {/* Resumo do método */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="bg-gray-50 border border-gray-200 rounded p-2">
+                    <div className="text-[10px] uppercase font-bold text-gray-500">Incluídas</div>
+                    <div className="text-lg font-bold text-green-700">{dadosAtuais.saneamento.cotacoesIncluidas}</div>
+                  </div>
+                  <div className="bg-gray-50 border border-gray-200 rounded p-2">
+                    <div className="text-[10px] uppercase font-bold text-gray-500">Excluídas</div>
+                    <div className="text-lg font-bold text-red-600">{dadosAtuais.saneamento.cotacoesExcluidas}</div>
+                  </div>
+                  <div className="bg-gray-50 border border-gray-200 rounded p-2">
+                    <div className="text-[10px] uppercase font-bold text-gray-500">CV final</div>
+                    <div className={`text-lg font-bold ${(dadosAtuais.saneamento.estatisticasFinais.coeficienteVariacao || 0) <= 25 ? 'text-green-700' : 'text-amber-600'}`}>
+                      {(dadosAtuais.saneamento.estatisticasFinais.coeficienteVariacao || 0).toFixed(1)}%
+                    </div>
+                    <div className="text-[9px] text-gray-500">limite: ≤ {dadosAtuais.saneamento.limiteCV}%</div>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-300 rounded p-2">
+                    <div className="text-[10px] uppercase font-bold text-blue-700">Preço de Referência</div>
+                    <div className="text-lg font-bold text-blue-900">{fmt(dadosAtuais.saneamento.precoReferencia)}</div>
+                  </div>
+                </div>
+
+                {/* Memória de cálculo (iterações) */}
+                {dadosAtuais.saneamento.iteracoes.length > 0 && (
+                  <details className="border border-gray-200 rounded">
+                    <summary className="px-2 py-1.5 cursor-pointer text-[11px] font-bold text-gray-700 hover:bg-gray-50">
+                      📊 Memória de cálculo ({dadosAtuais.saneamento.iteracoes.length} iteraç{dadosAtuais.saneamento.iteracoes.length === 1 ? 'ão' : 'ões'})
+                    </summary>
+                    <table className="w-full text-[10px] border-t border-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-2 py-1 text-left">#</th>
+                          <th className="px-2 py-1 text-right">n</th>
+                          <th className="px-2 py-1 text-right">μ (média)</th>
+                          <th className="px-2 py-1 text-right">σ (DP)</th>
+                          <th className="px-2 py-1 text-right">CV</th>
+                          <th className="px-2 py-1 text-right">Faixa válida</th>
+                          <th className="px-2 py-1 text-right">Excluídos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dadosAtuais.saneamento.iteracoes.map(it => (
+                          <tr key={it.iteracao} className="border-t border-gray-100">
+                            <td className="px-2 py-1 font-mono">{it.iteracao}</td>
+                            <td className="px-2 py-1 text-right">{it.n}</td>
+                            <td className="px-2 py-1 text-right font-mono">{fmt(it.media)}</td>
+                            <td className="px-2 py-1 text-right font-mono">{fmt(it.desvioPadrao)}</td>
+                            <td className={`px-2 py-1 text-right font-mono font-bold ${it.coeficienteVariacao <= 25 ? 'text-green-700' : 'text-amber-700'}`}>
+                              {it.coeficienteVariacao.toFixed(1)}%
+                            </td>
+                            <td className="px-2 py-1 text-right font-mono text-[9px]">
+                              {fmt(it.limiteInferior)} — {fmt(it.limiteSuperior)}
+                            </td>
+                            <td className="px-2 py-1 text-right font-bold text-red-600">
+                              {it.excluidosNestaIteracao > 0 ? `−${it.excluidosNestaIteracao}` : '0'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </details>
+                )}
+
+                <div className="text-[10px] text-gray-500 italic border-t border-gray-200 pt-2">
+                  <strong>Fundamento legal:</strong> {dadosAtuais.saneamento.baseLegal}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Estatísticas por unidade — quando há mais de uma */}
           {dadosAtuais.porUnidade && dadosAtuais.porUnidade.length > 1 && (
             <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -227,14 +320,27 @@ export default function MercadoDetalheModal({ item, dados, onClose, onAtualizar 
                                 c.fonte === 'pncp-ata' ? <Award className="w-4 h-4 text-purple-600" /> :
                                 <Package className="w-4 h-4 text-blue-600" />;
                   return (
-                    <div key={idx} className="p-3 hover:bg-gray-50 transition flex items-start gap-3">
+                    <div
+                      key={idx}
+                      className={`p-3 transition flex items-start gap-3 ${
+                        c.outlier ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="shrink-0 mt-0.5">
+                        {c.outlier ? <XCircle className="w-4 h-4 text-red-500" /> : <CheckCircle2 className="w-4 h-4 text-green-500" />}
+                      </div>
                       <div className="shrink-0 mt-0.5">{icone}</div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[9px] font-bold uppercase text-amber-700 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
                             {fonte}
                           </span>
-                          <span className="font-bold text-sm text-lie-ink truncate flex-1">
+                          {c.outlier && (
+                            <span className="text-[9px] font-bold uppercase text-red-700 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded" title={c.motivoExclusao || ''}>
+                              ✗ Outlier
+                            </span>
+                          )}
+                          <span className={`font-bold text-sm truncate flex-1 ${c.outlier ? 'text-gray-500 line-through' : 'text-lie-ink'}`}>
                             {c.orgao}
                           </span>
                           <div className="text-right">
@@ -265,6 +371,11 @@ export default function MercadoDetalheModal({ item, dados, onClose, onAtualizar 
                             </span>
                           )}
                         </div>
+                        {c.motivoExclusao && (
+                          <div className="text-[10px] text-red-700 mt-1 italic">
+                            {c.motivoExclusao}
+                          </div>
+                        )}
                         {c.linkPncp && (
                           <a
                             href={c.linkPncp}

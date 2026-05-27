@@ -663,24 +663,117 @@ exports.coletarMercadoItem = functions
             });
         }
     }
-    // === Estatísticas agregadas (todas as cotações) ===
+    const desvioPadraoAmostral = (vals, media) => {
+        if (vals.length < 2)
+            return 0;
+        const sumSq = vals.reduce((acc, v) => acc + Math.pow(v - media, 2), 0);
+        return Math.sqrt(sumSq / (vals.length - 1));
+    };
     const calcularStats = (valores) => {
         const ord = [...valores].sort((a, b) => a - b);
         const k = ord.length;
         if (k === 0)
-            return { minimo: 0, maximo: 0, medio: 0, mediano: 0 };
+            return { minimo: 0, maximo: 0, medio: 0, mediano: 0, desvioPadrao: 0, coeficienteVariacao: 0 };
+        const media = ord.reduce((a, b) => a + b, 0) / k;
+        const dp = desvioPadraoAmostral(ord, media);
         return {
             minimo: ord[0],
             maximo: ord[k - 1],
-            medio: Math.round((ord.reduce((a, b) => a + b, 0) / k) * 100) / 100,
+            medio: Math.round(media * 100) / 100,
             mediano: k % 2 === 0
                 ? Math.round(((ord[k / 2 - 1] + ord[k / 2]) / 2) * 100) / 100
-                : ord[Math.floor(k / 2)]
+                : ord[Math.floor(k / 2)],
+            desvioPadrao: Math.round(dp * 100) / 100,
+            coeficienteVariacao: media > 0 ? Math.round((dp / media) * 10000) / 100 : 0 // %
         };
+    };
+    const aplicarSaneamentoTCU = (pontos) => {
+        const LIMITE_CV = 25; // %
+        const MAX_ITER = 20;
+        const iteracoes = [];
+        let atuais = [...pontos];
+        for (let iter = 0; iter < MAX_ITER; iter++) {
+            if (atuais.length < 3) {
+                // Fallback: < 3 sobreviventes — não pode prosseguir
+                return { pontosFinais: pontos, iteracoes, convergiu: false, metodoFinal: 'mediana-fallback' };
+            }
+            const vals = atuais.map(p => p.valor);
+            const media = vals.reduce((a, b) => a + b, 0) / vals.length;
+            const dp = desvioPadraoAmostral(vals, media);
+            const cv = media > 0 ? (dp / media) * 100 : 0;
+            const LS = media + dp;
+            const LI = media - dp;
+            // Registra iteração
+            iteracoes.push({
+                iteracao: iter + 1,
+                n: atuais.length,
+                media: Math.round(media * 100) / 100,
+                desvioPadrao: Math.round(dp * 100) / 100,
+                coeficienteVariacao: Math.round(cv * 100) / 100,
+                limiteSuperior: Math.round(LS * 100) / 100,
+                limiteInferior: Math.round(LI * 100) / 100,
+                excluidosNestaIteracao: 0
+            });
+            if (cv <= LIMITE_CV) {
+                // Convergiu — aceita amostra atual
+                return {
+                    pontosFinais: atuais,
+                    iteracoes,
+                    convergiu: true,
+                    metodoFinal: iter === 0 ? 'media-original' : 'media-saneada'
+                };
+            }
+            // Marca outliers
+            const proxAtuais = [];
+            let removidos = 0;
+            for (const p of atuais) {
+                if (p.valor < LI || p.valor > LS) {
+                    p.excluidoIteracao = iter + 1;
+                    removidos++;
+                }
+                else {
+                    proxAtuais.push(p);
+                }
+            }
+            iteracoes[iter].excluidosNestaIteracao = removidos;
+            // Se não removeu ninguém nesta iteração, para (evita loop)
+            if (removidos === 0) {
+                return { pontosFinais: atuais, iteracoes, convergiu: false, metodoFinal: 'mediana-fallback' };
+            }
+            atuais = proxAtuais;
+        }
+        return { pontosFinais: atuais, iteracoes, convergiu: false, metodoFinal: 'mediana-fallback' };
     };
     const valores = cotacoes.map(c => c.valorUnitario);
     const n = valores.length;
-    const estatisticas = calcularStats(valores);
+    // Estatística da amostra completa (sem saneamento)
+    const estatisticasOriginais = calcularStats(valores);
+    // Aplica saneamento TCU sobre valorUnitario (cada cotação tem seu peso)
+    const pontosOrig = cotacoes.map((c, i) => ({ valor: c.valorUnitario, idxCotacao: i }));
+    const saneamento = aplicarSaneamentoTCU(pontosOrig);
+    // Estatísticas pós-saneamento
+    const valoresSaneados = saneamento.pontosFinais.map(p => p.valor);
+    const estatisticasSaneadas = calcularStats(valoresSaneados);
+    // Preço de referência conforme método final
+    const precoReferencia = saneamento.convergiu
+        ? estatisticasSaneadas.medio
+        : estatisticasOriginais.mediano;
+    // Marca outliers nas cotações
+    const idxExcluidos = new Set(pontosOrig.filter(p => p.excluidoIteracao !== undefined).map(p => p.idxCotacao));
+    const motivosExclusao = new Map();
+    pontosOrig.forEach(p => {
+        if (p.excluidoIteracao !== undefined) {
+            motivosExclusao.set(p.idxCotacao, `Excluído na iteração ${p.excluidoIteracao} (fora de μ±σ)`);
+        }
+    });
+    // Mantém estrutura antiga em 'estatisticas' = ORIGINAL pra retrocompatibilidade,
+    // e adiciona 'saneamento' com dados completos.
+    const estatisticas = {
+        minimo: estatisticasOriginais.minimo,
+        maximo: estatisticasOriginais.maximo,
+        medio: estatisticasOriginais.medio,
+        mediano: estatisticasOriginais.mediano
+    };
     // === Estatísticas POR UNIDADE DE FORNECIMENTO ===
     // Permite ao usuário comparar com a unidade certa quando há mistura
     // (ex: 12 cotações em GARRAFA 500ML + 3 em COPO 200ML).
@@ -694,7 +787,7 @@ exports.coletarMercadoItem = functions
                 siglaMedida: c.siglaUnidadeMedida || '',
                 capacidade: c.capacidadeUnidadeFornecimento || 0,
                 totalCotacoes: 0,
-                estatisticas: { minimo: 0, maximo: 0, medio: 0, mediano: 0 },
+                estatisticas: { minimo: 0, maximo: 0, medio: 0, mediano: 0, desvioPadrao: 0, coeficienteVariacao: 0 },
                 precoPorUnidadeBaseMediano: 0
             };
         }
@@ -713,8 +806,14 @@ exports.coletarMercadoItem = functions
                 : ord[Math.floor(k / 2)];
         }
     }
+    // Adiciona flags de outlier em cada cotação
+    const cotacoesComFlag = cotacoes.map((c, i) => ({
+        ...c,
+        outlier: idxExcluidos.has(i),
+        motivoExclusao: motivosExclusao.get(i) || null
+    }));
     // Trunca a 50 cotações pra cache leve (ordenadas por data DESC se houver)
-    const cotacoesTopo = cotacoes
+    const cotacoesTopo = cotacoesComFlag
         .sort((a, b) => (b.dataHomologacao || '').localeCompare(a.dataHomologacao || ''))
         .slice(0, 50);
     // Unidade dominante (mais cotações) — usada no resumo da coluna
@@ -725,6 +824,18 @@ exports.coletarMercadoItem = functions
         tipo: isServico ? 'servico' : 'material',
         totalCotacoes: n,
         estatisticas,
+        // Saneamento estatístico TCU
+        saneamento: {
+            metodo: saneamento.metodoFinal,
+            convergiu: saneamento.convergiu,
+            limiteCV: 25,
+            cotacoesIncluidas: saneamento.pontosFinais.length,
+            cotacoesExcluidas: n - saneamento.pontosFinais.length,
+            precoReferencia: Math.round(precoReferencia * 100) / 100,
+            estatisticasFinais: estatisticasSaneadas,
+            iteracoes: saneamento.iteracoes,
+            baseLegal: 'Lei 14.133/2021 art. 23 • IN SEGES/ME 65/2021 art. 6º • Manual SEGES + Acórdãos TCU 1.875/2021-P, 403/2013-1C'
+        },
         porUnidade: unidadesOrdenadas,
         unidadeDominante,
         cotacoes: cotacoesTopo,

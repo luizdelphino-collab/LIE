@@ -269,6 +269,10 @@ export default function ProjetoItensPage() {
         tipoCatmat: selectedMaster.tipoCatmat,
         nomeCatmatOficial: selectedMaster.nomeCatmatOficial,
         descricaoCatmatOficial: selectedMaster.descricaoCatmatOficial,
+        // Conversor de unidade
+        fatorConversao: selectedMaster.fatorConversao,
+        unidadeBase: selectedMaster.unidadeBase,
+        embalagemDescricao: selectedMaster.embalagemDescricao,
         criadoEm: formData.criadoEm || serverTimestamp() as Timestamp
       };
 

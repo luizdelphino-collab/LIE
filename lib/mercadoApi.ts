@@ -24,6 +24,9 @@ export interface CotacaoMercado {
   siglaUnidadeMedida: string;         // "ML", "G", "L", "UN"
   marca: string;
   precoPorUnidadeBase: number;        // R$/ml ou R$/g (quando capacidade conhecida)
+  // Saneamento TCU
+  outlier?: boolean;                  // true se removido pela Média Saneada
+  motivoExclusao?: string | null;     // ex: "Excluído na iteração 2 (fora de μ±σ)"
   // ---
   descricaoItem: string;
   linkPncp: string;
@@ -34,6 +37,31 @@ export interface EstatisticasMercado {
   maximo: number;
   medio: number;
   mediano: number;
+  desvioPadrao?: number;
+  coeficienteVariacao?: number;
+}
+
+export interface IteracaoSaneamento {
+  iteracao: number;
+  n: number;
+  media: number;
+  desvioPadrao: number;
+  coeficienteVariacao: number;
+  limiteSuperior: number;
+  limiteInferior: number;
+  excluidosNestaIteracao: number;
+}
+
+export interface SaneamentoTCU {
+  metodo: 'media-saneada' | 'media-original' | 'mediana-fallback';
+  convergiu: boolean;
+  limiteCV: number;
+  cotacoesIncluidas: number;
+  cotacoesExcluidas: number;
+  precoReferencia: number;
+  estatisticasFinais: EstatisticasMercado;
+  iteracoes: IteracaoSaneamento[];
+  baseLegal: string;
 }
 
 export interface EstatisticasPorUnidade {
@@ -50,6 +78,7 @@ export interface MercadoResposta {
   tipo: 'material' | 'servico';
   totalCotacoes: number;
   estatisticas: EstatisticasMercado;
+  saneamento?: SaneamentoTCU;
   porUnidade?: EstatisticasPorUnidade[];
   unidadeDominante?: EstatisticasPorUnidade | null;
   cotacoes: CotacaoMercado[];

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, writeBatch } from 'firebase/firestore';
-import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ShieldCheck, Lightbulb } from 'lucide-react';
+import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ShieldCheck, Lightbulb, Package } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
@@ -656,6 +656,80 @@ export default function ItensMasterPage() {
               />
             </div>
 
+            {/* === BLOCO CONVERSOR DE UNIDADE (opcional mas crítico) === */}
+            <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
+              <div className="flex items-start gap-2 mb-3">
+                <Package className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-bold text-lie-ink">Embalagem & Conversor de Unidade</h3>
+                  <p className="text-xs text-gray-500 leading-snug">
+                    Quando seu item é uma embalagem com múltiplas unidades (ex: <em>caixa com 48 copos de 200ml</em>),
+                    preencha aqui pra que o sistema compare o preço corretamente com o mercado público
+                    em <strong>R$/ml</strong>, <strong>R$/g</strong>, etc. Sem isso, comparações com cotações em
+                    unidade diferente ficam enganosas.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                <div className="md:col-span-6">
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Descrição da embalagem (humano)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Caixa com 48 copos de 200ml"
+                    value={formData.embalagemDescricao || ''}
+                    onChange={e => setFormData(p => ({ ...p, embalagemDescricao: e.target.value }))}
+                    className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                  />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Quantidade total</label>
+                  <input
+                    type="number" step="0.001" min={0}
+                    placeholder="Ex: 9600"
+                    value={formData.fatorConversao ?? ''}
+                    onChange={e => setFormData(p => ({ ...p, fatorConversao: e.target.value ? Number(e.target.value) : undefined }))}
+                    className="w-full border-gray-300 rounded-lg shadow-sm text-sm font-mono"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-0.5">48 × 200 = 9600</p>
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Unidade base</label>
+                  <select
+                    value={formData.unidadeBase || ''}
+                    onChange={e => setFormData(p => ({ ...p, unidadeBase: e.target.value || undefined }))}
+                    className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                  >
+                    <option value="">Selecione…</option>
+                    <option value="ML">ML (mililitros)</option>
+                    <option value="L">L (litros)</option>
+                    <option value="G">G (gramas)</option>
+                    <option value="KG">KG (quilogramas)</option>
+                    <option value="UN">UN (unidades)</option>
+                    <option value="M">M (metros)</option>
+                    <option value="M²">M² (metro quadrado)</option>
+                    <option value="M³">M³ (metro cúbico)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Preview do cálculo */}
+              {formData.fatorConversao && formData.unidadeBase && (formData.valorUnitario || 0) > 0 && (
+                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                  <span className="text-green-900">
+                    Preço base calculado:{' '}
+                    <strong className="font-mono">
+                      {((formData.valorUnitario || 0) / formData.fatorConversao).toFixed(4)}
+                    </strong>{' '}
+                    R$/{formData.unidadeBase.toLowerCase()}
+                    {' '}— este valor será comparado contra a mediana saneada das cotações governamentais
+                    na mesma unidade base.
+                  </span>
+                </div>
+              )}
+            </div>
+
             <div className="md:col-span-3 flex justify-end gap-3 pt-2">
               <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancelar</button>
               <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-8 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2">
@@ -740,35 +814,51 @@ export default function ItensMasterPage() {
                       );
                     }
                     if (dados && dados.totalCotacoes > 0) {
-                      const diff = ((it.valorUnitario - dados.estatisticas.mediano) / dados.estatisticas.mediano) * 100;
+                      // Comparação justa quando user cadastrou fator de conversão
+                      const temFator = !!(it.fatorConversao && it.fatorConversao > 0);
+                      const precoBaseItem = temFator ? it.valorUnitario / it.fatorConversao! : it.valorUnitario;
+                      // Preço de referência (saneado se disponível)
+                      const precoRefGov = dados.saneamento?.precoReferencia ?? dados.estatisticas.mediano;
+                      // Calcula referência base: se cotações têm capacidade, divide
+                      const capacidadeGov = dados.unidadeDominante?.capacidade || 0;
+                      const precoBaseGov = capacidadeGov > 0 ? precoRefGov / capacidadeGov : precoRefGov;
+
+                      // Quando dá pra comparar em base unificada (item TEM fator E mercado TEM capacidade)
+                      const podeCompararBase = temFator && capacidadeGov > 0
+                        && it.unidadeBase?.toUpperCase() === dados.unidadeDominante?.siglaMedida?.toUpperCase();
+
+                      const valorComparado = podeCompararBase ? precoBaseGov : precoRefGov;
+                      const nossoValor = podeCompararBase ? precoBaseItem : it.valorUnitario;
+                      const diff = ((nossoValor - valorComparado) / valorComparado) * 100;
                       const cor = diff > 20 ? 'text-red-600' : diff < -20 ? 'text-amber-600' : 'text-green-600';
                       const seta = diff > 5 ? '↑' : diff < -5 ? '↓' : '≈';
-                      // Detecta divergência de unidade (item em 'caixa', cotações em 'garrafa/copo')
-                      const unidadeItem = (it.unidade || '').toLowerCase();
-                      const unidadeGov = dados.unidadeDominante?.unidade?.toLowerCase() || '';
-                      const divergeUnidade = unidadeGov && unidadeItem && !unidadeGov.includes(unidadeItem.split(/[\s,]/)[0]) && !unidadeItem.includes(unidadeGov.split(/[\s,]/)[0]);
-                      const unidadeLabel = dados.unidadeDominante
-                        ? `/${dados.unidadeDominante.unidade.toLowerCase()}${dados.unidadeDominante.capacidade ? ` ${dados.unidadeDominante.capacidade}${dados.unidadeDominante.siglaMedida.toLowerCase()}` : ''}`
-                        : '';
+
+                      const diverge = !podeCompararBase && dados.unidadeDominante && it.unidade &&
+                        !it.unidade.toLowerCase().includes(dados.unidadeDominante.unidade.toLowerCase().slice(0, 4));
+
+                      const fmtPreco = (v: number) => v < 0.01
+                        ? `R$ ${v.toFixed(4)}`
+                        : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
                       return (
                         <button
                           onClick={(e) => { e.stopPropagation(); setMercadoDetalhe({ item: it, dados }); }}
-                          className={`group inline-flex flex-col items-end gap-0 hover:bg-blue-50 px-2 py-1 rounded transition ${divergeUnidade ? 'ring-1 ring-amber-300' : ''}`}
-                          title={divergeUnidade
-                            ? `⚠ Unidades diferentes: seu item é "${it.unidade}", cotações são "${dados.unidadeDominante?.unidade}". Clique pra detalhes.`
-                            : 'Clique pra ver cotações detalhadas'}
+                          className={`group inline-flex flex-col items-end gap-0 hover:bg-blue-50 px-2 py-1 rounded transition ${diverge ? 'ring-1 ring-amber-300' : ''}`}
+                          title={podeCompararBase
+                            ? `Comparação em R$/${it.unidadeBase?.toLowerCase()}: você R$${precoBaseItem.toFixed(4)} vs mercado R$${precoBaseGov.toFixed(4)}`
+                            : 'Clique pra ver cotações detalhadas e auditar saneamento'}
                         >
                           <span className="font-bold text-blue-700 flex items-baseline gap-1">
-                            {dados.estatisticas.mediano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                            {unidadeLabel && <span className="text-[9px] text-gray-500 font-normal">{unidadeLabel}</span>}
+                            {fmtPreco(valorComparado)}
+                            <span className="text-[9px] text-gray-500 font-normal">
+                              /{podeCompararBase ? it.unidadeBase?.toLowerCase() : (dados.unidadeDominante?.unidade?.toLowerCase() || 'un')}
+                            </span>
                           </span>
                           <span className="text-[9px] text-gray-500 font-medium uppercase tracking-wider">
-                            {dados.totalCotacoes} cotaç{dados.totalCotacoes === 1 ? 'ão' : 'ões'}
+                            {dados.saneamento ? `${dados.saneamento.cotacoesIncluidas}/${dados.totalCotacoes} saneadas` : `${dados.totalCotacoes} cotações`}
                           </span>
-                          {divergeUnidade ? (
-                            <span className="text-[9px] font-bold text-amber-700 flex items-center gap-0.5">
-                              ⚠ unidade difere
-                            </span>
+                          {diverge ? (
+                            <span className="text-[9px] font-bold text-amber-700">⚠ unidade difere</span>
                           ) : (
                             <span className={`text-[9px] font-bold ${cor}`}>
                               {seta} {Math.abs(diff).toFixed(0)}% vs nosso
