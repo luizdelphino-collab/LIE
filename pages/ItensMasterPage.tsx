@@ -6,6 +6,8 @@ import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
 import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/CatalogoSearchPicker';
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
+import { coletarMercadoLote, type MercadoResposta } from '../lib/mercadoApi';
+import MercadoDetalheModal from '../components/MercadoDetalheModal';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -59,8 +61,41 @@ export default function ItensMasterPage() {
   // Validação CATMAT em lote
   const [validacaoLoteOpen, setValidacaoLoteOpen] = useState(false);
 
+  // Preço de mercado (cache local em memória, busca paralela quando há CATMAT)
+  const [mercado, setMercado] = useState<Record<number, MercadoResposta | null>>({});
+  const [mercadoCarregando, setMercadoCarregando] = useState<Set<number>>(new Set());
+  const [mercadoDetalhe, setMercadoDetalhe] = useState<{ item: ItemMaster; dados: MercadoResposta } | null>(null);
+
   // Reset pra página 1 quando busca/filtro muda
   useEffect(() => { setPaginaAtual(1); }, [searchTerm, tamanhoPagina]);
+
+  // Quando os itens carregam, busca preços de mercado de quem tem CATMAT validado
+  // (em lote, paralelismo 4, cache de 24h na Cloud Function via Firestore).
+  useEffect(() => {
+    const itensComCatmat = items.filter(it => it.codigoCatmat && !(it.codigoCatmat in mercado));
+    if (itensComCatmat.length === 0) return;
+
+    const codigosAlvo = itensComCatmat.map(it => ({
+      codigoCatmat: it.codigoCatmat!,
+      tipo: (it.tipoCatmat || 'material') as 'material' | 'servico'
+    }));
+
+    setMercadoCarregando(prev => {
+      const n = new Set(prev);
+      codigosAlvo.forEach(c => n.add(c.codigoCatmat));
+      return n;
+    });
+
+    coletarMercadoLote(codigosAlvo).then(resultado => {
+      setMercado(prev => ({ ...prev, ...resultado }));
+      setMercadoCarregando(prev => {
+        const n = new Set(prev);
+        codigosAlvo.forEach(c => n.delete(c.codigoCatmat));
+        return n;
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   // Estado do limpador de duplicatas
   const [limpezaOpen, setLimpezaOpen] = useState(false);
@@ -652,6 +687,9 @@ export default function ItensMasterPage() {
               <th className="px-4 py-3 w-32 text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('valorUnitario')}>
                 <div className="flex items-center gap-1 justify-end">$ Unitário <ArrowUpDown className="w-3 h-3" /></div>
               </th>
+              <th className="px-4 py-3 w-36 text-right" title="Mediana do mercado público (Compras.gov.br + PNCP)">
+                <div className="flex items-center gap-1 justify-end">Mercado Gov</div>
+              </th>
               <th className="px-4 py-3 w-24 text-right">Ações</th>
             </tr>
           </thead>
@@ -686,6 +724,43 @@ export default function ItensMasterPage() {
                 <td className="px-4 py-3 text-sm text-gray-600">{it.unidade}</td>
                 <td className="px-4 py-3 text-sm font-bold text-right text-lie-ink">
                   {it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </td>
+                <td className="px-4 py-3 text-xs text-right">
+                  {!it.codigoCatmat ? (
+                    <span className="text-gray-300 italic">—</span>
+                  ) : mercadoCarregando.has(it.codigoCatmat) && !mercado[it.codigoCatmat] ? (
+                    <span className="text-gray-400 italic flex items-center justify-end gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> buscando…
+                    </span>
+                  ) : mercado[it.codigoCatmat] && mercado[it.codigoCatmat]!.totalCotacoes > 0 ? (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMercadoDetalhe({ item: it, dados: mercado[it.codigoCatmat]! }); }}
+                      className="group inline-flex flex-col items-end gap-0 hover:bg-blue-50 px-2 py-1 rounded transition"
+                      title="Clique pra ver cotações detalhadas"
+                    >
+                      <span className="font-bold text-blue-700">
+                        {mercado[it.codigoCatmat]!.estatisticas.mediano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </span>
+                      <span className="text-[9px] text-gray-500 font-medium uppercase tracking-wider">
+                        {mercado[it.codigoCatmat]!.totalCotacoes} cotaç{mercado[it.codigoCatmat]!.totalCotacoes === 1 ? 'ão' : 'ões'}
+                      </span>
+                      {(() => {
+                        const m = mercado[it.codigoCatmat]!;
+                        const diff = ((it.valorUnitario - m.estatisticas.mediano) / m.estatisticas.mediano) * 100;
+                        const cor = diff > 20 ? 'text-red-600' : diff < -20 ? 'text-amber-600' : 'text-green-600';
+                        const seta = diff > 5 ? '↑' : diff < -5 ? '↓' : '≈';
+                        return (
+                          <span className={`text-[9px] font-bold ${cor}`}>
+                            {seta} {Math.abs(diff).toFixed(0)}% vs nosso
+                          </span>
+                        );
+                      })()}
+                    </button>
+                  ) : mercado[it.codigoCatmat] && mercado[it.codigoCatmat]!.totalCotacoes === 0 ? (
+                    <span className="text-amber-600 text-[10px] italic">sem cotação</span>
+                  ) : (
+                    <span className="text-gray-300 italic">…</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
@@ -795,6 +870,19 @@ export default function ItensMasterPage() {
         items={items}
         onAtualizado={carregarItens}
       />
+
+      {/* ===== MODAL DE DETALHE DE MERCADO ===== */}
+      {mercadoDetalhe && (
+        <MercadoDetalheModal
+          item={mercadoDetalhe.item}
+          dados={mercadoDetalhe.dados}
+          onClose={() => setMercadoDetalhe(null)}
+          onAtualizar={(novo) => {
+            setMercado(prev => ({ ...prev, [novo.codigoCatmat]: novo }));
+            setMercadoDetalhe(prev => prev ? { ...prev, dados: novo } : null);
+          }}
+        />
+      )}
 
       {/* ===== MODAL DE LIMPEZA DE DUPLICATAS ===== */}
       {limpezaOpen && (

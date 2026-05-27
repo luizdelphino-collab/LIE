@@ -545,3 +545,196 @@ export const validarCatmat = functions
       });
     }
   });
+
+/**
+ * Coleta agregada de preços de mercado para um CATMAT/CATSER.
+ *
+ * Consulta os 3 endpoints do dadosabertos.compras.gov.br em paralelo,
+ * calcula estatísticas (mín/máx/médio/mediano) e cacheia no Firestore
+ * em 'marketCache/{codigo}' por 24h. Subsequentes leituras retornam
+ * direto do cache (custo zero).
+ *
+ * Uso:
+ *   GET /coletarMercadoItem?codigoCatmat=445484
+ *   GET /coletarMercadoItem?codigoCatmat=445484&forceRefresh=true
+ *   GET /coletarMercadoItem?codigoCatmat=3603&tipo=servico
+ *
+ * Resposta:
+ * {
+ *   codigoCatmat, totalCotacoes, fonteCache,
+ *   estatisticas: { minimo, maximo, medio, mediano },
+ *   cotacoes: [...]    // até 50 cotações detalhadas
+ * }
+ */
+export const coletarMercadoItem = functions
+  .runWith({ timeoutSeconds: 60, memory: '512MB' })
+  .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin as string | undefined);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Vary', 'Origin');
+
+    if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+    if (req.method !== 'GET') { res.status(405).json({ error: 'Apenas GET é suportado.' }); return; }
+
+    const codigoCatmat = String(req.query.codigoCatmat || '').trim();
+    if (!codigoCatmat || !/^\d+$/.test(codigoCatmat)) {
+      res.status(400).json({ error: 'Query param "codigoCatmat" obrigatório e numérico.' });
+      return;
+    }
+    const tipo = String(req.query.tipo || 'material').toLowerCase();
+    const isServico = tipo === 'servico' || tipo === 'serviço' || tipo === 'catser';
+    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
+
+    const cacheRef = admin.firestore()
+      .collection('marketCache')
+      .doc(`${isServico ? 'svc' : 'mat'}_${codigoCatmat}`);
+
+    // 1. Verifica cache (24h TTL)
+    if (!forceRefresh) {
+      try {
+        const snap = await cacheRef.get();
+        if (snap.exists) {
+          const data = snap.data() as any;
+          const atualizado = data.atualizadoEm?.toDate?.() || new Date(0);
+          const idadeHoras = (Date.now() - atualizado.getTime()) / (1000 * 60 * 60);
+          if (idadeHoras < 24) {
+            res.set('Cache-Control', 'public, max-age=3600');
+            res.json({ ...data, fonteCache: 'firestore', idadeHoras: Math.round(idadeHoras * 10) / 10 });
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Falha lendo cache, vai consultar API:', e);
+      }
+    }
+
+    // 2. Consulta APIs em paralelo
+    const base = 'https://dadosabertos.compras.gov.br';
+    const headers = {
+      Accept: 'application/json',
+      'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
+    };
+    const tamanho = 500;
+
+    type Fonte = { nome: string; url: string };
+    const fontes: Fonte[] = isServico
+      ? [{
+          nome: 'compras-servico',
+          url: `${base}/modulo-pesquisa-preco/3_consultarServico?codigoItemCatalogo=${codigoCatmat}&pagina=1&tamanhoPagina=${tamanho}`
+        }]
+      : [
+          {
+            nome: 'compras.gov.br',
+            url: `${base}/modulo-pesquisa-preco/1_consultarMaterial?codigoItemCatalogo=${codigoCatmat}&pagina=1&tamanhoPagina=${tamanho}`
+          },
+          {
+            nome: 'pncp-contratacao',
+            url: `${base}/modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133?codigoItemCatalogo=${codigoCatmat}&pagina=1&tamanhoPagina=${tamanho}`
+          },
+          {
+            nome: 'pncp-ata',
+            url: `${base}/modulo-arp/2_consultarARPItem?codigoItemCatalogo=${codigoCatmat}&pagina=1&tamanhoPagina=${tamanho}`
+          }
+        ];
+
+    const buscarFonte = async (f: Fonte): Promise<{ fonte: string; registros: any[] }> => {
+      try {
+        const resp = await fetch(f.url, { headers });
+        if (!resp.ok) return { fonte: f.nome, registros: [] };
+        const data = await resp.json();
+        const arr = data.resultado || data.data || [];
+        return { fonte: f.nome, registros: Array.isArray(arr) ? arr : [] };
+      } catch {
+        return { fonte: f.nome, registros: [] };
+      }
+    };
+
+    const resultados = await Promise.all(fontes.map(buscarFonte));
+
+    // Normaliza cotações (formato enxuto pra cache)
+    type Cotacao = {
+      fonte: string;
+      orgao: string;
+      uasg: string;
+      cnpjOrgao: string;
+      identificadorCompra: string;
+      dataHomologacao: string;
+      modalidade: string;
+      valorUnitario: number;
+      unidadeMedida: string;
+      descricaoItem: string;
+      linkPncp: string;
+    };
+
+    const cotacoes: Cotacao[] = [];
+    for (const { fonte, registros } of resultados) {
+      for (const r of registros) {
+        const valor = Number(r.valorUnitario || r.valorUnitarioEstimado || r.valorUnitarioHomologado || r.precoUnitario) || 0;
+        if (valor <= 0) continue;
+
+        const numCtrl = r.numeroControlePNCP || r.numeroControlePNCPCompra || r.numeroControlePNCPAta || '';
+        let link = r.linkProcesso || '';
+        const m = String(numCtrl).match(/^(\d{14})-[\dA-Z]+-(\d+)\/(\d{4})$/);
+        if (m) {
+          const tipoLink = fonte === 'pncp-ata' ? 'atas' : 'editais';
+          link = `https://pncp.gov.br/app/${tipoLink}/${m[1]}/${m[3]}/${m[2]}`;
+        } else if (r.uasg) {
+          link = `https://pncp.gov.br/app/contratacoes?q=${r.uasg}`;
+        }
+
+        cotacoes.push({
+          fonte,
+          orgao: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || 'ÓRGÃO PÚBLICO',
+          uasg: String(r.uasg || r.codigoUasg || ''),
+          cnpjOrgao: String(r.cnpjOrgao || r.orgaoEntidadeCnpj || ''),
+          identificadorCompra: String(r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || ''),
+          dataHomologacao: String(r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || ''),
+          modalidade: String(r.nomeModalidadeCompra || r.modalidade || ''),
+          valorUnitario: valor,
+          unidadeMedida: String(r.unidadeMedida || r.siglaUnidadeMedida || ''),
+          descricaoItem: String(r.descricaoItem || r.descricao || ''),
+          linkPncp: link
+        });
+      }
+    }
+
+    // Estatísticas
+    const valores = cotacoes.map(c => c.valorUnitario).sort((a, b) => a - b);
+    const n = valores.length;
+    const estatisticas = n === 0
+      ? { minimo: 0, maximo: 0, medio: 0, mediano: 0 }
+      : {
+          minimo: valores[0],
+          maximo: valores[n - 1],
+          medio: Math.round((valores.reduce((a, b) => a + b, 0) / n) * 100) / 100,
+          mediano: n % 2 === 0
+            ? Math.round(((valores[n / 2 - 1] + valores[n / 2]) / 2) * 100) / 100
+            : valores[Math.floor(n / 2)]
+        };
+
+    // Trunca a 50 cotações pra cache leve (ordenadas por data DESC se houver)
+    const cotacoesTopo = cotacoes
+      .sort((a, b) => (b.dataHomologacao || '').localeCompare(a.dataHomologacao || ''))
+      .slice(0, 50);
+
+    const payload = {
+      codigoCatmat: Number(codigoCatmat),
+      tipo: isServico ? 'servico' : 'material',
+      totalCotacoes: n,
+      estatisticas,
+      cotacoes: cotacoesTopo,
+      atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    // 3. Salva no cache (não bloqueia resposta)
+    cacheRef.set(payload).catch(e => console.warn('Falha gravando cache:', e));
+
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.json({
+      ...payload,
+      atualizadoEm: new Date().toISOString(),
+      fonteCache: 'api-fresh'
+    });
+  });

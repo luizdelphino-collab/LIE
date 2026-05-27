@@ -9,6 +9,8 @@
 // descobertos via inspeção do bundle Angular do portal. Se algum endpoint
 // quebrar, abrir o DevTools no portal e olhar as chamadas XHR pra confirmar.
 
+import { storage } from './firebase';
+
 const BASE = 'https://cnbs.estaleiro.serpro.gov.br/cnbs-api';
 
 const HEADERS = { Accept: 'application/json' };
