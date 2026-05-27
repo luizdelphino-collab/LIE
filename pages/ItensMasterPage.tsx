@@ -6,7 +6,7 @@ import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
 import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/CatalogoSearchPicker';
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
-import { coletarMercadoLote, type MercadoResposta } from '../lib/mercadoApi';
+import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta } from '../lib/mercadoApi';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 
 interface ItemComUso extends ItemMaster {
@@ -65,6 +65,36 @@ export default function ItensMasterPage() {
   const [mercado, setMercado] = useState<Record<number, MercadoResposta | null>>({});
   const [mercadoCarregando, setMercadoCarregando] = useState<Set<number>>(new Set());
   const [mercadoDetalhe, setMercadoDetalhe] = useState<{ item: ItemMaster; dados: MercadoResposta } | null>(null);
+
+  // Picker de embalagem oficial: descobre embalagens do CATMAT no mercado e oferece adotar
+  const [embalagensDisponiveis, setEmbalagensDisponiveis] = useState<MercadoResposta['porUnidade'] | null>(null);
+  const [buscandoEmbalagens, setBuscandoEmbalagens] = useState(false);
+
+  const buscarEmbalagensOficiais = async () => {
+    if (!formData.codigoCatmat) return;
+    setBuscandoEmbalagens(true);
+    try {
+      const dados = await coletarMercadoItem(formData.codigoCatmat, formData.tipoCatmat || 'material');
+      setEmbalagensDisponiveis(dados?.porUnidade || []);
+    } finally {
+      setBuscandoEmbalagens(false);
+    }
+  };
+
+  const adotarEmbalagem = (emb: NonNullable<MercadoResposta['porUnidade']>[0]) => {
+    setFormData(p => ({
+      ...p,
+      unidade: emb.unidade.toLowerCase(),  // "GARRAFA" → "garrafa"
+      embalagemDescricao: emb.capacidade > 0
+        ? `${emb.unidade.toLowerCase()} ${emb.capacidade}${emb.siglaMedida.toLowerCase()}`
+        : emb.unidade.toLowerCase(),
+      fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined,
+      unidadeBase: emb.siglaMedida || undefined,
+      // Sugere o preço com a mediana saneada (user pode ajustar)
+      valorUnitario: p.valorUnitario || emb.estatisticas.mediano
+    }));
+    setEmbalagensDisponiveis(null);
+  };
 
   // Reset pra página 1 quando busca/filtro muda
   useEffect(() => { setPaginaAtual(1); }, [searchTerm, tamanhoPagina]);
@@ -660,16 +690,76 @@ export default function ItensMasterPage() {
             <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
               <div className="flex items-start gap-2 mb-3">
                 <Package className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="text-sm font-bold text-lie-ink">Embalagem & Conversor de Unidade</h3>
-                  <p className="text-xs text-gray-500 leading-snug">
-                    Quando seu item é uma embalagem com múltiplas unidades (ex: <em>caixa com 48 copos de 200ml</em>),
-                    preencha aqui pra que o sistema compare o preço corretamente com o mercado público
-                    em <strong>R$/ml</strong>, <strong>R$/g</strong>, etc. Sem isso, comparações com cotações em
-                    unidade diferente ficam enganosas.
+                <div className="flex-1">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-lie-ink">Embalagem oficial</h3>
+                    {formData.codigoCatmat && (
+                      <button
+                        type="button"
+                        onClick={buscarEmbalagensOficiais}
+                        disabled={buscandoEmbalagens}
+                        className="text-xs px-3 py-1 bg-blue-600 text-white font-bold rounded hover:bg-blue-700 transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                      >
+                        {buscandoEmbalagens ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                        {buscandoEmbalagens ? 'Buscando…' : 'Ver embalagens do mercado'}
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 leading-snug mt-1">
+                    <strong>Ideal:</strong> usar a mesma embalagem que aparece no mercado público
+                    (ex: GARRAFA 500ml). Assim a comparação é direta, sem conversão e o parecerista
+                    não precisa interpretar matemática.
                   </p>
                 </div>
               </div>
+
+              {/* Picker de embalagens do mercado */}
+              {embalagensDisponiveis && (
+                <div className="mb-3 border-2 border-blue-200 rounded-lg overflow-hidden bg-blue-50/30">
+                  <div className="bg-blue-100 px-3 py-2 text-xs font-bold text-blue-900 flex items-center justify-between">
+                    <span>
+                      {embalagensDisponiveis.length === 0
+                        ? 'Nenhuma embalagem encontrada nas cotações públicas'
+                        : `${embalagensDisponiveis.length} embalagem(ns) encontrada(s) — clique pra adotar`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEmbalagensDisponiveis(null)}
+                      className="text-blue-700 hover:text-blue-900"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="divide-y divide-blue-100 max-h-60 overflow-y-auto">
+                    {embalagensDisponiveis.map((emb, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => adotarEmbalagem(emb)}
+                        className="w-full text-left p-2.5 hover:bg-blue-100 transition flex items-start gap-3"
+                      >
+                        <Package className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-sm text-lie-ink">
+                            {emb.unidade}
+                            {emb.capacidade > 0 && (
+                              <span className="text-blue-700 ml-1">{emb.capacidade} {emb.siglaMedida}</span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-gray-600 mt-0.5">
+                            {emb.totalCotacoes} cotação(ões) • Mediana: <strong>{emb.estatisticas.mediano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>
+                            {' '}({emb.estatisticas.minimo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} a {emb.estatisticas.maximo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})
+                          </div>
+                        </div>
+                        <CheckCircle2 className="w-4 h-4 text-green-600 opacity-0 group-hover:opacity-100 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="px-3 py-2 bg-blue-50 text-[10px] text-blue-800 italic border-t border-blue-100">
+                    Ao adotar, preenche unidade, fator de conversão e sugere o preço pela mediana saneada.
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
                 <div className="md:col-span-6">

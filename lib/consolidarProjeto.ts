@@ -522,9 +522,16 @@ async function renderPesquisaCertificadosJsPdf(
 ): Promise<Uint8Array | null> {
   if (itensPesquisados.length === 0) return null;
 
-  // Pre-gera QR codes — prioriza link PNCP original; fallback pra Storage
+  // Pre-gera QR codes — APENAS pra links PNCP oficiais. Pra cotações
+  // manuais/fomento usa o documento próprio do user. Storage jamais.
+  const fontesGov = ['compras.gov.br', 'pncp', 'pncp-contratacao', 'pncp-ata'];
   const todasUrls = itensPesquisados.flatMap(it =>
-    (it.referencias || []).map((r: any) => r.linkPncpOriginal || r.localizacaoUrl).filter(Boolean)
+    (it.referencias || []).map((r: any) => {
+      if (fontesGov.includes(r.fonte)) {
+        return r.linkPncpOriginal?.includes('pncp.gov.br') ? r.linkPncpOriginal : '';
+      }
+      return r.localizacaoUrl || '';
+    }).filter(Boolean)
   );
   const qrCache = await gerarQrCodes(todasUrls);
 
@@ -706,8 +713,10 @@ async function renderPesquisaCertificadosJsPdf(
         pdf.setLineWidth(0.3);
         pdf.rect(MARGIN, cardY, CONTENT_W, FICHA_H, 'FD');
 
-        // QR code — prioriza link PNCP oficial; fallback pro Storage
-        const qrUrl = r.linkPncpOriginal || r.localizacaoUrl;
+        // QR code — APENAS link oficial. Storage não vai pro relatório.
+        const qrUrl = fontesGov.includes(r.fonte)
+          ? (r.linkPncpOriginal?.includes('pncp.gov.br') ? r.linkPncpOriginal : '')
+          : (r.localizacaoUrl || '');
         const qrData = qrUrl ? qrCache[qrUrl] : null;
         if (qrData) {
           try {
@@ -822,29 +831,30 @@ async function renderPesquisaCertificadosJsPdf(
         pdf.text(fornecLines[0], colA + LABEL_W, lineY);
         lineY += 3.5;
 
-        // Linha 1: Fonte oficial (link PNCP/Compras quando preservado)
-        if (r.linkPncpOriginal) {
+        // Link oficial — política estrita: SÓ link governamental original
+        // (pncp.gov.br/app/...), nunca o Firebase Storage. Pra cotações
+        // manuais (fomento/manual), o localizacaoUrl é o PDF do user.
+        // (usa o 'fontesGov' do escopo da função)
+        const ehGov = fontesGov.includes(r.fonte);
+        const linkOficial = r.linkPncpOriginal && r.linkPncpOriginal.includes('pncp.gov.br')
+          ? r.linkPncpOriginal
+          : (!ehGov && r.localizacaoUrl ? r.localizacaoUrl : '');
+
+        if (linkOficial) {
           pdf.setFont('helvetica', 'bold');
           pdf.setTextColor(100, 100, 100);
           pdf.setFontSize(7);
-          pdf.text('Fonte oficial:', colA, lineY);
+          pdf.text(ehGov ? 'Validar no PNCP:' : 'Documento:', colA, lineY);
           pdf.setFont('helvetica', 'normal');
           pdf.setTextColor(0, 102, 204);
-          const urlLines = pdf.splitTextToSize(r.linkPncpOriginal, TEXT_MAX_W - LABEL_W);
-          pdf.textWithLink(urlLines[0], colA + LABEL_W, lineY, { url: r.linkPncpOriginal });
-          lineY += 3.5;
-        }
-        // Linha 2: Comprovante arquivado (Storage com PDF/certidão)
-        if (r.localizacaoUrl && r.localizacaoUrl !== r.linkPncpOriginal) {
-          pdf.setFont('helvetica', 'bold');
-          pdf.setTextColor(100, 100, 100);
-          pdf.setFontSize(7);
-          const label = r.linkPncpOriginal ? 'Comprovante:' : 'Validar em:';
-          pdf.text(label, colA, lineY);
-          pdf.setFont('helvetica', 'normal');
-          pdf.setTextColor(0, 102, 204);
-          const urlLines = pdf.splitTextToSize(r.localizacaoUrl, TEXT_MAX_W - LABEL_W);
-          pdf.textWithLink(urlLines[0], colA + LABEL_W, lineY, { url: r.localizacaoUrl });
+          const urlLines = pdf.splitTextToSize(linkOficial, TEXT_MAX_W - LABEL_W);
+          pdf.textWithLink(urlLines[0], colA + LABEL_W, lineY, { url: linkOficial });
+        } else if (ehGov) {
+          // Fonte governamental mas SEM link rastreável (cotação legada anterior à v1.5.9.8)
+          pdf.setFont('helvetica', 'italic');
+          pdf.setTextColor(160, 100, 100);
+          pdf.setFontSize(6.5);
+          pdf.text('(Pesquisa anterior à v1.5.9.8 — re-execute para vincular ao PNCP)', colA, lineY);
         }
 
         state.y += FICHA_H + 2;
