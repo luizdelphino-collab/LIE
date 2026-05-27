@@ -272,28 +272,57 @@ async function arquivarReferencia(
   return copy;
 }
 
+/**
+ * Limpa a cesta de pesquisa de um item — usado quando o reprocessamento
+ * encontra zero cotações elegíveis ou nenhum match no catálogo.
+ * Garante que o Firestore reflita o estado real (vazio = sem dados).
+ */
+async function limparPesquisaItem(item: ItemProjeto, codigoCatalogoTentado?: number): Promise<void> {
+  const patch: any = {
+    pesquisado: false,
+    referencias: [],
+    mediaReferencia: 0,
+    medianaReferencia: 0
+  };
+  if (codigoCatalogoTentado) patch.ultimoCodigoVinculado = codigoCatalogoTentado;
+  await setDoc(doc(db, `projects/${item.projectId}/items`, item.id), patch, { merge: true });
+}
+
 export async function pesquisarItemAutomatico(
   item: ItemProjeto,
   projetoTitulo: string,
   entidadeNome: string
 ): Promise<AutoPesquisaResult> {
   try {
+    console.info(`[pesquisa] iniciando '${item.nome}' (estimado: R$ ${item.valorUnitario})`);
+
     const matches = buscarMateriaisLocal(item.nome);
     if (matches.length === 0) {
+      console.info(`[pesquisa] '${item.nome}' SEM match no catálogo — limpando cesta antiga`);
+      await limparPesquisaItem(item);
       return { itemId: item.id, itemNome: item.nome, status: 'sem-match', reason: 'Nenhum material correspondente no catálogo CATMAT/CATSER.' };
     }
     const mat = matches[0];
+    console.info(`[pesquisa] '${item.nome}' match: ${mat.codigoItem} (${mat.nome})`);
 
     const precos = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario, item.nome);
+    console.info(`[pesquisa] '${item.nome}' API retornou ${precos.length} cotação(ões) brutas`);
+
     const elegiveis = precos
       .filter(p => p.valorUnitario >= item.valorUnitario)
       .sort((a, b) => b.valorUnitario - a.valorUnitario);
+    console.info(`[pesquisa] '${item.nome}' ${elegiveis.length} elegíveis (>= R$ ${item.valorUnitario})`);
 
     if (elegiveis.length === 0) {
-      return { itemId: item.id, itemNome: item.nome, status: 'sem-refs', reason: 'Nenhuma referência igual ou superior ao valor estimado.' };
+      console.info(`[pesquisa] '${item.nome}' SEM elegíveis — limpando cesta antiga`);
+      await limparPesquisaItem(item, mat.codigoItem);
+      const motivo = precos.length === 0
+        ? 'A API governamental não retornou nenhuma cotação pra esse código CATMAT.'
+        : `API retornou ${precos.length} cotação(ões), mas todas abaixo do valor estimado (R$ ${item.valorUnitario}).`;
+      return { itemId: item.id, itemNome: item.nome, status: 'sem-refs', reason: motivo };
     }
 
-    const token = item.tokenPesquisa || generateToken();
+    const token = generateToken();
 
     const referenciasArquivadas: PrecoReferencia[] = [];
     for (let idx = 0; idx < elegiveis.length; idx++) {
@@ -308,6 +337,7 @@ export async function pesquisarItemAutomatico(
       ? (valores[meio - 1] + valores[meio]) / 2
       : valores[meio];
 
+    // Sempre SETA explicitamente — não há merge silencioso de cesta antiga
     await setDoc(doc(db, `projects/${item.projectId}/items`, item.id), {
       pesquisado: true,
       referencias: referenciasArquivadas,
@@ -334,6 +364,7 @@ export async function pesquisarItemAutomatico(
       criadoEm: serverTimestamp()
     });
 
+    console.info(`[pesquisa] '${item.nome}' OK — ${referenciasArquivadas.length} refs salvas`);
     return { itemId: item.id, itemNome: item.nome, status: 'ok', refsCount: referenciasArquivadas.length };
   } catch (e: any) {
     console.error('Falha na pesquisa automática do item', item.nome, e);
