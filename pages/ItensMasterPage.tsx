@@ -250,12 +250,14 @@ export default function ItensMasterPage() {
     setEditId(it.id);
     setFormData({ ...it });
     setIsFormOpen(true);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
   const openNew = () => {
     setEditId(null);
     setFormData({ nome: '', descricao: '', unidade: 'unidade', valorUnitario: 0, categoria: 'Alimento' });
     setIsFormOpen(true);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
   const handleDelete = async (id: string) => {
