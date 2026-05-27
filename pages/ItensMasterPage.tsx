@@ -6,7 +6,7 @@ import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
 import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/CatalogoSearchPicker';
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
-import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta } from '../lib/mercadoApi';
+import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 
 interface ItemComUso extends ItemMaster {
@@ -94,6 +94,30 @@ export default function ItensMasterPage() {
       valorUnitario: p.valorUnitario || emb.estatisticas.mediano
     }));
     setEmbalagensDisponiveis(null);
+  };
+
+  // Adoção de embalagem direto pelo modal de detalhe de mercado (item ja salvo)
+  const handleAdotarEmbalagemModal = async (item: ItemMaster, emb: EstatisticasPorUnidade) => {
+    const novaUnidade = emb.unidade.toLowerCase();
+    const novaDescricao = emb.capacidade > 0
+      ? `${emb.unidade.toLowerCase()} ${emb.capacidade}${emb.siglaMedida.toLowerCase()}`
+      : emb.unidade.toLowerCase();
+    await setDoc(doc(db, 'items', item.id), {
+      unidade: novaUnidade,
+      embalagemDescricao: novaDescricao,
+      fatorConversao: emb.capacidade > 0 ? emb.capacidade : null,
+      unidadeBase: emb.siglaMedida || null,
+    }, { merge: true });
+
+    // Atualiza estado local pra refletir imediatamente (sem recarregar tudo)
+    setItems(prev => prev.map(it => it.id === item.id
+      ? { ...it, unidade: novaUnidade, embalagemDescricao: novaDescricao, fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined, unidadeBase: emb.siglaMedida || undefined }
+      : it));
+
+    // Atualiza o item refletido no modal para que o badge "em uso" apareça
+    setMercadoDetalhe(prev => prev && prev.item.id === item.id
+      ? { ...prev, item: { ...prev.item, unidade: novaUnidade, embalagemDescricao: novaDescricao, fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined, unidadeBase: emb.siglaMedida || undefined } }
+      : prev);
   };
 
   // Reset pra página 1 quando busca/filtro muda
@@ -1082,6 +1106,7 @@ export default function ItensMasterPage() {
             setMercado(prev => ({ ...prev, [novo.codigoCatmat]: novo }));
             setMercadoDetalhe(prev => prev ? { ...prev, dados: novo } : null);
           }}
+          onAdotarEmbalagem={(emb) => handleAdotarEmbalagemModal(mercadoDetalhe.item, emb)}
         />
       )}
 
