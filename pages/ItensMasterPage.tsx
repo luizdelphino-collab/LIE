@@ -726,41 +726,46 @@ export default function ItensMasterPage() {
                   {it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </td>
                 <td className="px-4 py-3 text-xs text-right">
-                  {!it.codigoCatmat ? (
-                    <span className="text-gray-300 italic">—</span>
-                  ) : mercadoCarregando.has(it.codigoCatmat) && !mercado[it.codigoCatmat] ? (
-                    <span className="text-gray-400 italic flex items-center justify-end gap-1">
-                      <Loader2 className="w-3 h-3 animate-spin" /> buscando…
-                    </span>
-                  ) : mercado[it.codigoCatmat] && mercado[it.codigoCatmat]!.totalCotacoes > 0 ? (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setMercadoDetalhe({ item: it, dados: mercado[it.codigoCatmat]! }); }}
-                      className="group inline-flex flex-col items-end gap-0 hover:bg-blue-50 px-2 py-1 rounded transition"
-                      title="Clique pra ver cotações detalhadas"
-                    >
-                      <span className="font-bold text-blue-700">
-                        {mercado[it.codigoCatmat]!.estatisticas.mediano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      </span>
-                      <span className="text-[9px] text-gray-500 font-medium uppercase tracking-wider">
-                        {mercado[it.codigoCatmat]!.totalCotacoes} cotaç{mercado[it.codigoCatmat]!.totalCotacoes === 1 ? 'ão' : 'ões'}
-                      </span>
-                      {(() => {
-                        const m = mercado[it.codigoCatmat]!;
-                        const diff = ((it.valorUnitario - m.estatisticas.mediano) / m.estatisticas.mediano) * 100;
-                        const cor = diff > 20 ? 'text-red-600' : diff < -20 ? 'text-amber-600' : 'text-green-600';
-                        const seta = diff > 5 ? '↑' : diff < -5 ? '↓' : '≈';
-                        return (
+                  {(() => {
+                    const cod = it.codigoCatmat;
+                    if (!cod) {
+                      return <span className="text-gray-300 italic">—</span>;
+                    }
+                    const dados = mercado[cod];
+                    if (mercadoCarregando.has(cod) && !dados) {
+                      return (
+                        <span className="text-gray-400 italic flex items-center justify-end gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" /> buscando…
+                        </span>
+                      );
+                    }
+                    if (dados && dados.totalCotacoes > 0) {
+                      const diff = ((it.valorUnitario - dados.estatisticas.mediano) / dados.estatisticas.mediano) * 100;
+                      const cor = diff > 20 ? 'text-red-600' : diff < -20 ? 'text-amber-600' : 'text-green-600';
+                      const seta = diff > 5 ? '↑' : diff < -5 ? '↓' : '≈';
+                      return (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setMercadoDetalhe({ item: it, dados }); }}
+                          className="group inline-flex flex-col items-end gap-0 hover:bg-blue-50 px-2 py-1 rounded transition"
+                          title="Clique pra ver cotações detalhadas"
+                        >
+                          <span className="font-bold text-blue-700">
+                            {dados.estatisticas.mediano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          </span>
+                          <span className="text-[9px] text-gray-500 font-medium uppercase tracking-wider">
+                            {dados.totalCotacoes} cotaç{dados.totalCotacoes === 1 ? 'ão' : 'ões'}
+                          </span>
                           <span className={`text-[9px] font-bold ${cor}`}>
                             {seta} {Math.abs(diff).toFixed(0)}% vs nosso
                           </span>
-                        );
-                      })()}
-                    </button>
-                  ) : mercado[it.codigoCatmat] && mercado[it.codigoCatmat]!.totalCotacoes === 0 ? (
-                    <span className="text-amber-600 text-[10px] italic">sem cotação</span>
-                  ) : (
-                    <span className="text-gray-300 italic">…</span>
-                  )}
+                        </button>
+                      );
+                    }
+                    if (dados && dados.totalCotacoes === 0) {
+                      return <span className="text-amber-600 text-[10px] italic">sem cotação</span>;
+                    }
+                    return <span className="text-gray-300 italic">…</span>;
+                  })()}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
