@@ -493,12 +493,54 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
             {/* Conteúdo Aba Compras.gov.br */}
             {activeTab === 'compras' && (
               <div className="space-y-4 flex-1 flex flex-col">
-                <div className="p-3 bg-blue-50 text-blue-800 rounded-xl text-xs flex gap-2 border border-blue-100 leading-relaxed">
-                  <Info className="w-4 h-4 shrink-0 text-blue-600 mt-0.5" />
-                  <div>
-                    <strong>Mecanismo de Resolução CATMAT:</strong> Digite o termo de busca para localizar o item no catálogo semente e consultar os preços homologados da API do governo.
+
+                {/* Painel contextual — muda conforme a situação do item */}
+                {!materialSelecionado && materiaisSemente.length === 0 && !loading ? (
+                  /* Sem CATMAT e sem resultado na busca inicial — guiar o usuário */
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-3">
+                    <p className="font-bold text-amber-900 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      Este item não tem código CATMAT/CATSER vinculado.
+                    </p>
+                    <p className="text-amber-800 leading-relaxed">
+                      Sem o código, não é possível buscar preços automaticamente em Compras.gov.br e PNCP.
+                      Você tem 3 caminhos:
+                    </p>
+                    <div className="space-y-2">
+                      <div className="flex gap-2 items-start">
+                        <span className="font-mono font-bold text-amber-700 shrink-0">1.</span>
+                        <span className="text-amber-800">
+                          <strong>Buscar agora:</strong> digite um termo abaixo para localizar no catálogo semente
+                          e consultar as cotações governamentais.
+                        </span>
+                      </div>
+                      <div className="flex gap-2 items-start">
+                        <span className="font-mono font-bold text-amber-700 shrink-0">2.</span>
+                        <span className="text-amber-800">
+                          <strong>Vincular CATMAT permanentemente:</strong> feche este modal, vá em
+                          <em> Itens → editar este item → campo CATMAT</em>. Na próxima pesquisa o código
+                          já estará disponível.
+                        </span>
+                      </div>
+                      <div className="flex gap-2 items-start">
+                        <span className="font-mono font-bold text-amber-700 shrink-0">3.</span>
+                        <span className="text-amber-800">
+                          <strong>Cotação manual:</strong> se este item é Recurso Humano (professor, árbitro,
+                          coordenador) ou não existe no catálogo público, use a aba
+                          <em> Cotações Manuais / Fomento</em> ao lado.
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-3 bg-blue-50 text-blue-800 rounded-xl text-xs flex gap-2 border border-blue-100 leading-relaxed">
+                    <Info className="w-4 h-4 shrink-0 text-blue-600 mt-0.5" />
+                    <div>
+                      <strong>Catálogo CATMAT/CATSER:</strong> selecione o material correspondente
+                      para consultar os preços homologados em Compras.gov.br e PNCP (IN 65/2021).
+                    </div>
+                  </div>
+                )}
 
                 {/* Caixa de Busca */}
                 <div className="relative">

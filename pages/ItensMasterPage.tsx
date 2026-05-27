@@ -8,6 +8,7 @@ import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/Catalo
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
 import CatmatDiagnostico from '../components/CatmatDiagnostico';
 import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
+import { isRecursoHumano } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 
 interface ItemComUso extends ItemMaster {
@@ -920,8 +921,25 @@ export default function ItensMasterPage() {
                 <td className="px-4 py-3 text-xs text-right">
                   {(() => {
                     const cod = it.codigoCatmat;
+
+                    // Sem CATMAT — diferenciar RH de material sem código
                     if (!cod) {
-                      return <span className="text-gray-300 italic">—</span>;
+                      const isRH = isRecursoHumano(it);
+                      if (isRH) {
+                        return (
+                          <span className="text-[9px] text-gray-400 italic leading-tight block text-right">
+                            N/A<br />Serv. Pessoal
+                          </span>
+                        );
+                      }
+                      return (
+                        <span
+                          className="text-[9px] text-amber-600 font-semibold italic cursor-help"
+                          title="Este item não tem código CATMAT/CATSER. Edite o item e vincule o código para habilitar a comparação de preços de mercado."
+                        >
+                          ⚠ sem CATMAT
+                        </span>
+                      );
                     }
                     const dados = mercado[cod];
                     if (mercadoCarregando.has(cod) && !dados) {

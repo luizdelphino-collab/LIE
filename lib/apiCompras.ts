@@ -369,6 +369,185 @@ const CATMAT_SPORTS_SEED: SeedItem[] = [
   },
 ];
 
+// =============================================================================
+// Seed CATSER — Serviços e Recursos Humanos típicos da FEDEESP / JEESP
+// =============================================================================
+// Separado do CATMAT para deixar explícito que são CATSER (tipo: 'servico').
+// codigoItem = codigoServico do CNBS-SERPRO.
+// Itens de Recurso Humano: não têm Mercado Gov pois não são licitados como
+// compras públicas — são contratados diretamente. A coluna Mercado Gov será
+// exibida como "N/A — RH" em vez de traço genérico.
+// =============================================================================
+
+const CATSER_SEED: SeedItem[] = [
+
+  // ── ARBITRAGEM ──────────────────────────────────────────────────────────────
+  {
+    codigoItem: 25682,
+    nome: "ARBITRAGEM ESPORTIVA",
+    nomesAlternativos: [
+      "arbitragem", "serviço de arbitragem", "equipe de arbitragem",
+      "arbitragem voleibol", "arbitragem futsal", "arbitragem basquete",
+      "arbitragem handebol", "arbitragem - coletivas", "arbitragem - interceus",
+      "anotador", "anotador - interceus", "anotador - olimpíadas"
+    ],
+    descricaoItem: "SERVIÇO DE ARBITRAGEM ESPORTIVA, COM EQUIPE COMPLETA DE ÁRBITROS CERTIFICADOS, INCLUINDO ANOTADORES E MATERIAIS DE APOIO",
+    categoria: "Recurso Humano",
+    unidade: "diária"
+  },
+
+  // ── TRANSPORTE ──────────────────────────────────────────────────────────────
+  {
+    codigoItem: 20062,
+    nome: "LOCAÇÃO DE ÔNIBUS",
+    nomesAlternativos: [
+      "ônibus", "onibus", "van", "ônibus/van", "transporte atletas",
+      "fretamento", "ônibus fretado", "locação ônibus", "gerenciamento de transporte",
+      "transporte escolar"
+    ],
+    descricaoItem: "LOCAÇÃO DE VEÍCULO TIPO ÔNIBUS/VAN COM MOTORISTA PARA TRANSPORTE DE ATLETAS E EQUIPE, INCLUSO SEGURO E COMBUSTÍVEL",
+    categoria: "Transporte",
+    unidade: "diária"
+  },
+
+  // ── RECURSOS HUMANOS — COORDENAÇÃO ─────────────────────────────────────────
+  {
+    codigoItem: 17612,
+    nome: "COORDENADOR DE EVENTO",
+    nomesAlternativos: [
+      "coordenador", "coordenador geral", "coordenador acadêmico",
+      "coordenador geral da modalidade", "coordenadores fedeesp",
+      "coordenadores fedeesp - interceus", "coordenadores fedeesp - olimpíadas"
+    ],
+    descricaoItem: "SERVIÇO DE COORDENAÇÃO DE EVENTOS ESPORTIVOS, COM PROFISSIONAL RESPONSÁVEL PELA ORGANIZAÇÃO E GESTÃO DO EVENTO",
+    categoria: "Recurso Humano",
+    unidade: "diária"
+  },
+  {
+    codigoItem: 17620,
+    nome: "PROFESSOR / TÉCNICO ESPORTIVO",
+    nomesAlternativos: [
+      "professor", "professor de educação física", "técnico esportivo",
+      "instrutor esportivo", "monitor", "equipe de monitoria", "monitoria"
+    ],
+    descricaoItem: "SERVIÇO DE DOCÊNCIA/MONITORIA ESPORTIVA, COM PROFISSIONAL HABILITADO EM EDUCAÇÃO FÍSICA OU ÁREA AFIM",
+    categoria: "Recurso Humano",
+    unidade: "diária"
+  },
+  {
+    codigoItem: 17639,
+    nome: "REPRESENTANTE / SECRETARIA",
+    nomesAlternativos: [
+      "representante", "representantes - coletivas", "secretaria",
+      "secretaria e atendentes", "atendente", "recepcionista"
+    ],
+    descricaoItem: "SERVIÇO DE REPRESENTAÇÃO E SECRETARIADO EM EVENTOS, INCLUINDO CONTROLE DE INSCRIÇÕES E ATENDIMENTO AO PÚBLICO",
+    categoria: "Recurso Humano",
+    unidade: "diária"
+  },
+  {
+    codigoItem: 17647,
+    nome: "SOCORRISTA / PARAMÉDICO",
+    nomesAlternativos: [
+      "socorrista", "socorristas", "paramédico", "primeiros socorros",
+      "ambulância", "ambulância básica", "ambulância uti", "uti móvel"
+    ],
+    descricaoItem: "SERVIÇO DE SUPORTE MÉDICO DE EMERGÊNCIA EM EVENTOS ESPORTIVOS, COM EQUIPE E VEÍCULO EQUIPADO",
+    categoria: "Outro",
+    unidade: "evento"
+  },
+  {
+    codigoItem: 17655,
+    nome: "PROFISSIONAL DE SEGURANÇA",
+    nomesAlternativos: [
+      "segurança", "profissional de segurança", "vigilante", "segurança patrimonial"
+    ],
+    descricaoItem: "SERVIÇO DE SEGURANÇA PATRIMONIAL E PESSOAL EM EVENTOS ESPORTIVOS",
+    categoria: "Recurso Humano",
+    unidade: "diária"
+  },
+  {
+    codigoItem: 17663,
+    nome: "PROFISSIONAL DE LIMPEZA",
+    nomesAlternativos: [
+      "limpeza", "profissional de limpeza", "auxiliar de limpeza", "zeladoria"
+    ],
+    descricaoItem: "SERVIÇO DE LIMPEZA E CONSERVAÇÃO DE INSTALAÇÕES DURANTE EVENTOS ESPORTIVOS",
+    categoria: "Recurso Humano",
+    unidade: "diária"
+  },
+  {
+    codigoItem: 17671,
+    nome: "LOCUTOR / MESTRE DE CERIMÔNIAS",
+    nomesAlternativos: [
+      "locução", "locutor", "mestre de cerimônias", "mc", "apresentador",
+      "intérprete do mascote", "interprete mascote", "mascote"
+    ],
+    descricaoItem: "SERVIÇO DE LOCUÇÃO E APRESENTAÇÃO DE EVENTOS ESPORTIVOS, INCLUINDO ANIMAÇÃO E CONDUÇÃO DA CERIMÔNIA",
+    categoria: "Recurso Humano",
+    unidade: "evento"
+  },
+
+  // ── COMUNICAÇÃO E MÍDIA ────────────────────────────────────────────────────
+  {
+    codigoItem: 22586,
+    nome: "FOTOGRAFIA E FILMAGEM",
+    nomesAlternativos: [
+      "fotografia", "filmagem", "cobertura foto e filmagem",
+      "cobertura fotográfica", "cobertura jornalística", "registro fotográfico",
+      "vídeo institucional", "video institucional", "foto giratória 360",
+      "foto 360", "transmissão ao vivo", "transmissao ao vivo", "live"
+    ],
+    descricaoItem: "SERVIÇO DE FOTOGRAFIA, FILMAGEM E TRANSMISSÃO DE EVENTOS ESPORTIVOS, COM EDIÇÃO E ENTREGA EM MÍDIA DIGITAL",
+    categoria: "Outro",
+    unidade: "evento"
+  },
+
+  // ── INFRAESTRUTURA DE EVENTO ───────────────────────────────────────────────
+  {
+    codigoItem: 22594,
+    nome: "MONTAGEM E DESMONTAGEM",
+    nomesAlternativos: [
+      "montagem", "montagem e desmontagem", "montagem e desmontagem de eventos",
+      "infraestrutura evento", "logística evento"
+    ],
+    descricaoItem: "SERVIÇO DE MONTAGEM E DESMONTAGEM DE ESTRUTURAS PARA EVENTOS ESPORTIVOS, INCLUINDO PALCO, ARQUIBANCADA E DEMAIS EQUIPAMENTOS",
+    categoria: "Outro",
+    unidade: "evento"
+  },
+  {
+    codigoItem: 22608,
+    nome: "SISTEMA DE SOM E AUDIOVISUAL",
+    nomesAlternativos: [
+      "equipamento de som", "som", "sonorização", "audiovisual",
+      "recurso áudio-visual", "recurso audiovisual", "projetor", "telão",
+      "painel de led", "painel led"
+    ],
+    descricaoItem: "LOCAÇÃO E OPERAÇÃO DE SISTEMA DE SONORIZAÇÃO, AUDIOVISUAL E ILUMINAÇÃO PARA EVENTOS ESPORTIVOS",
+    categoria: "Material não Esportivo",
+    unidade: "evento"
+  },
+
+  // ── TECNOLOGIA E SISTEMAS ──────────────────────────────────────────────────
+  {
+    codigoItem: 22616,
+    nome: "SISTEMA DE INSCRIÇÕES ONLINE",
+    nomesAlternativos: [
+      "sistema de inscrições", "sistema de inscrições on-line",
+      "plataforma inscrição", "inscrição online", "website", "site"
+    ],
+    descricaoItem: "DESENVOLVIMENTO E OPERAÇÃO DE SISTEMA/PLATAFORMA ONLINE PARA GESTÃO DE INSCRIÇÕES E RESULTADOS DE EVENTOS ESPORTIVOS",
+    categoria: "Outro",
+    unidade: "evento"
+  },
+];
+
+// Seed completo = materiais + serviços
+const CATMAT_SPORTS_SEED_ALL: SeedItem[] = [
+  ...CATMAT_SPORTS_SEED,
+  ...CATSER_SEED,
+];
+
 // 1. Pesquisa local case-insensitive por palavra-chave no Banco Semente
 // Verifica: nome principal + nomesAlternativos + descricaoItem
 export function buscarMateriaisLocal(termo: string): GovernmentMaterial[] {
@@ -378,7 +557,6 @@ export function buscarMateriaisLocal(termo: string): GovernmentMaterial[] {
     s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[-_]/g, " ");
 
   const queryClean = norm(termo);
-  // Divide o termo em palavras significativas (>= 3 chars) para match parcial
   const palavras = queryClean.split(/\s+/).filter(p => p.length >= 3);
 
   const score = (m: SeedItem): number => {
@@ -388,17 +566,15 @@ export function buscarMateriaisLocal(termo: string): GovernmentMaterial[] {
       m.descricaoItem
     ].map(norm);
 
-    // Match exato de qualquer campo → score máximo
     if (campos.some(c => c.includes(queryClean))) return 2;
 
-    // Todas as palavras presentes em algum campo combinado
     const textoCombinado = campos.join(' ');
     if (palavras.length > 0 && palavras.every(p => textoCombinado.includes(p))) return 1;
 
     return 0;
   };
 
-  return CATMAT_SPORTS_SEED
+  return CATMAT_SPORTS_SEED_ALL
     .map(m => ({ m, s: score(m) }))
     .filter(({ s }) => s > 0)
     .sort((a, b) => b.s - a.s)
@@ -406,11 +582,26 @@ export function buscarMateriaisLocal(termo: string): GovernmentMaterial[] {
 }
 
 /**
- * Retorna todos os itens do seed — útil para exibir
- * um seletor completo de materiais disponíveis.
+ * Retorna todos os itens do seed — materiais e serviços.
  */
 export function listarTodosSeedLocal(): GovernmentMaterial[] {
-  return [...CATMAT_SPORTS_SEED];
+  return [...CATMAT_SPORTS_SEED_ALL];
+}
+
+/**
+ * Retorna true se o item é de Recurso Humano / serviço pessoal.
+ * Esses itens NÃO têm cotações em Compras.gov.br pois são contratados
+ * diretamente, não por licitação de material/serviço padronizado.
+ * A coluna Mercado Gov deve exibir "N/A — Serv. Pessoal" em vez de traço.
+ */
+export function isRecursoHumano(item: { categoria?: string; nome?: string }): boolean {
+  const cat = (item.categoria || '').toLowerCase();
+  const nome = (item.nome || '').toLowerCase();
+  if (cat.includes('recurso humano')) return true;
+  const rhKeywords = ['professor', 'coordenador', 'árbitro', 'arbitro', 'anotador',
+    'socorrista', 'segurança', 'limpeza', 'locução', 'locutor', 'mascote',
+    'monitor', 'representante', 'secretaria', 'atendente'];
+  return rhKeywords.some(k => nome.includes(k));
 }
 
 /**
@@ -452,7 +643,7 @@ export async function validarCatmatOficial(
 
 // Obter especificações de um material pelo código CATMAT/CATSER
 export function obterDetalheMaterialPorCodigo(codigo: number, termoFallback?: string): GovernmentMaterial | null {
-  const material = CATMAT_SPORTS_SEED.find(m => m.codigoItem === codigo);
+  const material = CATMAT_SPORTS_SEED_ALL.find(m => m.codigoItem === codigo);
   if (material) return material;
   
   if (termoFallback) {
