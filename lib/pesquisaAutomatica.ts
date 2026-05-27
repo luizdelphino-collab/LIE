@@ -32,110 +32,179 @@ export function gerarCertidaoCotacaoPDF(
 ): Blob {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
+  // === Cabeçalho institucional ===
   doc.setFillColor(15, 23, 42);
-  doc.rect(0, 0, 210, 35, 'F');
-
+  doc.rect(0, 0, 210, 30, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text("REGISTRO NACIONAL DE PREÇOS PÚBLICOS", 15, 15);
-
-  doc.setFontSize(7.5);
+  doc.text('REGISTRO DE COTAÇÃO PÚBLICA — IN SEGES/ME Nº 65/2021', 15, 13);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(34, 211, 238);
-  doc.text("PORTAL NEUTRO DE AUDITORIA E CONFORMIDADE LEGAL — INSTRUÇÃO NORMATIVA SEGES/ME Nº 65/2021", 15, 22);
+  doc.setTextColor(148, 163, 184);
+  doc.text('Documento gerado pelo Sistema LIE-Projetos para arquivamento e auditoria de preços públicos', 15, 19);
+  doc.text(`Token de validação: ${token}`, 15, 25);
 
+  // === Título do documento ===
   doc.setTextColor(30, 41, 59);
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text("CERTIDÃO DE COMPROVAÇÃO E PREÇO PÚBLICO", 15, 50);
+  doc.text('CERTIDÃO DE COMPROVAÇÃO E PREÇO PÚBLICO', 15, 42);
 
-  doc.setFontSize(9);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text(`Identificador do Registro (Token): ${token}`, 15, 56);
+  doc.text(`Emitida em: ${new Date().toLocaleString('pt-BR')}`, 15, 48);
 
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.3);
-  doc.line(15, 62, 195, 62);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(71, 85, 105);
-  doc.text("DADOS DO ÓRGÃO E DA CONTRATAÇÃO", 15, 69);
-
-  const drawField = (label: string, value: string, y: number) => {
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text(label, 15, y);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(30, 41, 59);
-    doc.text(value.substring(0, 70), 65, y);
+  const FONTE_LABELS: Record<string, string> = {
+    'compras.gov.br': 'COMPRAS.GOV.BR',
+    'pncp-contratacao': 'PNCP — EDITAL (Lei 14.133/2021)',
+    'pncp-ata': 'PNCP — ATA DE REGISTRO DE PREÇOS',
+    'pncp': 'PNCP',
+    'tce-pe': 'TCE-PE',
+    'fomento': 'FOMENTO MANUAL',
+    'manual': 'CADASTRO MANUAL'
   };
 
-  drawField("Órgão Licitante / Parceiro:", r.orgaoLicitante || '-', 77);
-  drawField("Identificador da Compra:", r.identificadorCompra || '-', 84);
-  drawField("Código UASG / Parceiro:", r.uasg || 'Não especificado', 91);
-  drawField("Data de Homologação:", r.dataHomologacao || '-', 98);
+  // === Helpers de renderização ===
+  let y = 56;
+  const MAX_W = 125;
+  const COL_LABEL_X = 15;
+  const COL_VALUE_X = 70;
 
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text("Valor Unitário de Referência:", 15, 105);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(16, 185, 129);
-  doc.text(r.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 65, 105);
+  const sectionTitle = (title: string) => {
+    if (y > 270) { doc.addPage(); y = 20; }
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.4);
+    doc.line(15, y, 195, y);
+    y += 5;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text(title, COL_LABEL_X, y);
+    y += 5;
+  };
 
-  doc.line(15, 112, 195, 112);
+  const field = (label: string, value: string | undefined, highlight = false) => {
+    const safeValue = (value || '').toString().trim();
+    if (!safeValue || safeValue === '-') return;
+    if (y > 275) { doc.addPage(); y = 20; }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(label, COL_LABEL_X, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(highlight ? 16 : 30, highlight ? 185 : 41, highlight ? 129 : 59);
+    const lines = doc.splitTextToSize(safeValue, MAX_W);
+    doc.text(lines, COL_VALUE_X, y);
+    y += Math.max(5, lines.length * 4);
+  };
 
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(71, 85, 105);
-  doc.text("ASSOCIAÇÃO TÉCNICA E FINALIDADE", 15, 119);
+  // === Seção 1: Identidade do órgão ===
+  sectionTitle('1. IDENTIDADE DO ÓRGÃO LICITANTE');
+  field('Órgão Licitante:', r.orgaoLicitante);
+  field('CNPJ:', r.cnpjOrgao);
+  field('Código UASG:', r.uasg);
+  const esferaUf = [r.poder, r.esfera, r.uf].filter(Boolean).join(' • ');
+  field('Poder / Esfera / UF:', esferaUf);
 
-  drawField("Item do Plano de Trabalho:", (itemNome || '').toUpperCase(), 127);
-  drawField("Projeto Vinculado:", (projetoTitulo || '').toUpperCase(), 134);
+  // === Seção 2: Legalidade da compra ===
+  sectionTitle('2. LEGALIDADE DA CONTRATAÇÃO');
+  field('Fonte da cotação:', FONTE_LABELS[r.fonte] || r.fonte.toUpperCase());
+  field('Modalidade:', r.modalidade);
+  field('Situação:', r.situacao);
+  field('Identificador da compra:', r.identificadorCompra);
+  field('Nº de controle PNCP:', r.numeroControlePNCP);
+  field('Data de homologação:', r.dataHomologacao);
+  field('Vigência da ARP:', r.dataVigenciaFinalAta ? `até ${r.dataVigenciaFinalAta}` : '');
 
-  doc.line(15, 141, 195, 141);
+  // === Seção 3: Identidade do item ===
+  sectionTitle('3. IDENTIDADE DO OBJETO');
+  field('Item (LIE):', itemNome);
+  field('Descrição oficial:', r.descricaoItem);
+  field('Código CATMAT/CATSER:', r.codigoCatalogoItem);
+  const qtdUnid = r.quantidade ? `${r.quantidade}${r.unidadeMedida ? ' ' + r.unidadeMedida : ''}` : '';
+  field('Quantidade adquirida:', qtdUnid);
 
+  // === Seção 4: Adjudicatário ===
+  if (r.fornecedorNome || r.fornecedorCnpj) {
+    sectionTitle('4. ADJUDICATÁRIO');
+    field('Razão social:', r.fornecedorNome);
+    field('CNPJ:', r.fornecedorCnpj);
+  }
+
+  // === Seção 5: Valor de referência ===
+  sectionTitle('5. VALOR DE REFERÊNCIA');
+  field(
+    'Valor unitário:',
+    r.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+    true
+  );
+  if (r.quantidade && r.valorUnitario) {
+    const total = r.quantidade * r.valorUnitario;
+    field('Valor total estimado:', total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+  }
+
+  // === Seção 6: Vinculação ao projeto ===
+  sectionTitle('6. VINCULAÇÃO TÉCNICA AO PROJETO');
+  field('Projeto:', projetoTitulo);
+  field('Token de validação:', token);
+
+  // === Seção 7: Rastreabilidade pública ===
+  sectionTitle('7. RASTREABILIDADE PÚBLICA');
+  if (r.linkPncpOriginal && r.linkPncpOriginal !== r.localizacaoUrl) {
+    field('Fonte oficial (PNCP/Compras):', r.linkPncpOriginal);
+  }
+  field('Validação externa:', `https://projetos.lie.com.br/#/validar?token=${token}`);
+
+  // === Declaração de conformidade ===
+  if (y > 245) { doc.addPage(); y = 20; }
+  y += 4;
   doc.setFillColor(248, 250, 252);
-  doc.rect(15, 148, 180, 38, 'F');
   doc.setDrawColor(203, 213, 225);
-  doc.rect(15, 148, 180, 38, 'S');
+  doc.setLineWidth(0.3);
+  doc.rect(15, y, 180, 30, 'FD');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(30, 41, 59);
-  doc.text("DECLARAÇÃO DE ECONOMICIDADE E CONFORMIDADE LEGAL", 20, 155);
+  doc.text('DECLARAÇÃO DE ECONOMICIDADE E CONFORMIDADE LEGAL', 20, y + 6);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
-  const textStr = "Atesta-se, sob as diretrizes de integridade administrativa, que o preço público acima referenciado foi coletado, validado e arquivado para instrução do processo de cotação de mercado. Esta referência atende de forma integral ao Art. 5º da Instrução Normativa SEGES/ME nº 65/2021, integrando de forma regular a cesta estatística de preços públicos homologados. O presente registro de conformidade encontra-se blindado e auditável pelo link público abaixo.";
-  const textLines = doc.splitTextToSize(textStr, 170);
-  doc.text(textLines, 20, 161);
+  const declaracao =
+    'Atesta-se, sob as diretrizes de integridade administrativa, que o preço público acima referenciado '
+    + 'foi coletado, validado e arquivado para instrução do processo de cotação de mercado. Esta referência '
+    + 'atende ao Art. 5º da IN SEGES/ME nº 65/2021, integrando a cesta estatística de preços públicos '
+    + 'homologados. O presente registro encontra-se blindado e auditável pelos links acima.';
+  const decLines = doc.splitTextToSize(declaracao, 170);
+  doc.text(decLines, 20, y + 12);
+  y += 36;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(2, 132, 199);
-  doc.setFontSize(7.5);
-  doc.text(`Acesse para validação externa: https://projetos.lie.com.br/#/validar?token=${token}`, 15, 195);
-
+  // === Carimbo ===
+  if (y > 265) { doc.addPage(); y = 20; }
   doc.setDrawColor(16, 185, 129);
   doc.setLineWidth(0.5);
-  doc.rect(140, 210, 55, 22);
-
+  doc.rect(140, y, 55, 22);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
+  doc.setFontSize(7);
   doc.setTextColor(16, 185, 129);
-  doc.text("PREÇO PÚBLICO", 143, 215);
-  doc.text("VALIDADO & HOMOLOGADO", 143, 219);
-
+  doc.text('PREÇO PÚBLICO', 143, y + 6);
+  doc.text('VALIDADO & HOMOLOGADO', 143, y + 10);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(5.5);
   doc.setTextColor(100, 116, 139);
-  doc.text(`Token: ${token.substring(0, 16)}`, 143, 224);
-  doc.text(`Data Reg: ${new Date().toLocaleDateString('pt-BR')}`, 143, 228);
+  doc.text(`Token: ${token.substring(0, 16)}`, 143, y + 15);
+  doc.text(`Data Reg: ${new Date().toLocaleDateString('pt-BR')}`, 143, y + 19);
 
+  // === Rodapé ===
   doc.setTextColor(148, 163, 184);
   doc.setFontSize(6.5);
-  doc.text("Documento oficial de rastreabilidade gerado eletronicamente nos termos da legislação federal de licitações. Brasília-DF.", 15, 280);
+  doc.text(
+    'Documento oficial de rastreabilidade gerado eletronicamente nos termos da IN SEGES/ME nº 65/2021. Brasília-DF.',
+    15, 285
+  );
 
   return doc.output('blob');
 }
@@ -150,8 +219,15 @@ async function arquivarReferencia(
 ): Promise<PrecoReferencia> {
   const copy = { ...r };
 
-  if (copy.fonte !== 'compras.gov.br' && copy.fonte !== 'pncp') {
+  // Só arquiva pra fontes federais — TCE-PE e cotações manuais já têm link válido
+  const fontesFederais: PrecoReferencia['fonte'][] = ['compras.gov.br', 'pncp', 'pncp-contratacao', 'pncp-ata'];
+  if (!fontesFederais.includes(copy.fonte)) {
     return copy;
+  }
+
+  // Preserva URL original do PNCP/Compras antes de qualquer sobrescrita
+  if (copy.localizacaoUrl && (copy.localizacaoUrl.includes('pncp.gov.br') || copy.localizacaoUrl.includes('compras.gov.br'))) {
+    copy.linkPncpOriginal = copy.localizacaoUrl;
   }
 
   const fileKey = `${token}_ref_${idx}`;

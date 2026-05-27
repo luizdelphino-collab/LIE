@@ -343,6 +343,8 @@ export interface PrecoReferencia {
   numeroControlePNCP?: string;
   // Temporal
   dataVigenciaFinalAta?: string;
+  // Preservação da URL original do PNCP (sobrescrita pelo arquivo Storage quando cai no fallback)
+  linkPncpOriginal?: string;
   localizacaoUrl: string; // Para manual/fomento, é a URL de upload no Firebase Storage
   arquivoNome?: string;
 }

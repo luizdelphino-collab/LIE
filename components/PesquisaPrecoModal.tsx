@@ -311,8 +311,12 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         const r = referenciasArquivadas[idx];
         
         // Cotações manuais já estão no Storage, ignoramos.
-        // Só arquivamos cotações que venham de fontes públicas (compras.gov.br ou pncp)
-        if (r.fonte === 'compras.gov.br' || r.fonte === 'pncp') {
+        // Só arquivamos cotações que venham de fontes públicas federais
+        if (r.fonte === 'compras.gov.br' || r.fonte === 'pncp' || r.fonte === 'pncp-contratacao' || r.fonte === 'pncp-ata') {
+          // Preserva a URL original do PNCP/Compras antes de qualquer sobrescrita
+          if (r.localizacaoUrl && (r.localizacaoUrl.includes('pncp.gov.br') || r.localizacaoUrl.includes('compras.gov.br'))) {
+            r.linkPncpOriginal = r.localizacaoUrl;
+          }
           const fileKey = `${token}_ref_${idx}`;
           
           // Checar se a URL é de fallback (não tem pregão específico) ou aponta para a busca geral do PNCP

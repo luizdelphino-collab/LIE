@@ -522,9 +522,9 @@ async function renderPesquisaCertificadosJsPdf(
 ): Promise<Uint8Array | null> {
   if (itensPesquisados.length === 0) return null;
 
-  // Pre-gera todos os QR codes em paralelo
+  // Pre-gera QR codes — prioriza link PNCP original; fallback pra Storage
   const todasUrls = itensPesquisados.flatMap(it =>
-    (it.referencias || []).map((r: any) => r.localizacaoUrl).filter(Boolean)
+    (it.referencias || []).map((r: any) => r.linkPncpOriginal || r.localizacaoUrl).filter(Boolean)
   );
   const qrCache = await gerarQrCodes(todasUrls);
 
@@ -690,7 +690,7 @@ async function renderPesquisaCertificadosJsPdf(
       state.y += 5;
 
       const QR_SIZE = 22;
-      const FICHA_H = 46;
+      const FICHA_H = 50;
       const TEXT_X = MARGIN + QR_SIZE + 3;
       const TEXT_MAX_W = CONTENT_W - QR_SIZE - 3;
       const LABEL_W = 26;
@@ -706,8 +706,9 @@ async function renderPesquisaCertificadosJsPdf(
         pdf.setLineWidth(0.3);
         pdf.rect(MARGIN, cardY, CONTENT_W, FICHA_H, 'FD');
 
-        // QR code (esquerda)
-        const qrData = r.localizacaoUrl ? qrCache[r.localizacaoUrl] : null;
+        // QR code — prioriza link PNCP oficial; fallback pro Storage
+        const qrUrl = r.linkPncpOriginal || r.localizacaoUrl;
+        const qrData = qrUrl ? qrCache[qrUrl] : null;
         if (qrData) {
           try {
             pdf.addImage(qrData, 'PNG', MARGIN + 2, cardY + 2, QR_SIZE - 4, QR_SIZE - 4);
@@ -821,11 +822,25 @@ async function renderPesquisaCertificadosJsPdf(
         pdf.text(fornecLines[0], colA + LABEL_W, lineY);
         lineY += 3.5;
 
-        // URL clicável (largura total)
-        if (r.localizacaoUrl) {
+        // Linha 1: Fonte oficial (link PNCP/Compras quando preservado)
+        if (r.linkPncpOriginal) {
           pdf.setFont('helvetica', 'bold');
           pdf.setTextColor(100, 100, 100);
-          pdf.text('Validar em:', colA, lineY);
+          pdf.setFontSize(7);
+          pdf.text('Fonte oficial:', colA, lineY);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setTextColor(0, 102, 204);
+          const urlLines = pdf.splitTextToSize(r.linkPncpOriginal, TEXT_MAX_W - LABEL_W);
+          pdf.textWithLink(urlLines[0], colA + LABEL_W, lineY, { url: r.linkPncpOriginal });
+          lineY += 3.5;
+        }
+        // Linha 2: Comprovante arquivado (Storage com PDF/certidão)
+        if (r.localizacaoUrl && r.localizacaoUrl !== r.linkPncpOriginal) {
+          pdf.setFont('helvetica', 'bold');
+          pdf.setTextColor(100, 100, 100);
+          pdf.setFontSize(7);
+          const label = r.linkPncpOriginal ? 'Comprovante:' : 'Validar em:';
+          pdf.text(label, colA, lineY);
           pdf.setFont('helvetica', 'normal');
           pdf.setTextColor(0, 102, 204);
           const urlLines = pdf.splitTextToSize(r.localizacaoUrl, TEXT_MAX_W - LABEL_W);
