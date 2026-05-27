@@ -5,14 +5,13 @@
 import { PrecoReferencia } from '../types';
 import { storage } from './firebase';
 
-function consultarPrecosComprasUrl(codigoItemCatalogo: number, pagina = 1, tamanhoPagina = 100): string {
+function consultarPrecosMultiUrl(codigoItemCatalogo: number, tamanhoPagina = 50): string {
   const projectId = storage.app.options.projectId;
   const params = new URLSearchParams({
     codigoItemCatalogo: String(codigoItemCatalogo),
-    pagina: String(pagina),
     tamanhoPagina: String(tamanhoPagina)
   });
-  return `https://us-central1-${projectId}.cloudfunctions.net/consultarPrecosCompras?${params}`;
+  return `https://us-central1-${projectId}.cloudfunctions.net/consultarPrecosMulti?${params}`;
 }
 
 export interface GovernmentMaterial {
@@ -184,56 +183,61 @@ export function obterDetalheMaterialPorCodigo(codigo: number, termoFallback?: st
   return null;
 }
 
-// 2. Consulta de Preços Praticados — APENAS DADOS REAIS DO COMPRAS.GOV.BR/PNCP
+// 2. Consulta multi-fonte de Preços Praticados — APENAS DADOS REAIS
 //
-// IMPORTANTE: este método NÃO gera mais cotações simuladas. Se a API real falhar
-// ou retornar vazio, devolve array vazio — cabe ao usuário cadastrar manualmente
-// uma cotação de fomento (upload do PDF) ou aceitar que o item fique sem cesta
-// estatística. Cotações inventadas em documento oficial (IN 65/2021) podem ser
-// interpretadas como declaração falsa.
+// IMPORTANTE: este método NÃO gera cotações simuladas. Se as APIs reais
+// falharem ou retornarem vazio, devolve array vazio — cabe ao usuário
+// cadastrar manualmente uma cotação de fomento (upload do PDF). Cotações
+// inventadas em documento oficial (IN 65/2021) podem ser interpretadas
+// como declaração falsa.
 //
-// Passa pela Cloud Function 'consultarPrecosCompras' pra contornar o CORS
-// bloqueado pela API governamental.
+// Agrega 3 fontes em paralelo (via Cloud Function consultarPrecosMulti):
+//   - compras.gov.br (preços praticados histórico)
+//   - pncp-contratacao (Lei 14.133/2021 — editais)
+//   - pncp-ata (atas de registro de preço)
+//
+// Cada item retorna com `localizacaoUrl` apontando pro PNCP quando
+// possível (rastreabilidade pública pra auditoria do parecerista).
 export async function consultarPrecosPraticados(
   codigoItemCatalogo: number,
   _valorUnitarioEstimado?: number
 ): Promise<PrecoReferencia[]> {
-  const url = consultarPrecosComprasUrl(codigoItemCatalogo);
+  const url = consultarPrecosMultiUrl(codigoItemCatalogo);
 
   try {
     const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
 
     if (!response.ok) {
-      console.warn(`API Compras.gov.br retornou HTTP ${response.status}.`);
+      console.warn(`Cloud Function consultarPrecosMulti retornou HTTP ${response.status}.`);
       return [];
     }
 
     const data = await response.json();
-    const registros = data.resultado || data.data || [];
+    const registros = data.registros || [];
     if (!Array.isArray(registros) || registros.length === 0) {
       return [];
     }
 
+    // Log telemétrico — útil pra entender se alguma fonte está fora do ar
+    if (data.totaisPorFonte) {
+      console.info('Cotações por fonte:', data.totaisPorFonte);
+    }
+
     return registros
-      .map((r: any) => {
-        const uasg = r.uasg || r.codigoUasg || '';
-        const linkProcesso = r.linkProcesso
-          || (uasg ? `https://pncp.gov.br/app/contratacoes?q=${uasg}` : '');
-        return {
-          orgaoLicitante: r.orgaoLicitante || r.nomeOrgao || 'ÓRGÃO PÚBLICO',
-          uasg,
-          identificadorCompra: r.idCompra || r.processo || r.numeroProcesso || '',
-          dataHomologacao: r.dataCompra || r.dataResultado || '',
-          quantidade: r.quantidade || 0,
-          unidadeMedida: r.unidadeMedida || '',
-          valorUnitario: Number(r.valorUnitario) || 0,
-          fonte: 'compras.gov.br' as const,
-          localizacaoUrl: linkProcesso
-        };
-      })
+      .map((r: any): PrecoReferencia => ({
+        orgaoLicitante: r.orgaoLicitante || 'ÓRGÃO PÚBLICO',
+        uasg: r.uasg || r.cnpjOrgao || '',
+        identificadorCompra: r.identificadorCompra || r.numeroControlePNCP || '',
+        dataHomologacao: r.dataHomologacao || '',
+        quantidade: Number(r.quantidade) || 0,
+        unidadeMedida: r.unidadeMedida || '',
+        valorUnitario: Number(r.valorUnitario) || 0,
+        fonte: r.fonte || 'compras.gov.br',
+        localizacaoUrl: r.localizacaoUrl || ''
+      }))
       .filter((r: PrecoReferencia) => r.valorUnitario > 0);
   } catch (err) {
-    console.warn('Proxy de pesquisa de preços inoperante. Nenhuma cotação retornada.', err);
+    console.warn('Proxy multi-fonte inoperante. Nenhuma cotação retornada.', err);
     return [];
   }
 }

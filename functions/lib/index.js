@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.consultarPrecosCompras = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
+exports.consultarPrecosCompras = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const puppeteer = require("puppeteer");
@@ -186,17 +186,128 @@ exports.downloadStorageFile = functions
     }
 });
 /**
- * Proxy para a API pública de Pesquisa de Preços do Compras.gov.br.
+ * Pesquisa multi-fonte de preços públicos por código CATMAT/CATSER.
  *
- * Por quê: a API governamental (dadosabertos.compras.gov.br) não envia
- * headers CORS, então o browser bloqueia chamadas diretas do nosso
- * frontend. Essa function roda server-side (sem CORS), consulta a API
- * e devolve o JSON com headers CORS abertos pro nosso domínio.
+ * Consulta em paralelo 3 endpoints do dadosabertos.compras.gov.br:
+ *   - /modulo-pesquisa-preco/1_consultarMaterial            (preços praticados — base histórica)
+ *   - /modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133 (contratações Lei 14.133/2021)
+ *   - /modulo-arp/2_consultarARPItem                        (atas de registro de preço PNCP)
+ *
+ * Normaliza tudo num formato comum e adiciona `linkPublico` rastreável
+ * apontando pro PNCP (https://pncp.gov.br/app/{editais|atas|contratos}/...)
+ * quando o numeroControlePNCP estiver disponível.
  *
  * Uso:
- *   GET https://us-central1-lie-projetos.cloudfunctions.net/consultarPrecosCompras?codigoItemCatalogo=601221
- *
- * Aceita opcionalmente: pagina (default 1), tamanhoPagina (default 100).
+ *   GET https://us-central1-lie-projetos.cloudfunctions.net/consultarPrecosMulti?codigoItemCatalogo=601221
+ */
+exports.consultarPrecosMulti = functions
+    .runWith({ timeoutSeconds: 90, memory: '512MB' })
+    .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Vary', 'Origin');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'GET') {
+        res.status(405).json({ error: 'Apenas GET é suportado.' });
+        return;
+    }
+    const codigoItemCatalogo = String(req.query.codigoItemCatalogo || '').trim();
+    if (!codigoItemCatalogo || !/^\d+$/.test(codigoItemCatalogo)) {
+        res.status(400).json({ error: 'Query param "codigoItemCatalogo" obrigatório e numérico.' });
+        return;
+    }
+    const tamanhoPagina = String(req.query.tamanhoPagina || '50');
+    const base = 'https://dadosabertos.compras.gov.br';
+    const headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
+    };
+    const fontes = [
+        {
+            nome: 'compras.gov.br',
+            url: `${base}/modulo-pesquisa-preco/1_consultarMaterial?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`
+        },
+        {
+            nome: 'pncp-contratacao',
+            url: `${base}/modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`
+        },
+        {
+            nome: 'pncp-ata',
+            url: `${base}/modulo-arp/2_consultarARPItem?pagina=1&tamanhoPagina=${tamanhoPagina}&codigoItemCatalogo=${codigoItemCatalogo}`
+        }
+    ];
+    const montarLinkPncp = (numeroControle, tipo) => {
+        if (!numeroControle)
+            return undefined;
+        // Formato esperado: {CNPJ}-1-{sequencial}/{ano}
+        const m = numeroControle.match(/^(\d{14})-[\dA-Z]+-(\d+)\/(\d{4})$/);
+        if (!m)
+            return undefined;
+        const [, cnpj, seq, ano] = m;
+        return `https://pncp.gov.br/app/${tipo}/${cnpj}/${ano}/${seq}`;
+    };
+    const normalizar = (r, fonteNome) => {
+        const numeroControle = r.numeroControlePNCP || r.numeroControlePNCPCompra || r.numeroControlePNCPAta;
+        const tipoLink = fonteNome === 'pncp-ata' ? 'atas' :
+            fonteNome === 'pncp-contratacao' ? 'editais' : 'editais';
+        const linkPncp = montarLinkPncp(numeroControle, tipoLink);
+        const linkFallback = r.linkProcesso || (r.uasg ? `https://pncp.gov.br/app/contratacoes?q=${r.uasg}` : '');
+        return {
+            fonte: fonteNome,
+            orgaoLicitante: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || 'ÓRGÃO PÚBLICO',
+            uasg: r.uasg || r.codigoUasg || '',
+            cnpjOrgao: r.cnpjOrgao || '',
+            identificadorCompra: r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || '',
+            numeroControlePNCP: numeroControle || '',
+            dataHomologacao: r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || r.dataAprovacaoAta || '',
+            quantidade: Number(r.quantidade) || 0,
+            unidadeMedida: r.unidadeMedida || '',
+            descricaoItem: r.descricaoItem || r.descricao || '',
+            valorUnitario: Number(r.valorUnitario || r.valorUnitarioEstimado || r.valorUnitarioHomologado) || 0,
+            localizacaoUrl: linkPncp || linkFallback || ''
+        };
+    };
+    const fetchFonte = async (f) => {
+        try {
+            const resp = await fetch(f.url, { headers });
+            if (!resp.ok) {
+                return { fonte: f.nome, ok: false, status: resp.status, registros: [] };
+            }
+            const data = await resp.json();
+            const arr = data.resultado || data.data || data || [];
+            const lista = Array.isArray(arr) ? arr : [];
+            return {
+                fonte: f.nome,
+                ok: true,
+                status: 200,
+                registros: lista.map((r) => normalizar(r, f.nome)).filter((r) => r.valorUnitario > 0)
+            };
+        }
+        catch (e) {
+            return { fonte: f.nome, ok: false, status: 0, erro: e?.message || String(e), registros: [] };
+        }
+    };
+    const resultados = await Promise.all(fontes.map(fetchFonte));
+    const todos = resultados.flatMap(r => r.registros);
+    const totaisPorFonte = Object.fromEntries(resultados.map(r => [r.fonte, { ok: r.ok, total: r.registros.length }]));
+    // Cache curto pra aliviar API governamental
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({
+        codigoItemCatalogo,
+        total: todos.length,
+        totaisPorFonte,
+        registros: todos
+    });
+});
+/**
+ * Proxy legado — mantido pra retrocompatibilidade.
+ * Usa apenas o endpoint clássico /modulo-pesquisa-preco/1_consultarMaterial.
+ * Novos chamadores devem usar `consultarPrecosMulti` (acima).
  */
 exports.consultarPrecosCompras = functions
     .runWith({ timeoutSeconds: 60, memory: '512MB' })

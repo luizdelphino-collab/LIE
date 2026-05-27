@@ -324,7 +324,10 @@ export interface PrecoReferencia {
   quantidade?: number;
   unidadeMedida?: string;
   valorUnitario: number;
-  fonte: 'compras.gov.br' | 'pncp' | 'fomento' | 'manual';
+  fonte: 'compras.gov.br' | 'pncp' | 'pncp-contratacao' | 'pncp-ata' | 'fomento' | 'manual';
+  numeroControlePNCP?: string;
+  cnpjOrgao?: string;
+  descricaoItem?: string;
   localizacaoUrl: string; // Para manual/fomento, é a URL de upload no Firebase Storage
   arquivoNome?: string;
 }
