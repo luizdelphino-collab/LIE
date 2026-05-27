@@ -462,9 +462,12 @@ exports.validarCatmat = functions
     }
     const tipo = String(req.query.tipo || 'material').toLowerCase();
     const isServico = tipo === 'servico' || tipo === 'serviço' || tipo === 'catser';
+    // A API exige tamanhoPagina entre 10 e 500. Se omitir os params de
+    // paginação, retorna 200 com 1 registro (que é o nosso caso). Por
+    // segurança usamos só o filtro por código.
     const url = isServico
-        ? `https://dadosabertos.compras.gov.br/modulo-servico/6_consultarItemServico?pagina=1&tamanhoPagina=1&codigoServico=${encodeURIComponent(codigo)}`
-        : `https://dadosabertos.compras.gov.br/modulo-material/4_consultarItemMaterial?pagina=1&tamanhoPagina=1&codigoItem=${encodeURIComponent(codigo)}`;
+        ? `https://dadosabertos.compras.gov.br/modulo-servico/6_consultarItemServico?codigoServico=${encodeURIComponent(codigo)}`
+        : `https://dadosabertos.compras.gov.br/modulo-material/4_consultarItemMaterial?codigoItem=${encodeURIComponent(codigo)}`;
     try {
         const resp = await fetch(url, {
             headers: {
