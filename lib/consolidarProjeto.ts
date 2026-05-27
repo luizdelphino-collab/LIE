@@ -666,64 +666,173 @@ async function renderPesquisaCertificadosJsPdf(
 
     state.y = (pdf as any).lastAutoTable.finalY + 4;
 
-    // Lista de links rastreáveis (URLs reais pra auditoria pelo parecerista)
-    // + QR code de cada link pra validação rápida via celular
-    const refsComLink = (it.referencias || []).filter((r: any) => r.localizacaoUrl);
-    if (refsComLink.length > 0) {
-      const QR_SIZE = 13; // mm
-      const QR_GAP = 3;
-      const ROW_H = QR_SIZE + 2;
-
-      checkPageSpace(state, 8 + refsComLink.length * ROW_H);
-      pdf.setFontSize(8);
+    // === SEÇÃO: AUDITORIA DETALHADA POR COTAÇÃO ===
+    // Ficha completa de cada cotação com todos os campos rastreáveis
+    // (CNPJ órgão, modalidade, situação, CATMAT, fornecedor, etc.)
+    // + QR code apontando pro portal oficial PNCP/Compras.
+    const refsAudit = (it.referencias || []).filter((r: any) => r.localizacaoUrl || r.cnpjOrgao);
+    if (refsAudit.length > 0) {
+      checkPageSpace(state, 14);
+      pdf.setFontSize(9);
       pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(80, 80, 80);
-      pdf.text('Links de comprovação (rastreabilidade pública — escaneie o QR ou clique no link):', MARGIN, state.y);
+      pdf.setTextColor(...cor);
+      pdf.text('AUDITORIA DETALHADA — FICHAS DE COMPROVAÇÃO', MARGIN, state.y);
       state.y += 4;
 
-      for (let i = 0; i < refsComLink.length; i++) {
-        const r = refsComLink[i];
-        checkPageSpace(state, ROW_H + 2);
-        const rowY = state.y;
-        const qrData = qrCache[r.localizacaoUrl];
+      pdf.setFontSize(7);
+      pdf.setFont('helvetica', 'italic');
+      pdf.setTextColor(110, 110, 110);
+      pdf.text(
+        'Cada ficha abaixo permite ao parecerista validar a cotação diretamente no portal oficial '
+        + '(PNCP/Compras.gov.br) via QR code ou link clicável.',
+        MARGIN, state.y
+      );
+      state.y += 5;
 
-        // QR code à esquerda (se disponível)
+      const QR_SIZE = 22;
+      const FICHA_H = 46;
+      const TEXT_X = MARGIN + QR_SIZE + 3;
+      const TEXT_MAX_W = CONTENT_W - QR_SIZE - 3;
+      const LABEL_W = 26;
+
+      for (let i = 0; i < refsAudit.length; i++) {
+        const r: any = refsAudit[i];
+        checkPageSpace(state, FICHA_H + 2);
+        const cardY = state.y;
+
+        // Moldura
+        pdf.setFillColor(252, 252, 253);
+        pdf.setDrawColor(220, 224, 230);
+        pdf.setLineWidth(0.3);
+        pdf.rect(MARGIN, cardY, CONTENT_W, FICHA_H, 'FD');
+
+        // QR code (esquerda)
+        const qrData = r.localizacaoUrl ? qrCache[r.localizacaoUrl] : null;
         if (qrData) {
           try {
-            pdf.addImage(qrData, 'PNG', MARGIN, rowY, QR_SIZE, QR_SIZE);
-          } catch (e) {
-            console.warn('Falha ao desenhar QR no PDF', e);
-          }
+            pdf.addImage(qrData, 'PNG', MARGIN + 2, cardY + 2, QR_SIZE - 4, QR_SIZE - 4);
+          } catch {}
         }
-
-        const textX = MARGIN + QR_SIZE + QR_GAP;
-        const textMaxW = CONTENT_W - QR_SIZE - QR_GAP;
-
-        // Linha 1: numeração + órgão + identificador
+        // Numeração abaixo do QR
+        pdf.setFontSize(8);
         pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(7.5);
-        pdf.setTextColor(60, 60, 60);
-        const header = `[${i + 1}] ${r.orgaoLicitante.substring(0, 70)}`;
-        pdf.text(header, textX, rowY + 3);
+        pdf.setTextColor(...cor);
+        pdf.text(`[${i + 1}]`, MARGIN + 2, cardY + QR_SIZE + 2);
 
-        pdf.setFont('helvetica', 'normal');
+        // Cabeçalho: órgão (esq) + fonte (dir)
+        pdf.setFontSize(8.5);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(40, 40, 40);
+        const fonteLabel = ({
+          'compras.gov.br': 'COMPRAS.GOV.BR',
+          'pncp-contratacao': 'PNCP — EDITAL',
+          'pncp-ata': 'PNCP — ATA',
+          'pncp': 'PNCP',
+          'tce-pe': 'TCE-PE',
+          'fomento': 'FOMENTO MANUAL',
+          'manual': 'CADASTRO MANUAL'
+        } as Record<string, string>)[r.fonte] || (r.fonte || '').toUpperCase();
+        pdf.setFontSize(6.5);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(...cor);
+        const fonteW = pdf.getTextWidth(fonteLabel);
+        const fonteX = MARGIN + CONTENT_W - fonteW - 3;
+        pdf.text(fonteLabel, fonteX, cardY + 4);
+
+        pdf.setFontSize(8.5);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(40, 40, 40);
+        const orgaoLines = pdf.splitTextToSize(r.orgaoLicitante || '-', TEXT_MAX_W - fonteW - 5);
+        pdf.text(orgaoLines[0], TEXT_X, cardY + 4);
+
+        // Linhas chave-valor (grid 2 colunas)
+        let lineY = cardY + 9;
+        const COL_GAP = 4;
+        const colWidth = (TEXT_MAX_W - COL_GAP) / 2;
+
+        const drawKV = (label: string, value: string, x: number, y: number) => {
+          if (!value || value === '-') {
+            pdf.setFont('helvetica', 'bold');
+            pdf.setTextColor(160, 160, 160);
+            pdf.setFontSize(7);
+            pdf.text(label, x, y);
+            pdf.setFont('helvetica', 'normal');
+            pdf.text('-', x + LABEL_W, y);
+            return;
+          }
+          pdf.setFont('helvetica', 'bold');
+          pdf.setTextColor(100, 100, 100);
+          pdf.setFontSize(7);
+          pdf.text(label, x, y);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setTextColor(40, 40, 40);
+          const valLines = pdf.splitTextToSize(value, colWidth - LABEL_W);
+          pdf.text(valLines[0], x + LABEL_W, y);
+        };
+
+        const colA = TEXT_X;
+        const colB = TEXT_X + colWidth + COL_GAP;
+        const formatBrl = (v: number) =>
+          v ? v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-';
+        const orgaoMeta = [r.poder, r.esfera, r.uf].filter(Boolean).join(' • ');
+
+        drawKV('CNPJ Órgão:', r.cnpjOrgao || '-', colA, lineY);
+        drawKV('Esfera/UF:', orgaoMeta || '-', colB, lineY);
+        lineY += 3.5;
+
+        drawKV('Modalidade:', r.modalidade || '-', colA, lineY);
+        drawKV('Situação:', r.situacao || '-', colB, lineY);
+        lineY += 3.5;
+
+        drawKV('Identificador:', r.identificadorCompra || '-', colA, lineY);
+        drawKV('UASG:', r.uasg || '-', colB, lineY);
+        lineY += 3.5;
+
+        drawKV('Nº PNCP:', r.numeroControlePNCP || '-', colA, lineY);
+        drawKV('Data:', r.dataHomologacao || '-', colB, lineY);
+        lineY += 3.5;
+
+        drawKV(
+          'CATMAT/CATSER:',
+          r.codigoCatalogoItem
+            ? `${r.codigoCatalogoItem}${r.descricaoItem ? ' — ' + r.descricaoItem.substring(0, 30) : ''}`
+            : '-',
+          colA, lineY
+        );
+        drawKV('Vigência ARP:', r.dataVigenciaFinalAta ? `até ${r.dataVigenciaFinalAta}` : '-', colB, lineY);
+        lineY += 3.5;
+
+        const qtdUnid = r.quantidade ? `${r.quantidade}${r.unidadeMedida ? ' ' + r.unidadeMedida : ''}` : '-';
+        drawKV('Qtd:', qtdUnid, colA, lineY);
+        drawKV('Valor Unit.:', formatBrl(Number(r.valorUnitario)), colB, lineY);
+        lineY += 3.5;
+
+        // Fornecedor (largura total)
+        const fornec = r.fornecedorNome
+          ? `${r.fornecedorNome}${r.fornecedorCnpj ? ' (CNPJ ' + r.fornecedorCnpj + ')' : ''}`
+          : '-';
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(100, 100, 100);
         pdf.setFontSize(7);
-        pdf.setTextColor(110, 110, 110);
-        const meta: string[] = [];
-        if (r.identificadorCompra) meta.push(`Compra: ${r.identificadorCompra}`);
-        if (r.uasg) meta.push(`UASG: ${r.uasg}`);
-        if (r.dataHomologacao) meta.push(`Data: ${r.dataHomologacao}`);
-        if (meta.length > 0) {
-          pdf.text(meta.join(' • ').substring(0, 100), textX, rowY + 7);
+        pdf.text('Adjudicatário:', colA, lineY);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(40, 40, 40);
+        const fornecLines = pdf.splitTextToSize(fornec, TEXT_MAX_W - LABEL_W);
+        pdf.text(fornecLines[0], colA + LABEL_W, lineY);
+        lineY += 3.5;
+
+        // URL clicável (largura total)
+        if (r.localizacaoUrl) {
+          pdf.setFont('helvetica', 'bold');
+          pdf.setTextColor(100, 100, 100);
+          pdf.text('Validar em:', colA, lineY);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setTextColor(0, 102, 204);
+          const urlLines = pdf.splitTextToSize(r.localizacaoUrl, TEXT_MAX_W - LABEL_W);
+          pdf.textWithLink(urlLines[0], colA + LABEL_W, lineY, { url: r.localizacaoUrl });
         }
 
-        // Linha 3: URL clicável
-        pdf.setTextColor(0, 102, 204);
-        pdf.setFontSize(6.5);
-        const urlLines = pdf.splitTextToSize(r.localizacaoUrl, textMaxW);
-        pdf.textWithLink(urlLines[0], textX, rowY + 11, { url: r.localizacaoUrl });
-
-        state.y += ROW_H;
+        state.y += FICHA_H + 2;
       }
       state.y += 2;
     }

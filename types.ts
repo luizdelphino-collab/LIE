@@ -324,10 +324,25 @@ export interface PrecoReferencia {
   quantidade?: number;
   unidadeMedida?: string;
   valorUnitario: number;
-  fonte: 'compras.gov.br' | 'pncp' | 'pncp-contratacao' | 'pncp-ata' | 'fomento' | 'manual';
-  numeroControlePNCP?: string;
+  fonte: 'compras.gov.br' | 'pncp' | 'pncp-contratacao' | 'pncp-ata' | 'tce-pe' | 'fomento' | 'manual';
+  // Identidade do órgão
   cnpjOrgao?: string;
+  poder?: string;
+  esfera?: string;
+  uf?: string;
+  // Legalidade
+  modalidade?: string;
+  situacao?: string;
+  // Identidade do item
+  codigoCatalogoItem?: string;
   descricaoItem?: string;
+  // Adjudicatário
+  fornecedorNome?: string;
+  fornecedorCnpj?: string;
+  // Identificadores
+  numeroControlePNCP?: string;
+  // Temporal
+  dataVigenciaFinalAta?: string;
   localizacaoUrl: string; // Para manual/fomento, é a URL de upload no Firebase Storage
   arquivoNome?: string;
 }

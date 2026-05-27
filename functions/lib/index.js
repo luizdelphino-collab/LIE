@@ -276,9 +276,18 @@ exports.consultarPrecosMulti = functions
                 orgaoLicitante: 'TCE-PE (Contrato Estadual)',
                 uasg: '',
                 cnpjOrgao: '',
+                poder: 'Estadual',
+                esfera: '',
+                uf: 'PE',
+                modalidade: '',
+                situacao: '',
+                codigoCatalogoItem: '',
+                fornecedorNome: '',
+                fornecedorCnpj: '',
                 identificadorCompra: codContrato || r.CodigoItem || '',
                 numeroControlePNCP: '',
                 dataHomologacao: '',
+                dataVigenciaFinalAta: '',
                 quantidade: Number(r.Quantidade) || 0,
                 unidadeMedida: r.Unidade || '',
                 descricaoItem: r.Descricao || '',
@@ -293,16 +302,32 @@ exports.consultarPrecosMulti = functions
         const linkFallback = r.linkProcesso || (r.uasg ? `https://pncp.gov.br/app/contratacoes?q=${r.uasg}` : '');
         return {
             fonte: fonteNome,
-            orgaoLicitante: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || 'ÓRGÃO PÚBLICO',
-            uasg: r.uasg || r.codigoUasg || '',
-            cnpjOrgao: r.cnpjOrgao || '',
-            identificadorCompra: r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || '',
+            // === Identidade do órgão ===
+            orgaoLicitante: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || r.orgaoEntidadeNome || r.nomeOrgaoEntidade || 'ÓRGÃO PÚBLICO',
+            uasg: r.uasg || r.codigoUasg || r.codigoUnidadeAdministrativa || '',
+            cnpjOrgao: r.cnpjOrgao || r.orgaoEntidadeCnpj || r.cnpj || '',
+            poder: r.poder || r.orgaoEntidadePoder || '',
+            esfera: r.esfera || r.orgaoEntidadeEsfera || '',
+            uf: r.uf || r.orgaoEntidadeUfSigla || r.estado || r.siglaUf || '',
+            // === Legalidade da compra ===
+            modalidade: r.nomeModalidadeCompra || r.modalidade || r.modalidadeCompra || r.modalidadeNome || '',
+            situacao: r.situacaoCompraItem || r.situacaoCompra || r.situacao || (r.temResultado ? 'Homologado' : ''),
+            // === Identidade do item ===
+            codigoCatalogoItem: String(r.codItemCatalogo || r.codigoItemCatalogo || r.codigoItemCatalogoCompra || ''),
+            descricaoItem: r.descricaoItemCatalogo || r.descricaoItem || r.descricao || '',
+            // === Adjudicatário ===
+            fornecedorNome: r.nomeFornecedor || r.razaoSocialFornecedor || r.fornecedorNome || '',
+            fornecedorCnpj: r.niFornecedor || r.codFornecedor || r.cnpjFornecedor || r.fornecedorCnpj || '',
+            // === Identificadores ===
+            identificadorCompra: r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || r.numeroAtaRegistroPreco || '',
             numeroControlePNCP: numeroControle || '',
+            // === Temporal ===
             dataHomologacao: r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || r.dataAprovacaoAta || '',
+            dataVigenciaFinalAta: r.dataVigenciaFinalAta || r.dataFimVigencia || '',
+            // === Escala ===
             quantidade: Number(r.quantidade) || 0,
-            unidadeMedida: r.unidadeMedida || '',
-            descricaoItem: r.descricaoItem || r.descricao || '',
-            valorUnitario: Number(r.valorUnitario || r.valorUnitarioEstimado || r.valorUnitarioHomologado) || 0,
+            unidadeMedida: r.unidadeMedida || r.siglaUnidadeMedida || '',
+            valorUnitario: Number(r.valorUnitario || r.valorUnitarioEstimado || r.valorUnitarioHomologado || r.precoUnitario) || 0,
             localizacaoUrl: linkPncp || linkFallback || ''
         };
     };
