@@ -264,6 +264,11 @@ export default function ProjetoItensPage() {
         unidade: selectedMaster.unidade,
         valorUnitario: selectedMaster.valorUnitario,
         valorTotal,
+        // Propaga CATMAT/CATSER oficial do master pra pesquisa automática
+        codigoCatmat: selectedMaster.codigoCatmat,
+        tipoCatmat: selectedMaster.tipoCatmat,
+        nomeCatmatOficial: selectedMaster.nomeCatmatOficial,
+        descricaoCatmatOficial: selectedMaster.descricaoCatmatOficial,
         criadoEm: formData.criadoEm || serverTimestamp() as Timestamp
       };
 
@@ -302,6 +307,11 @@ export default function ProjetoItensPage() {
           memorialCalculo: data.memorialCalculo,
           quantidade: data.quantidade,
           valorTotal,
+          // Propaga CATMAT/CATSER oficial do master pra pesquisa automática
+          codigoCatmat: m.codigoCatmat,
+          tipoCatmat: m.tipoCatmat,
+          nomeCatmatOficial: m.nomeCatmatOficial,
+          descricaoCatmatOficial: m.descricaoCatmatOficial,
           criadoEm: serverTimestamp() as Timestamp
         };
 

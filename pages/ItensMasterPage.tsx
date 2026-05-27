@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, writeBatch } from 'firebase/firestore';
-import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ExternalLink, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
+import { validarCatmatOficial, type CatmatValidacao } from '../lib/apiCompras';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
 
 interface ItemComUso extends ItemMaster {
@@ -46,6 +47,12 @@ export default function ItensMasterPage() {
     valorUnitario: 0,
     categoria: 'Alimento'
   });
+
+  // Validação do CATMAT/CATSER oficial via API governamental
+  const [catmatInput, setCatmatInput] = useState<string>('');
+  const [catmatTipo, setCatmatTipo] = useState<'material' | 'servico'>('material');
+  const [validandoCatmat, setValidandoCatmat] = useState(false);
+  const [catmatResultado, setCatmatResultado] = useState<CatmatValidacao | null>(null);
 
   // Estado do limpador de duplicatas
   const [limpezaOpen, setLimpezaOpen] = useState(false);
@@ -249,6 +256,15 @@ export default function ItensMasterPage() {
   const openEdit = (it: ItemMaster) => {
     setEditId(it.id);
     setFormData({ ...it });
+    setCatmatInput(it.codigoCatmat ? String(it.codigoCatmat) : '');
+    setCatmatTipo(it.tipoCatmat || 'material');
+    setCatmatResultado(it.codigoCatmat ? {
+      valido: true,
+      codigo: it.codigoCatmat,
+      tipo: it.tipoCatmat,
+      nome: it.nomeCatmatOficial,
+      descricao: it.descricaoCatmatOficial
+    } : null);
     setIsFormOpen(true);
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
@@ -256,8 +272,49 @@ export default function ItensMasterPage() {
   const openNew = () => {
     setEditId(null);
     setFormData({ nome: '', descricao: '', unidade: 'unidade', valorUnitario: 0, categoria: 'Alimento' });
+    setCatmatInput('');
+    setCatmatTipo('material');
+    setCatmatResultado(null);
     setIsFormOpen(true);
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  };
+
+  const validarCatmatHandler = async () => {
+    const cod = parseInt(catmatInput, 10);
+    if (!cod || isNaN(cod)) {
+      setCatmatResultado({ valido: false, motivo: 'Informe um código numérico.' });
+      return;
+    }
+    setValidandoCatmat(true);
+    setCatmatResultado(null);
+    try {
+      const res = await validarCatmatOficial(cod, catmatTipo);
+      setCatmatResultado(res);
+      // Se válido, aplica nome/descrição oficial nos campos do form
+      if (res.valido) {
+        setFormData(p => ({
+          ...p,
+          codigoCatmat: res.codigo,
+          tipoCatmat: res.tipo,
+          nomeCatmatOficial: res.nome,
+          descricaoCatmatOficial: res.descricao
+        }));
+      }
+    } finally {
+      setValidandoCatmat(false);
+    }
+  };
+
+  const removerCatmat = () => {
+    setCatmatInput('');
+    setCatmatResultado(null);
+    setFormData(p => ({
+      ...p,
+      codigoCatmat: undefined,
+      tipoCatmat: undefined,
+      nomeCatmatOficial: undefined,
+      descricaoCatmatOficial: undefined
+    }));
   };
 
   const handleDelete = async (id: string) => {
@@ -492,6 +549,116 @@ export default function ItensMasterPage() {
               <label className="block text-sm font-bold text-gray-700 mb-1">Descrição / Especificação</label>
               <textarea rows={2} value={formData.descricao} onChange={e => setFormData(p => ({...p, descricao: e.target.value}))} className="w-full border-gray-300 rounded-lg shadow-sm" />
             </div>
+
+            {/* === BLOCO CATMAT/CATSER OFICIAL === */}
+            <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
+              <div className="flex items-start gap-2 mb-2">
+                <ShieldCheck className="w-5 h-5 text-lie-green shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-bold text-lie-ink">Código CATMAT / CATSER oficial</h3>
+                  <p className="text-xs text-gray-500 leading-snug">
+                    Obrigatório pra que o item entre na <strong>Pesquisa Automática de Preços</strong> (IN 65/2021).
+                    Sem código oficial, o item só aceita cotações manuais (upload de PDF).
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Tipo</label>
+                  <select
+                    value={catmatTipo}
+                    onChange={e => setCatmatTipo(e.target.value as 'material' | 'servico')}
+                    className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                  >
+                    <option value="material">CATMAT (material)</option>
+                    <option value="servico">CATSER (serviço)</option>
+                  </select>
+                </div>
+                <div className="md:col-span-4">
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Código</label>
+                  <input
+                    type="number"
+                    placeholder="Ex: 437936"
+                    value={catmatInput}
+                    onChange={e => setCatmatInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); validarCatmatHandler(); } }}
+                    className="w-full border-gray-300 rounded-lg shadow-sm text-sm font-mono"
+                  />
+                </div>
+                <div className="md:col-span-5 flex items-end gap-2">
+                  <button
+                    type="button"
+                    onClick={validarCatmatHandler}
+                    disabled={validandoCatmat || !catmatInput}
+                    className="flex-1 px-3 py-2 bg-lie-green text-white text-sm font-bold rounded-lg hover:bg-lie-greenDark transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {validandoCatmat ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                    {validandoCatmat ? 'Validando…' : 'Validar na API'}
+                  </button>
+                  <a
+                    href="https://catalogo.compras.gov.br/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Buscar código no catálogo oficial Compras.gov.br"
+                    className="px-3 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-lg hover:bg-gray-50 transition flex items-center gap-1"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Resultado da validação */}
+              {catmatResultado && (
+                <div className={`mt-2 p-3 rounded-lg border text-xs ${
+                  catmatResultado.valido
+                    ? 'bg-green-50 border-green-200 text-green-900'
+                    : 'bg-red-50 border-red-200 text-red-900'
+                }`}>
+                  {catmatResultado.valido ? (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4" />
+                          Código {catmatResultado.codigo} validado no catálogo oficial
+                        </span>
+                        <button
+                          type="button"
+                          onClick={removerCatmat}
+                          className="text-[10px] uppercase font-bold text-red-600 hover:text-red-800 underline"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                      {catmatResultado.nome && <div><strong>Nome (PDM):</strong> {catmatResultado.nome}</div>}
+                      {catmatResultado.descricao && (
+                        <div><strong>Descrição oficial:</strong> {catmatResultado.descricao}</div>
+                      )}
+                      {(catmatResultado.grupo || catmatResultado.classe) && (
+                        <div className="text-[10px] text-green-700">
+                          {catmatResultado.grupo && <span>Grupo: {catmatResultado.grupo}</span>}
+                          {catmatResultado.classe && <span> • Classe: {catmatResultado.classe}</span>}
+                          {catmatResultado.ncm && <span> • NCM: {catmatResultado.ncm}</span>}
+                          {catmatResultado.status && <span> • Status: {catmatResultado.status}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Código não encontrado:</strong> {catmatResultado.motivo}
+                        <br />
+                        <span className="text-[10px]">
+                          Confira em <a href="https://catalogo.compras.gov.br/" target="_blank" rel="noopener noreferrer" className="underline">catalogo.compras.gov.br</a>.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="md:col-span-3 flex justify-end gap-3 pt-2">
               <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancelar</button>
               <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-8 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2">

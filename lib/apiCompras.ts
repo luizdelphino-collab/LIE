@@ -153,29 +153,51 @@ export function buscarMateriaisLocal(termo: string): GovernmentMaterial[] {
     return nomeClean.includes(queryClean) || descClean.includes(queryClean);
   });
 
-  // Se não houver correspondência local, gera um registro SINTÉTICO marcado.
-  // O código é apenas placeholder — NÃO deve ser usado pra consultar a API
-  // governamental, porque NÃO existe nesse catálogo. Cotações retornadas com
-  // ele seriam de produtos aleatórios via colisão de hash (risco de fraude).
-  if (filtrados.length === 0 && termo.trim().length >= 2) {
-    const termUpper = termo.toUpperCase().trim();
-    let hash = 0;
-    for (let i = 0; i < termUpper.length; i++) {
-      hash = termUpper.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const codigoItem = 500000 + Math.abs(hash) % 400000;
-
-    return [{
-      codigoItem,
-      nome: termUpper,
-      descricaoItem: `ITEM SEM CATMAT/CATSER OFICIAL CADASTRADO: ${termUpper}`,
-      categoria: "Item do Projeto",
-      unidade: "unidade",
-      sintetico: true
-    }];
-  }
+  // REMOVIDO: geração sintética de CATMAT por hash.
+  // Esses códigos colidiam aleatoriamente com CATMATs reais de outros
+  // produtos, retornando cotações de itens não-relacionados e gerando
+  // risco de fraude documental. Agora: só retorna matches REAIS do
+  // catálogo semente local. Pra itens sem match, o usuário deve cadastrar
+  // o CATMAT oficial via formulário de Item (com validação na API gov).
 
   return filtrados;
+}
+
+/**
+ * Valida um código CATMAT/CATSER consultando a API oficial do
+ * Compras.gov.br. Retorna a descrição oficial do código pra confirmação
+ * do usuário, ou null se o código não existir no catálogo.
+ */
+export interface CatmatValidacao {
+  valido: boolean;
+  codigo?: number;
+  tipo?: 'material' | 'servico';
+  nome?: string;
+  descricao?: string;
+  grupo?: string;
+  classe?: string;
+  pdm?: string;
+  ncm?: string;
+  status?: string;
+  sustentavel?: boolean;
+  motivo?: string;
+}
+
+export async function validarCatmatOficial(
+  codigo: number,
+  tipo: 'material' | 'servico' = 'material'
+): Promise<CatmatValidacao> {
+  const projectId = storage.app.options.projectId;
+  const url = `https://us-central1-${projectId}.cloudfunctions.net/validarCatmat?codigo=${encodeURIComponent(codigo)}&tipo=${tipo}`;
+  try {
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!resp.ok && resp.status !== 404) {
+      return { valido: false, motivo: `HTTP ${resp.status} ao consultar API oficial.` };
+    }
+    return await resp.json();
+  } catch (e: any) {
+    return { valido: false, motivo: e?.message || 'Falha de rede.' };
+  }
 }
 
 // Obter especificações de um material pelo código CATMAT/CATSER

@@ -296,31 +296,34 @@ export async function pesquisarItemAutomatico(
   try {
     console.info(`[pesquisa] iniciando '${item.nome}' (estimado: R$ ${item.valorUnitario})`);
 
-    const matches = buscarMateriaisLocal(item.nome);
-    if (matches.length === 0) {
-      console.info(`[pesquisa] '${item.nome}' SEM match no catálogo — limpando cesta antiga`);
-      await limparPesquisaItem(item);
-      return { itemId: item.id, itemNome: item.nome, status: 'sem-match', reason: 'Nenhum material correspondente no catálogo CATMAT/CATSER.' };
-    }
-    const mat = matches[0];
-    console.info(`[pesquisa] '${item.nome}' match: ${mat.codigoItem} (${mat.nome})${mat.sintetico ? ' [SINTÉTICO]' : ''}`);
+    // Prioridade 1: CATMAT/CATSER validado oficialmente no cadastro do item
+    let codigoCatmat: number;
+    let nomeCatmat: string;
 
-    // BLOQUEIO DE SEGURANÇA: códigos sintéticos (gerados por hash quando
-    // não há match real no catálogo) NÃO devem ser usados pra consultar
-    // a API governamental — colidem aleatoriamente com CATMATs reais de
-    // outros produtos e geram cotações irrelevantes/enganosas no laudo.
-    if (mat.sintetico) {
-      console.warn(`[pesquisa] '${item.nome}' BLOQUEADO: código ${mat.codigoItem} é sintético (sem CATMAT real)`);
-      await limparPesquisaItem(item);
-      return {
-        itemId: item.id,
-        itemNome: item.nome,
-        status: 'sem-catmat-real',
-        reason: 'Item não possui CATMAT/CATSER oficial cadastrado no catálogo. Use a aba "Registro Manual" pra anexar uma cotação de fomento.'
-      };
+    if (item.codigoCatmat && item.codigoCatmat > 0) {
+      codigoCatmat = item.codigoCatmat;
+      nomeCatmat = item.nomeCatmatOficial || item.nome;
+      console.info(`[pesquisa] '${item.nome}' usando CATMAT validado: ${codigoCatmat} (${nomeCatmat})`);
+    } else {
+      // Prioridade 2: tentar match no seed local (códigos REAIS conhecidos)
+      const matches = buscarMateriaisLocal(item.nome);
+      if (matches.length === 0) {
+        console.info(`[pesquisa] '${item.nome}' SEM CATMAT validado nem match no seed local — limpando cesta`);
+        await limparPesquisaItem(item);
+        return {
+          itemId: item.id,
+          itemNome: item.nome,
+          status: 'sem-catmat-real',
+          reason: 'Item não tem CATMAT/CATSER oficial cadastrado. Edite o item base e informe o código (busque em https://catalogo.compras.gov.br/).'
+        };
+      }
+      const mat = matches[0];
+      codigoCatmat = mat.codigoItem;
+      nomeCatmat = mat.nome;
+      console.info(`[pesquisa] '${item.nome}' match seed: ${codigoCatmat} (${nomeCatmat})`);
     }
 
-    const precos = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario, item.nome);
+    const precos = await consultarPrecosPraticados(codigoCatmat, item.valorUnitario, nomeCatmat);
     console.info(`[pesquisa] '${item.nome}' API retornou ${precos.length} cotação(ões) brutas`);
 
     const elegiveis = precos
@@ -330,7 +333,7 @@ export async function pesquisarItemAutomatico(
 
     if (elegiveis.length === 0) {
       console.info(`[pesquisa] '${item.nome}' SEM elegíveis — limpando cesta antiga`);
-      await limparPesquisaItem(item, mat.codigoItem);
+      await limparPesquisaItem(item, codigoCatmat);
       const motivo = precos.length === 0
         ? 'A API governamental não retornou nenhuma cotação pra esse código CATMAT.'
         : `API retornou ${precos.length} cotação(ões), mas todas abaixo do valor estimado (R$ ${item.valorUnitario}).`;
@@ -359,7 +362,7 @@ export async function pesquisarItemAutomatico(
       mediaReferencia: media,
       medianaReferencia: mediana,
       tokenPesquisa: token,
-      ultimoCodigoVinculado: mat.codigoItem
+      ultimoCodigoVinculado: codigoCatmat
     }, { merge: true });
 
     await setDoc(doc(db, 'cotacoesValidadoras', token), {

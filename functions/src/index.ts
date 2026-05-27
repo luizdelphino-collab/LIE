@@ -447,3 +447,98 @@ export const consultarPrecosCompras = functions
       });
     }
   });
+
+/**
+ * Valida um código CATMAT (material) OU CATSER (serviço) consultando
+ * a API oficial do Compras.gov.br. Devolve a descrição oficial pra que
+ * o usuário confirme que o código corresponde ao item esperado.
+ *
+ * NÃO existe endpoint público de busca por texto livre — a API só
+ * aceita busca por código exato. O usuário precisa achar o código
+ * manualmente no portal https://catalogo.compras.gov.br/ e colar aqui.
+ *
+ * Uso:
+ *   GET /validarCatmat?codigo=437936&tipo=material
+ *   GET /validarCatmat?codigo=3603&tipo=servico
+ *
+ * Resposta de sucesso:
+ *   { valido: true, codigo, nome, descricao, tipo, grupo, classe, ncm, status }
+ *
+ * Resposta de não-encontrado:
+ *   { valido: false, motivo: 'Código não existe no catálogo oficial.' }
+ */
+export const validarCatmat = functions
+  .runWith({ timeoutSeconds: 30, memory: '256MB' })
+  .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin as string | undefined);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Vary', 'Origin');
+
+    if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+    if (req.method !== 'GET') { res.status(405).json({ error: 'Apenas GET é suportado.' }); return; }
+
+    const codigo = String(req.query.codigo || '').trim();
+    if (!codigo || !/^\d+$/.test(codigo)) {
+      res.status(400).json({ valido: false, motivo: 'Query param "codigo" obrigatório e numérico.' });
+      return;
+    }
+    const tipo = String(req.query.tipo || 'material').toLowerCase();
+    const isServico = tipo === 'servico' || tipo === 'serviço' || tipo === 'catser';
+
+    const url = isServico
+      ? `https://dadosabertos.compras.gov.br/modulo-servico/6_consultarItemServico?pagina=1&tamanhoPagina=1&codigoServico=${encodeURIComponent(codigo)}`
+      : `https://dadosabertos.compras.gov.br/modulo-material/4_consultarItemMaterial?pagina=1&tamanhoPagina=1&codigoItem=${encodeURIComponent(codigo)}`;
+
+    try {
+      const resp = await fetch(url, {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
+        }
+      });
+
+      if (!resp.ok) {
+        res.status(resp.status).json({
+          valido: false,
+          motivo: `API governamental retornou HTTP ${resp.status}.`
+        });
+        return;
+      }
+
+      const data = await resp.json();
+      const lista = data.resultado || data.data || [];
+      if (!Array.isArray(lista) || lista.length === 0) {
+        res.set('Cache-Control', 'public, max-age=86400'); // cache 1 dia (negativo)
+        res.json({
+          valido: false,
+          motivo: `Código ${codigo} não foi encontrado no catálogo oficial ${isServico ? 'CATSER' : 'CATMAT'}.`
+        });
+        return;
+      }
+
+      const item = lista[0];
+      res.set('Cache-Control', 'public, max-age=2592000'); // cache 30 dias
+      res.json({
+        valido: true,
+        codigo: Number(item.codigoItem || item.codigoServico || codigo),
+        tipo: isServico ? 'servico' : 'material',
+        nome: item.nomePdm || item.nomeClasse || item.nomeGrupo || '',
+        descricao: item.descricaoItem || item.descricaoServico || item.descricao || '',
+        grupo: item.nomeGrupo || '',
+        classe: item.nomeClasse || '',
+        pdm: item.nomePdm || '',
+        ncm: item.codigo_ncm || item.codigoNcm || '',
+        status: item.statusItem || item.statusServico || '',
+        sustentavel: !!item.itemSustentavel
+      });
+    } catch (e: any) {
+      console.error('Falha ao validar CATMAT/CATSER:', e);
+      res.status(502).json({
+        valido: false,
+        motivo: 'Falha ao consultar a API oficial. Tente novamente.',
+        detail: e?.message || String(e)
+      });
+    }
+  });

@@ -307,13 +307,19 @@ export type UnidadeMedida =
 
 export interface ItemMaster {
   id: string;
-  codigo: number; // Gerado sequencialmente
+  codigo: number; // Gerado sequencialmente (interno)
   nome: string;
   descricao?: string;
   unidade: UnidadeMedida | string;
   valorUnitario: number;
   categoria: CategoriaItem | string;
   criadoEm: Timestamp;
+  // CATMAT/CATSER oficial validado via API do Compras.gov.br.
+  // Obrigatório pra que o item entre na pesquisa automática de preços.
+  codigoCatmat?: number;
+  tipoCatmat?: 'material' | 'servico';
+  nomeCatmatOficial?: string;
+  descricaoCatmatOficial?: string;
 }
 
 export interface PrecoReferencia {
@@ -363,6 +369,12 @@ export interface ItemProjeto {
   ordem?: number;
   fornecedoresIds?: string[]; // IDs dos fornecedores vinculados ao item na execução
   criadoEm: Timestamp;
+
+  // CATMAT/CATSER oficial herdado do ItemMaster — usado pela pesquisa
+  codigoCatmat?: number;
+  tipoCatmat?: 'material' | 'servico';
+  nomeCatmatOficial?: string;
+  descricaoCatmatOficial?: string;
 
   // Campos de Pesquisa de Preço Público (IN 65/2021)
   pesquisado?: boolean;
