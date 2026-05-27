@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
 import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/CatalogoSearchPicker';
+import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -54,6 +55,9 @@ export default function ItensMasterPage() {
   // Paginação cliente
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [tamanhoPagina, setTamanhoPagina] = useState(25);
+
+  // Validação CATMAT em lote
+  const [validacaoLoteOpen, setValidacaoLoteOpen] = useState(false);
 
   // Reset pra página 1 quando busca/filtro muda
   useEffect(() => { setPaginaAtual(1); }, [searchTerm, tamanhoPagina]);
@@ -487,6 +491,18 @@ export default function ItensMasterPage() {
 
 
 
+          {/* Validar CATMAT em Lote */}
+          <button
+            onClick={() => setValidacaoLoteOpen(true)}
+            title="Buscar CATMAT/CATSER oficial em lote — atribui automaticamente"
+            className="group flex items-center bg-amber-50 border border-amber-300 text-amber-700 rounded-lg p-2 transition-all duration-300 hover:bg-amber-100 shadow-sm"
+          >
+            <Wand2 className="w-5 h-5 shrink-0 text-amber-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Validar CATMAT em Lote
+            </span>
+          </button>
+
           {/* Limpar Duplicatas */}
           <button
             onClick={abrirLimpeza}
@@ -771,6 +787,14 @@ export default function ItensMasterPage() {
           </div>
         )}
       </div>
+
+      {/* ===== MODAL DE VALIDAÇÃO CATMAT EM LOTE ===== */}
+      <ValidacaoCatmatLoteModal
+        isOpen={validacaoLoteOpen}
+        onClose={() => setValidacaoLoteOpen(false)}
+        items={items}
+        onAtualizado={carregarItens}
+      />
 
       {/* ===== MODAL DE LIMPEZA DE DUPLICATAS ===== */}
       {limpezaOpen && (

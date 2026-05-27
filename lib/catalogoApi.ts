@@ -209,6 +209,108 @@ export async function obterServico(codigoServico: number): Promise<ServicoDetalh
 }
 
 /**
+ * Calcula similaridade entre duas strings via Dice coefficient com bigramas.
+ * Retorna valor entre 0 (nada parecido) e 1 (idêntico). Bom pra nomes
+ * curtos como "Água Mineral" vs "Água Mineral Natural".
+ */
+export function similaridade(a: string, b: string): number {
+  const normA = normalizar(a);
+  const normB = normalizar(b);
+  if (!normA || !normB) return 0;
+  if (normA === normB) return 1;
+  if (normA.length < 2 || normB.length < 2) return 0;
+
+  const bigramas = (s: string): Set<string> => {
+    const out = new Set<string>();
+    for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
+    return out;
+  };
+
+  const setA = bigramas(normA);
+  const setB = bigramas(normB);
+  let interseccao = 0;
+  setA.forEach(b => { if (setB.has(b)) interseccao++; });
+  return (2 * interseccao) / (setA.size + setB.size);
+}
+
+function normalizar(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Sugere o melhor PDM/serviço pro nome de um item.
+ * Tenta material primeiro, depois serviço. Retorna o melhor match com
+ * o score de similaridade.
+ */
+export interface SugestaoCatalogo {
+  tipo: 'material' | 'servico';
+  codigoPdm?: number;
+  nomePdm?: string;
+  codigoServico?: number;
+  nomeServico?: string;
+  classe?: string;
+  grupo?: string;
+  score: number;
+  totalAlternativas: number;
+}
+
+export async function sugerirMelhorMatch(nome: string): Promise<SugestaoCatalogo | null> {
+  if (!nome || nome.trim().length < 2) return null;
+
+  // Tira parênteses (frequentemente ruído tipo "(caixa 48 copos)")
+  const termoLimpo = nome.replace(/\([^)]*\)/g, '').trim();
+
+  // Tenta a primeira palavra significativa (>= 3 letras) pra busca mais ampla
+  const palavras = termoLimpo.split(/\s+/).filter(p => p.length >= 3);
+  const palavraBusca = palavras[0] || termoLimpo;
+
+  // Busca em paralelo material + serviço
+  const [pdms, servicos] = await Promise.all([
+    buscarPdmsPorPalavra(palavraBusca),
+    buscarServicosPorPalavra(palavraBusca)
+  ]);
+
+  let melhor: SugestaoCatalogo | null = null;
+
+  for (const pdm of pdms) {
+    const score = similaridade(nome, pdm.nomePdm || '');
+    if (!melhor || score > melhor.score) {
+      melhor = {
+        tipo: 'material',
+        codigoPdm: pdm.codigoPdm,
+        nomePdm: pdm.nomePdm,
+        classe: pdm.nomeClasse,
+        grupo: pdm.descricaoGrupo,
+        score,
+        totalAlternativas: pdms.length + servicos.length
+      };
+    }
+  }
+
+  for (const s of servicos) {
+    const nomeServ = s.descricaoServicoAcentuado || s.descricaoServico || '';
+    const score = similaridade(nome, nomeServ);
+    if (!melhor || score > melhor.score) {
+      melhor = {
+        tipo: 'servico',
+        codigoServico: s.codigoServico,
+        nomeServico: nomeServ,
+        grupo: s.nomeGrupo,
+        score,
+        totalAlternativas: pdms.length + servicos.length
+      };
+    }
+  }
+
+  return melhor;
+}
+
+/**
  * Formata as características de um item numa string legível.
  * Ex: "Tipo: Sem Gás • Material Embalagem: Plástico"
  */
