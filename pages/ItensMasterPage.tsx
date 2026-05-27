@@ -51,6 +51,13 @@ export default function ItensMasterPage() {
   // CATMAT/CATSER oficial — busca interativa no catálogo Compras.gov.br
   const [sugestaoNomeOficial, setSugestaoNomeOficial] = useState<string>('');
 
+  // Paginação cliente
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(25);
+
+  // Reset pra página 1 quando busca/filtro muda
+  useEffect(() => { setPaginaAtual(1); }, [searchTerm, tamanhoPagina]);
+
   // Estado do limpador de duplicatas
   const [limpezaOpen, setLimpezaOpen] = useState(false);
   const [analisando, setAnalisando] = useState(false);
@@ -219,6 +226,12 @@ export default function ItensMasterPage() {
       if (valA! > valB!) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
+
+  const totalItens = sortedItems.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalItens / tamanhoPagina));
+  const paginaSegura = Math.min(paginaAtual, totalPaginas);
+  const offsetIni = (paginaSegura - 1) * tamanhoPagina;
+  const itensPaginados = sortedItems.slice(offsetIni, offsetIni + tamanhoPagina);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -627,7 +640,7 @@ export default function ItensMasterPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {sortedItems.map(it => (
+            {itensPaginados.map(it => (
               <tr key={it.id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-3">
                   <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-100 rounded-full text-gray-600 uppercase">{it.categoria}</span>
@@ -694,6 +707,68 @@ export default function ItensMasterPage() {
         </table>
         {sortedItems.length === 0 && (
           <div className="p-12 text-center text-lie-gray italic">Nenhum item encontrado.</div>
+        )}
+
+        {/* Paginação */}
+        {totalItens > 0 && (
+          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="text-gray-600">
+              Mostrando <strong>{offsetIni + 1}</strong>–<strong>{Math.min(offsetIni + tamanhoPagina, totalItens)}</strong> de <strong>{totalItens}</strong> item(ns)
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-gray-500">Por página:</label>
+              <select
+                value={tamanhoPagina}
+                onChange={e => setTamanhoPagina(Number(e.target.value))}
+                className="border border-gray-300 rounded px-2 py-1 text-xs bg-white focus:ring-lie-green focus:border-lie-green"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={500}>Todos</option>
+              </select>
+            </div>
+
+            {totalPaginas > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPaginaAtual(1)}
+                  disabled={paginaSegura === 1}
+                  className="px-2 py-1 border border-gray-300 rounded text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  title="Primeira página"
+                >
+                  «
+                </button>
+                <button
+                  onClick={() => setPaginaAtual(p => Math.max(1, p - 1))}
+                  disabled={paginaSegura === 1}
+                  className="px-3 py-1 border border-gray-300 rounded text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  Anterior
+                </button>
+                <span className="px-3 py-1 bg-lie-green text-white rounded font-bold">
+                  {paginaSegura} <span className="font-normal opacity-70">de {totalPaginas}</span>
+                </span>
+                <button
+                  onClick={() => setPaginaAtual(p => Math.min(totalPaginas, p + 1))}
+                  disabled={paginaSegura === totalPaginas}
+                  className="px-3 py-1 border border-gray-300 rounded text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  Próximo
+                </button>
+                <button
+                  onClick={() => setPaginaAtual(totalPaginas)}
+                  disabled={paginaSegura === totalPaginas}
+                  className="px-2 py-1 border border-gray-300 rounded text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  title="Última página"
+                >
+                  »
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
