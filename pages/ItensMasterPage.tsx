@@ -1,9 +1,27 @@
 import { useEffect, useState } from 'react';
-import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit } from 'firebase/firestore';
-import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet } from 'lucide-react';
+import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, writeBatch } from 'firebase/firestore';
+import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
+
+interface ItemComUso extends ItemMaster {
+  projetosUsando: number;
+}
+
+interface GrupoDuplicata {
+  nomeNormalizado: string;
+  paraManter: ItemComUso[];
+  paraExcluir: ItemComUso[];
+}
+
+function normalizarNome(s: string): string {
+  return (s || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 
 const CATEGORIAS: CategoriaItem[] = ['Alimento', 'Transporte', 'Material Esportivo', 'Material não Esportivo', 'Recurso Humano', 'Outro'];
@@ -28,6 +46,14 @@ export default function ItensMasterPage() {
     valorUnitario: 0,
     categoria: 'Alimento'
   });
+
+  // Estado do limpador de duplicatas
+  const [limpezaOpen, setLimpezaOpen] = useState(false);
+  const [analisando, setAnalisando] = useState(false);
+  const [grupos, setGrupos] = useState<GrupoDuplicata[]>([]);
+  const [backupBaixado, setBackupBaixado] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+  const [excluidos, setExcluidos] = useState<number | null>(null);
 
   const carregarItens = async () => {
     try {
@@ -243,6 +269,128 @@ export default function ItensMasterPage() {
     }
   };
 
+  const abrirLimpeza = async () => {
+    setLimpezaOpen(true);
+    setBackupBaixado(false);
+    setExcluidos(null);
+    setGrupos([]);
+    setAnalisando(true);
+    try {
+      // 1. Carregar todos masters
+      const mastersSnap = await getDocs(collection(db, 'items'));
+      const masters = mastersSnap.docs.map(d => ({ id: d.id, ...d.data() } as ItemMaster));
+
+      // 2. Cruzar com itens dos projetos
+      const projectsSnap = await getDocs(collection(db, 'projects'));
+      const usoPorItemId = new Map<string, Set<string>>();
+      await Promise.all(
+        projectsSnap.docs.map(async (projSnap) => {
+          const itemsSnap = await getDocs(collection(db, `projects/${projSnap.id}/items`));
+          itemsSnap.docs.forEach(d => {
+            const data = d.data() as any;
+            const refId: string | undefined = data.itemId || data.itemMasterId;
+            if (refId) {
+              if (!usoPorItemId.has(refId)) usoPorItemId.set(refId, new Set());
+              usoPorItemId.get(refId)!.add(projSnap.id);
+            }
+          });
+        })
+      );
+
+      // 3. Agrupar por nome normalizado
+      const mapa = new Map<string, ItemComUso[]>();
+      masters.forEach(m => {
+        const k = normalizarNome(m.nome);
+        if (!k) return;
+        if (!mapa.has(k)) mapa.set(k, []);
+        mapa.get(k)!.push({ ...m, projetosUsando: (usoPorItemId.get(m.id) || new Set()).size });
+      });
+
+      // 4. Decidir manter/excluir
+      const resultado: GrupoDuplicata[] = [];
+      mapa.forEach((itens, k) => {
+        if (itens.length <= 1) return;
+        const emUso = itens.filter(it => it.projetosUsando > 0);
+        const orfaos = itens.filter(it => it.projetosUsando === 0);
+        let paraManter: ItemComUso[];
+        let paraExcluir: ItemComUso[];
+        if (emUso.length > 0) {
+          paraManter = emUso;
+          paraExcluir = orfaos;
+        } else {
+          const ord = itens.slice().sort((a, b) => (a.codigo || 0) - (b.codigo || 0));
+          paraManter = [ord[0]];
+          paraExcluir = ord.slice(1);
+        }
+        if (paraExcluir.length > 0) {
+          resultado.push({ nomeNormalizado: k, paraManter, paraExcluir });
+        }
+      });
+
+      resultado.sort((a, b) => a.nomeNormalizado.localeCompare(b.nomeNormalizado));
+      setGrupos(resultado);
+    } catch (e: any) {
+      console.error(e);
+      alert(`Erro ao analisar duplicatas: ${e?.message || e}`);
+    } finally {
+      setAnalisando(false);
+    }
+  };
+
+  const baixarBackup = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'items'));
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const json = JSON.stringify({
+        exportadoEm: new Date().toISOString(),
+        total: data.length,
+        items: data
+      }, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.href = url;
+      a.download = `items-backup-${ts}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupBaixado(true);
+    } catch (e: any) {
+      alert(`Erro ao baixar backup: ${e?.message || e}`);
+    }
+  };
+
+  const executarExclusao = async () => {
+    const total = grupos.reduce((acc, g) => acc + g.paraExcluir.length, 0);
+    if (!backupBaixado) {
+      alert('Baixe o backup antes de excluir.');
+      return;
+    }
+    if (!confirm(`Excluir definitivamente ${total} item(s) duplicado(s)? Esta ação NÃO pode ser desfeita.`)) return;
+    if (!confirm('CONFIRMAÇÃO FINAL: a exclusão é permanente. Continuar?')) return;
+
+    setExcluindo(true);
+    try {
+      const idsExcluir = grupos.flatMap(g => g.paraExcluir.map(it => it.id));
+      // Firestore writeBatch suporta até 500 ops; particiona se preciso
+      for (let i = 0; i < idsExcluir.length; i += 400) {
+        const batch = writeBatch(db);
+        idsExcluir.slice(i, i + 400).forEach(id => {
+          batch.delete(doc(db, 'items', id));
+        });
+        await batch.commit();
+      }
+      setExcluidos(idsExcluir.length);
+      await carregarItens();
+    } catch (e: any) {
+      alert(`Erro ao excluir: ${e?.message || e}`);
+    } finally {
+      setExcluindo(false);
+    }
+  };
+
   if (loading) return <div className="p-6 text-lie-gray">Carregando banco de itens...</div>;
 
   return (
@@ -280,6 +428,18 @@ export default function ItensMasterPage() {
           </label>
 
 
+
+          {/* Limpar Duplicatas */}
+          <button
+            onClick={abrirLimpeza}
+            title="Limpar itens duplicados (mantém os em uso por projetos)"
+            className="group flex items-center bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 transition-all duration-300 hover:bg-red-100 shadow-sm"
+          >
+            <Wand2 className="w-5 h-5 shrink-0 text-red-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Limpar Duplicatas
+            </span>
+          </button>
 
           {/* New Item Button */}
           <button onClick={openNew} className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm">
@@ -415,6 +575,148 @@ export default function ItensMasterPage() {
           <div className="p-12 text-center text-lie-gray italic">Nenhum item encontrado.</div>
         )}
       </div>
+
+      {/* ===== MODAL DE LIMPEZA DE DUPLICATAS ===== */}
+      {limpezaOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-zoom-in">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-500 rounded-lg">
+                  <Wand2 className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Limpar Itens Duplicados</h3>
+                  <p className="text-xs text-gray-300">
+                    {analisando ? 'Analisando banco de itens e cruzando com projetos…' :
+                     excluidos !== null ? `Concluído: ${excluidos} item(s) excluído(s).` :
+                     grupos.length === 0 ? 'Nenhum grupo de duplicatas encontrado.' :
+                     `${grupos.length} grupo(s) de duplicatas — ${grupos.reduce((a, g) => a + g.paraExcluir.length, 0)} item(s) serão excluídos.`}
+                  </p>
+                </div>
+              </div>
+              {!analisando && !excluindo && (
+                <button onClick={() => setLimpezaOpen(false)} className="hover:bg-white/10 p-2 rounded-full">
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {analisando && (
+                <div className="flex flex-col items-center py-10 text-gray-500">
+                  <Loader2 className="w-8 h-8 animate-spin text-red-500 mb-3" />
+                  <p className="text-sm">Carregando masters e percorrendo projetos…</p>
+                </div>
+              )}
+
+              {!analisando && excluidos === null && grupos.length === 0 && (
+                <div className="p-6 text-center text-green-700 bg-green-50 border border-green-200 rounded-xl">
+                  <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-600" />
+                  <p className="font-bold">Banco está limpo!</p>
+                  <p className="text-xs mt-1">Nenhum grupo de itens com mesmo nome foi encontrado.</p>
+                </div>
+              )}
+
+              {!analisando && excluidos === null && grupos.length > 0 && (
+                <>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 flex gap-2 leading-relaxed">
+                    <ShieldAlert className="w-5 h-5 shrink-0 text-amber-600" />
+                    <div>
+                      <strong>Regra aplicada:</strong> itens com mesmo nome (normalizado) são considerados
+                      duplicatas. Pra cada grupo:
+                      <ul className="list-disc ml-5 mt-1 space-y-0.5">
+                        <li>Se houver pelo menos 1 em uso por projetos → mantém todos os em uso, exclui órfãos.</li>
+                        <li>Se nenhum estiver em uso → mantém o de menor código, exclui o resto.</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
+                    {grupos.map((g) => (
+                      <div key={g.nomeNormalizado} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                        <div className="font-bold text-sm text-lie-ink mb-2">{g.nomeNormalizado}</div>
+                        <div className="space-y-1">
+                          {g.paraManter.map(it => (
+                            <div key={it.id} className="flex items-center gap-2 text-xs bg-green-50 border border-green-200 rounded px-2 py-1.5">
+                              <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                              <span className="font-mono text-gray-500">#{String(it.codigo || 0).padStart(3, '0')}</span>
+                              <span className="flex-1 truncate">{it.nome} · {it.unidade}</span>
+                              <span className="text-[10px] font-bold uppercase text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
+                                {it.projetosUsando > 0 ? `Em uso (${it.projetosUsando})` : 'Mantido (menor #)'}
+                              </span>
+                            </div>
+                          ))}
+                          {g.paraExcluir.map(it => (
+                            <div key={it.id} className="flex items-center gap-2 text-xs bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                              <Trash2 className="w-4 h-4 text-red-600 shrink-0" />
+                              <span className="font-mono text-gray-500">#{String(it.codigo || 0).padStart(3, '0')}</span>
+                              <span className="flex-1 truncate">{it.nome} · {it.unidade}</span>
+                              <span className="text-[10px] font-bold uppercase text-red-700 bg-red-100 px-1.5 py-0.5 rounded">
+                                Excluir
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {excluidos !== null && (
+                <div className="p-6 text-center text-green-700 bg-green-50 border border-green-200 rounded-xl">
+                  <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-600" />
+                  <p className="font-bold">{excluidos} item(s) excluído(s) com sucesso!</p>
+                  <p className="text-xs mt-1">O backup JSON foi baixado antes da exclusão.</p>
+                </div>
+              )}
+            </div>
+
+            {!analisando && excluidos === null && grupos.length > 0 && (
+              <div className="p-4 bg-gray-50 border-t flex flex-wrap gap-3 items-center justify-between">
+                <button
+                  onClick={baixarBackup}
+                  className={`flex items-center gap-2 px-4 py-2 font-bold rounded-lg transition ${
+                    backupBaixado ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-amber-500 text-white hover:bg-amber-600'
+                  }`}
+                >
+                  {backupBaixado ? <CheckCircle2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+                  {backupBaixado ? 'Backup baixado' : 'Baixar backup JSON'}
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setLimpezaOpen(false)}
+                    className="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={executarExclusao}
+                    disabled={!backupBaixado || excluindo}
+                    className="flex items-center gap-2 px-5 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {excluindo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    {excluindo ? 'Excluindo…' : `Excluir ${grupos.reduce((a, g) => a + g.paraExcluir.length, 0)} item(s)`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(analisando || excluindo || excluidos !== null) && (
+              <div className="p-4 bg-gray-50 border-t flex justify-end">
+                <button
+                  onClick={() => setLimpezaOpen(false)}
+                  disabled={analisando || excluindo}
+                  className="px-5 py-2 bg-lie-green text-white font-bold rounded-lg hover:bg-lie-greenDark disabled:opacity-50"
+                >
+                  Fechar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
