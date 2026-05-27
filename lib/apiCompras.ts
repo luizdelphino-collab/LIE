@@ -23,6 +23,13 @@ export interface GovernmentMaterial {
   descricaoItem: string;
   categoria: string;
   unidade: string;
+  /**
+   * true quando o código foi GERADO sinteticamente (hash) por não haver
+   * match no catálogo CATMAT local. Esses códigos NÃO existem na API
+   * governamental e qualquer cotação retornada com eles é coincidência
+   * de colisão de hash com outros produtos — não use pra pesquisa real.
+   */
+  sintetico?: boolean;
 }
 
 // Banco Semente Local de Materiais Esportivos do CATMAT (Grupo 78 e correlatos)
@@ -146,23 +153,25 @@ export function buscarMateriaisLocal(termo: string): GovernmentMaterial[] {
     return nomeClean.includes(queryClean) || descClean.includes(queryClean);
   });
 
-  // Se não houver correspondência local (por exemplo, "ônibus", "serviço"), geramos um registro CATMAT dinâmico sob demanda!
-  // Isso impede que o usuário fique travado e permite cotar qualquer tipo de material ou serviço
+  // Se não houver correspondência local, gera um registro SINTÉTICO marcado.
+  // O código é apenas placeholder — NÃO deve ser usado pra consultar a API
+  // governamental, porque NÃO existe nesse catálogo. Cotações retornadas com
+  // ele seriam de produtos aleatórios via colisão de hash (risco de fraude).
   if (filtrados.length === 0 && termo.trim().length >= 2) {
     const termUpper = termo.toUpperCase().trim();
-    // Gerar um código numérico único e persistente baseado no hash do termo
     let hash = 0;
     for (let i = 0; i < termUpper.length; i++) {
       hash = termUpper.charCodeAt(i) + ((hash << 5) - hash);
     }
-    const codigoItem = 500000 + Math.abs(hash) % 400000; // Códigos na faixa de 500.000 a 900.000
+    const codigoItem = 500000 + Math.abs(hash) % 400000;
 
     return [{
       codigoItem,
       nome: termUpper,
-      descricaoItem: `ESPECIFICAÇÃO COMPLEMENTAR REGISTRADA SOB DEMANDA: ${termUpper}`,
+      descricaoItem: `ITEM SEM CATMAT/CATSER OFICIAL CADASTRADO: ${termUpper}`,
       categoria: "Item do Projeto",
-      unidade: "unidade"
+      unidade: "unidade",
+      sintetico: true
     }];
   }
 

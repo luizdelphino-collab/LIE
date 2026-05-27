@@ -798,12 +798,14 @@ export default function ProjetoItensPage() {
                       key={idx}
                       className={`flex items-start gap-2 p-2.5 rounded-lg border text-xs ${
                         r.status === 'ok' ? 'bg-green-50 border-green-200' :
+                        r.status === 'sem-catmat-real' ? 'bg-orange-50 border-orange-200' :
                         r.status === 'sem-match' ? 'bg-gray-50 border-gray-200' :
                         r.status === 'sem-refs' ? 'bg-amber-50 border-amber-200' :
                         'bg-red-50 border-red-200'
                       }`}
                     >
                       {r.status === 'ok' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
+                      {r.status === 'sem-catmat-real' && <AlertCircle className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />}
                       {r.status === 'sem-match' && <AlertCircle className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />}
                       {r.status === 'sem-refs' && <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />}
                       {r.status === 'erro' && <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}

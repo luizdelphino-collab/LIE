@@ -5,7 +5,7 @@ import { storage, db } from './firebase';
 import { buscarMateriaisLocal, consultarPrecosPraticados } from './apiCompras';
 import type { ItemProjeto, PrecoReferencia } from '../types';
 
-export type AutoPesquisaStatus = 'ok' | 'sem-match' | 'sem-refs' | 'erro';
+export type AutoPesquisaStatus = 'ok' | 'sem-match' | 'sem-catmat-real' | 'sem-refs' | 'erro';
 
 export interface AutoPesquisaResult {
   itemId: string;
@@ -303,7 +303,22 @@ export async function pesquisarItemAutomatico(
       return { itemId: item.id, itemNome: item.nome, status: 'sem-match', reason: 'Nenhum material correspondente no catálogo CATMAT/CATSER.' };
     }
     const mat = matches[0];
-    console.info(`[pesquisa] '${item.nome}' match: ${mat.codigoItem} (${mat.nome})`);
+    console.info(`[pesquisa] '${item.nome}' match: ${mat.codigoItem} (${mat.nome})${mat.sintetico ? ' [SINTÉTICO]' : ''}`);
+
+    // BLOQUEIO DE SEGURANÇA: códigos sintéticos (gerados por hash quando
+    // não há match real no catálogo) NÃO devem ser usados pra consultar
+    // a API governamental — colidem aleatoriamente com CATMATs reais de
+    // outros produtos e geram cotações irrelevantes/enganosas no laudo.
+    if (mat.sintetico) {
+      console.warn(`[pesquisa] '${item.nome}' BLOQUEADO: código ${mat.codigoItem} é sintético (sem CATMAT real)`);
+      await limparPesquisaItem(item);
+      return {
+        itemId: item.id,
+        itemNome: item.nome,
+        status: 'sem-catmat-real',
+        reason: 'Item não possui CATMAT/CATSER oficial cadastrado no catálogo. Use a aba "Registro Manual" pra anexar uma cotação de fomento.'
+      };
+    }
 
     const precos = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario, item.nome);
     console.info(`[pesquisa] '${item.nome}' API retornou ${precos.length} cotação(ões) brutas`);
