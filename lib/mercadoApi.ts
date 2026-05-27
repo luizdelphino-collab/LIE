@@ -17,7 +17,14 @@ export interface CotacaoMercado {
   dataHomologacao: string;
   modalidade: string;
   valorUnitario: number;
-  unidadeMedida: string;
+  // Unidades — essencial pra comparação correta
+  unidadeFornecimento: string;        // "GARRAFA", "CAIXA", etc.
+  siglaUnidadeFornecimento: string;   // "GRF", "CX"
+  capacidadeUnidadeFornecimento: number; // 500 = "garrafa de 500ml"
+  siglaUnidadeMedida: string;         // "ML", "G", "L", "UN"
+  marca: string;
+  precoPorUnidadeBase: number;        // R$/ml ou R$/g (quando capacidade conhecida)
+  // ---
   descricaoItem: string;
   linkPncp: string;
 }
@@ -29,11 +36,22 @@ export interface EstatisticasMercado {
   mediano: number;
 }
 
+export interface EstatisticasPorUnidade {
+  unidade: string;
+  siglaMedida: string;
+  capacidade: number;
+  totalCotacoes: number;
+  estatisticas: EstatisticasMercado;
+  precoPorUnidadeBaseMediano: number;
+}
+
 export interface MercadoResposta {
   codigoCatmat: number;
   tipo: 'material' | 'servico';
   totalCotacoes: number;
   estatisticas: EstatisticasMercado;
+  porUnidade?: EstatisticasPorUnidade[];
+  unidadeDominante?: EstatisticasPorUnidade | null;
   cotacoes: CotacaoMercado[];
   fonteCache: 'firestore' | 'api-fresh';
   atualizadoEm: string;

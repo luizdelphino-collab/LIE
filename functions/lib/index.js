@@ -639,6 +639,10 @@ exports.coletarMercadoItem = functions
             else if (r.uasg) {
                 link = `https://pncp.gov.br/app/contratacoes?q=${r.uasg}`;
             }
+            const capacidade = Number(r.capacidadeUnidadeFornecimento) || 0;
+            const siglaMedida = String(r.siglaUnidadeMedida || r.unidadeMedida || '').trim().toUpperCase();
+            // preço por unidade base: se garrafa de 500ml custa R$ 1,15 → R$ 0,0023/ml
+            const precoPorUnidadeBase = capacidade > 0 ? valor / capacidade : 0;
             cotacoes.push({
                 fonte,
                 orgao: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || 'ÓRGÃO PÚBLICO',
@@ -648,34 +652,81 @@ exports.coletarMercadoItem = functions
                 dataHomologacao: String(r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || ''),
                 modalidade: String(r.nomeModalidadeCompra || r.modalidade || ''),
                 valorUnitario: valor,
-                unidadeMedida: String(r.unidadeMedida || r.siglaUnidadeMedida || ''),
+                unidadeFornecimento: String(r.nomeUnidadeFornecimento || '').trim().toUpperCase(),
+                siglaUnidadeFornecimento: String(r.siglaUnidadeFornecimento || '').trim().toUpperCase(),
+                capacidadeUnidadeFornecimento: capacidade,
+                siglaUnidadeMedida: siglaMedida,
+                marca: String(r.marca || '').trim(),
+                precoPorUnidadeBase,
                 descricaoItem: String(r.descricaoItem || r.descricao || ''),
                 linkPncp: link
             });
         }
     }
-    // Estatísticas
-    const valores = cotacoes.map(c => c.valorUnitario).sort((a, b) => a - b);
-    const n = valores.length;
-    const estatisticas = n === 0
-        ? { minimo: 0, maximo: 0, medio: 0, mediano: 0 }
-        : {
-            minimo: valores[0],
-            maximo: valores[n - 1],
-            medio: Math.round((valores.reduce((a, b) => a + b, 0) / n) * 100) / 100,
-            mediano: n % 2 === 0
-                ? Math.round(((valores[n / 2 - 1] + valores[n / 2]) / 2) * 100) / 100
-                : valores[Math.floor(n / 2)]
+    // === Estatísticas agregadas (todas as cotações) ===
+    const calcularStats = (valores) => {
+        const ord = [...valores].sort((a, b) => a - b);
+        const k = ord.length;
+        if (k === 0)
+            return { minimo: 0, maximo: 0, medio: 0, mediano: 0 };
+        return {
+            minimo: ord[0],
+            maximo: ord[k - 1],
+            medio: Math.round((ord.reduce((a, b) => a + b, 0) / k) * 100) / 100,
+            mediano: k % 2 === 0
+                ? Math.round(((ord[k / 2 - 1] + ord[k / 2]) / 2) * 100) / 100
+                : ord[Math.floor(k / 2)]
         };
+    };
+    const valores = cotacoes.map(c => c.valorUnitario);
+    const n = valores.length;
+    const estatisticas = calcularStats(valores);
+    // === Estatísticas POR UNIDADE DE FORNECIMENTO ===
+    // Permite ao usuário comparar com a unidade certa quando há mistura
+    // (ex: 12 cotações em GARRAFA 500ML + 3 em COPO 200ML).
+    const porUnidade = {};
+    for (const c of cotacoes) {
+        // Chave: unidade + capacidade + sigla (ex: "GARRAFA-500-ML")
+        const chave = `${c.unidadeFornecimento || 'N/A'}-${c.capacidadeUnidadeFornecimento || 0}-${c.siglaUnidadeMedida || ''}`;
+        if (!porUnidade[chave]) {
+            porUnidade[chave] = {
+                unidade: c.unidadeFornecimento || 'NÃO INFORMADO',
+                siglaMedida: c.siglaUnidadeMedida || '',
+                capacidade: c.capacidadeUnidadeFornecimento || 0,
+                totalCotacoes: 0,
+                estatisticas: { minimo: 0, maximo: 0, medio: 0, mediano: 0 },
+                precoPorUnidadeBaseMediano: 0
+            };
+        }
+    }
+    // Calcula estatísticas por unidade
+    for (const chave of Object.keys(porUnidade)) {
+        const cots = cotacoes.filter(c => `${c.unidadeFornecimento || 'N/A'}-${c.capacidadeUnidadeFornecimento || 0}-${c.siglaUnidadeMedida || ''}` === chave);
+        porUnidade[chave].totalCotacoes = cots.length;
+        porUnidade[chave].estatisticas = calcularStats(cots.map(c => c.valorUnitario));
+        const precosBase = cots.map(c => c.precoPorUnidadeBase).filter(p => p > 0);
+        if (precosBase.length > 0) {
+            const ord = precosBase.sort((a, b) => a - b);
+            const k = ord.length;
+            porUnidade[chave].precoPorUnidadeBaseMediano = k % 2 === 0
+                ? (ord[k / 2 - 1] + ord[k / 2]) / 2
+                : ord[Math.floor(k / 2)];
+        }
+    }
     // Trunca a 50 cotações pra cache leve (ordenadas por data DESC se houver)
     const cotacoesTopo = cotacoes
         .sort((a, b) => (b.dataHomologacao || '').localeCompare(a.dataHomologacao || ''))
         .slice(0, 50);
+    // Unidade dominante (mais cotações) — usada no resumo da coluna
+    const unidadesOrdenadas = Object.values(porUnidade).sort((a, b) => b.totalCotacoes - a.totalCotacoes);
+    const unidadeDominante = unidadesOrdenadas[0] || null;
     const payload = {
         codigoCatmat: Number(codigoCatmat),
         tipo: isServico ? 'servico' : 'material',
         totalCotacoes: n,
         estatisticas,
+        porUnidade: unidadesOrdenadas,
+        unidadeDominante,
         cotacoes: cotacoesTopo,
         atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
     };

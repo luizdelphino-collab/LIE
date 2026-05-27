@@ -743,21 +743,37 @@ export default function ItensMasterPage() {
                       const diff = ((it.valorUnitario - dados.estatisticas.mediano) / dados.estatisticas.mediano) * 100;
                       const cor = diff > 20 ? 'text-red-600' : diff < -20 ? 'text-amber-600' : 'text-green-600';
                       const seta = diff > 5 ? '↑' : diff < -5 ? '↓' : '≈';
+                      // Detecta divergência de unidade (item em 'caixa', cotações em 'garrafa/copo')
+                      const unidadeItem = (it.unidade || '').toLowerCase();
+                      const unidadeGov = dados.unidadeDominante?.unidade?.toLowerCase() || '';
+                      const divergeUnidade = unidadeGov && unidadeItem && !unidadeGov.includes(unidadeItem.split(/[\s,]/)[0]) && !unidadeItem.includes(unidadeGov.split(/[\s,]/)[0]);
+                      const unidadeLabel = dados.unidadeDominante
+                        ? `/${dados.unidadeDominante.unidade.toLowerCase()}${dados.unidadeDominante.capacidade ? ` ${dados.unidadeDominante.capacidade}${dados.unidadeDominante.siglaMedida.toLowerCase()}` : ''}`
+                        : '';
                       return (
                         <button
                           onClick={(e) => { e.stopPropagation(); setMercadoDetalhe({ item: it, dados }); }}
-                          className="group inline-flex flex-col items-end gap-0 hover:bg-blue-50 px-2 py-1 rounded transition"
-                          title="Clique pra ver cotações detalhadas"
+                          className={`group inline-flex flex-col items-end gap-0 hover:bg-blue-50 px-2 py-1 rounded transition ${divergeUnidade ? 'ring-1 ring-amber-300' : ''}`}
+                          title={divergeUnidade
+                            ? `⚠ Unidades diferentes: seu item é "${it.unidade}", cotações são "${dados.unidadeDominante?.unidade}". Clique pra detalhes.`
+                            : 'Clique pra ver cotações detalhadas'}
                         >
-                          <span className="font-bold text-blue-700">
+                          <span className="font-bold text-blue-700 flex items-baseline gap-1">
                             {dados.estatisticas.mediano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            {unidadeLabel && <span className="text-[9px] text-gray-500 font-normal">{unidadeLabel}</span>}
                           </span>
                           <span className="text-[9px] text-gray-500 font-medium uppercase tracking-wider">
                             {dados.totalCotacoes} cotaç{dados.totalCotacoes === 1 ? 'ão' : 'ões'}
                           </span>
-                          <span className={`text-[9px] font-bold ${cor}`}>
-                            {seta} {Math.abs(diff).toFixed(0)}% vs nosso
-                          </span>
+                          {divergeUnidade ? (
+                            <span className="text-[9px] font-bold text-amber-700 flex items-center gap-0.5">
+                              ⚠ unidade difere
+                            </span>
+                          ) : (
+                            <span className={`text-[9px] font-bold ${cor}`}>
+                              {seta} {Math.abs(diff).toFixed(0)}% vs nosso
+                            </span>
+                          )}
                         </button>
                       );
                     }
