@@ -264,15 +264,15 @@ export default function ProjetoItensPage() {
         unidade: selectedMaster.unidade,
         valorUnitario: selectedMaster.valorUnitario,
         valorTotal,
-        // Propaga CATMAT/CATSER oficial do master pra pesquisa automática
-        codigoCatmat: selectedMaster.codigoCatmat,
-        tipoCatmat: selectedMaster.tipoCatmat,
-        nomeCatmatOficial: selectedMaster.nomeCatmatOficial,
-        descricaoCatmatOficial: selectedMaster.descricaoCatmatOficial,
+        // Propaga CATMAT/CATSER oficial do master (Firestore nao aceita undefined)
+        ...(selectedMaster.codigoCatmat && { codigoCatmat: selectedMaster.codigoCatmat }),
+        ...(selectedMaster.tipoCatmat && { tipoCatmat: selectedMaster.tipoCatmat }),
+        ...(selectedMaster.nomeCatmatOficial && { nomeCatmatOficial: selectedMaster.nomeCatmatOficial }),
+        ...(selectedMaster.descricaoCatmatOficial && { descricaoCatmatOficial: selectedMaster.descricaoCatmatOficial }),
         // Conversor de unidade
-        fatorConversao: selectedMaster.fatorConversao,
-        unidadeBase: selectedMaster.unidadeBase,
-        embalagemDescricao: selectedMaster.embalagemDescricao,
+        ...(selectedMaster.fatorConversao && { fatorConversao: selectedMaster.fatorConversao }),
+        ...(selectedMaster.unidadeBase && { unidadeBase: selectedMaster.unidadeBase }),
+        ...(selectedMaster.embalagemDescricao && { embalagemDescricao: selectedMaster.embalagemDescricao }),
         criadoEm: formData.criadoEm || serverTimestamp() as Timestamp
       };
 
@@ -311,11 +311,15 @@ export default function ProjetoItensPage() {
           memorialCalculo: data.memorialCalculo,
           quantidade: data.quantidade,
           valorTotal,
-          // Propaga CATMAT/CATSER oficial do master pra pesquisa automática
-          codigoCatmat: m.codigoCatmat,
-          tipoCatmat: m.tipoCatmat,
-          nomeCatmatOficial: m.nomeCatmatOficial,
-          descricaoCatmatOficial: m.descricaoCatmatOficial,
+          // Propaga CATMAT/CATSER oficial do master (Firestore nao aceita undefined)
+          ...(m.codigoCatmat && { codigoCatmat: m.codigoCatmat }),
+          ...(m.tipoCatmat && { tipoCatmat: m.tipoCatmat }),
+          ...(m.nomeCatmatOficial && { nomeCatmatOficial: m.nomeCatmatOficial }),
+          ...(m.descricaoCatmatOficial && { descricaoCatmatOficial: m.descricaoCatmatOficial }),
+          // Conversor de unidade
+          ...(m.fatorConversao && { fatorConversao: m.fatorConversao }),
+          ...(m.unidadeBase && { unidadeBase: m.unidadeBase }),
+          ...(m.embalagemDescricao && { embalagemDescricao: m.embalagemDescricao }),
           criadoEm: serverTimestamp() as Timestamp
         };
 
