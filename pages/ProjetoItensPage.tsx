@@ -332,6 +332,9 @@ export default function ProjetoItensPage() {
     setFormData({ ...ip });
     setShowItemPicker(false);
     setIsFormOpen(true);
+    // Scroll to top pra o form ficar visivel (sem isso parece que clicar
+    // no editar nao faz nada quando o user ja esta scrollado na lista)
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
   const toggleMasterSelection = (it: ItemMaster) => {
@@ -361,38 +364,48 @@ export default function ProjetoItensPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !selectedMaster) return;
+    if (!id) return;
+    // Em edicao, selectedMaster pode estar nulo se o master foi deletado
+    // do Banco depois. Nesse caso, usa o formData (que tem snapshot dos
+    // campos copiados no momento da vinculacao). Em criacao, requer master.
+    if (!editId && !selectedMaster) {
+      alert('Selecione um item do Banco antes de vincular.');
+      return;
+    }
     setSaving(true);
     try {
       const docId = editId || doc(collection(db, `projects/${id}/items`)).id;
-      const valorTotal = (selectedMaster.valorUnitario || 0) * (formData.quantidade || 0);
+      // Fonte dos campos do master: preferimos selectedMaster (master atual),
+      // fallback pra formData (snapshot do momento da vinculacao)
+      const fonteCampos = selectedMaster || (formData as ItemProjeto);
+      const valorTotal = (fonteCampos.valorUnitario || 0) * (formData.quantidade || 0);
 
       const payload: Partial<ItemProjeto> = {
         ...formData,
         id: docId,
         projectId: id,
-        itemId: selectedMaster.id,
-        nome: selectedMaster.nome,
-        descricao: selectedMaster.descricao || '',
-        unidade: selectedMaster.unidade,
-        valorUnitario: selectedMaster.valorUnitario,
+        itemId: (selectedMaster?.id) || formData.itemId || docId,
+        nome: fonteCampos.nome || formData.nome || '',
+        descricao: fonteCampos.descricao || '',
+        unidade: fonteCampos.unidade || formData.unidade || 'unidade',
+        valorUnitario: fonteCampos.valorUnitario,
         valorTotal,
-        // Propaga CATMAT/CATSER oficial do master (Firestore nao aceita undefined)
-        ...(selectedMaster.codigoCatmat && { codigoCatmat: selectedMaster.codigoCatmat }),
-        ...(selectedMaster.tipoCatmat && { tipoCatmat: selectedMaster.tipoCatmat }),
-        ...(selectedMaster.nomeCatmatOficial && { nomeCatmatOficial: selectedMaster.nomeCatmatOficial }),
-        ...(selectedMaster.descricaoCatmatOficial && { descricaoCatmatOficial: selectedMaster.descricaoCatmatOficial }),
+        // Propaga CATMAT/CATSER oficial (Firestore nao aceita undefined)
+        ...(fonteCampos.codigoCatmat && { codigoCatmat: fonteCampos.codigoCatmat }),
+        ...(fonteCampos.tipoCatmat && { tipoCatmat: fonteCampos.tipoCatmat }),
+        ...(fonteCampos.nomeCatmatOficial && { nomeCatmatOficial: fonteCampos.nomeCatmatOficial }),
+        ...(fonteCampos.descricaoCatmatOficial && { descricaoCatmatOficial: fonteCampos.descricaoCatmatOficial }),
         // Conversor de unidade
-        ...(selectedMaster.fatorConversao && { fatorConversao: selectedMaster.fatorConversao }),
-        ...(selectedMaster.unidadeBase && { unidadeBase: selectedMaster.unidadeBase }),
-        ...(selectedMaster.embalagemDescricao && { embalagemDescricao: selectedMaster.embalagemDescricao }),
+        ...(fonteCampos.fatorConversao && { fatorConversao: fonteCampos.fatorConversao }),
+        ...(fonteCampos.unidadeBase && { unidadeBase: fonteCampos.unidadeBase }),
+        ...(fonteCampos.embalagemDescricao && { embalagemDescricao: fonteCampos.embalagemDescricao }),
         // Rota legal alternativa (3 orcamentos com fornecedores)
-        ...(selectedMaster.semCorrespondenciaCatalogo && { semCorrespondenciaCatalogo: true }),
+        ...(fonteCampos.semCorrespondenciaCatalogo && { semCorrespondenciaCatalogo: true }),
         criadoEm: formData.criadoEm || serverTimestamp() as Timestamp
       };
 
       await setDoc(doc(db, `projects/${id}/items`, docId), payload as any, { merge: true });
-      
+
       setIsFormOpen(false);
       carregarDados();
     } catch (e) {
