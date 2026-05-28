@@ -8,21 +8,73 @@ interface Props {
   dados: MercadoResposta;
   onClose: () => void;
   onAtualizar: (novo: MercadoResposta) => void;
-  /** Chamado quando o user adota uma embalagem oficial do mercado como unidade do item */
-  onAdotarEmbalagem?: (emb: EstatisticasPorUnidade) => Promise<void>;
+  /**
+   * Chamado quando o user adota uma embalagem oficial do mercado.
+   * razao = quantas embalagens do mercado cabem em 1 unidade atual do item.
+   * Quando undefined ou 1, o callback NÃO deve dividir valorUnitario.
+   */
+  onAdotarEmbalagem?: (emb: EstatisticasPorUnidade, razao?: number) => Promise<void>;
+}
+
+function extrairRazaoDoNome(nome: string): number | null {
+  const padroes = [
+    /(\d+)\s*(?:un|unidades|copos|garrafas|pacotes|sachês?|saches?|frascos?)/i,
+    /(?:caixa|cx|pacote|kit|fardo|cartela)\s*(?:com\s+|c\/\s*)?(\d+)/i,
+    /(?:com\s+|c\/\s*)(\d+)\s*(?:un|unidades|copos|garrafas|pacotes)/i,
+    /(\d+)\s*[x×]\s*\d/i,
+  ];
+  for (const p of padroes) {
+    const m = nome.match(p);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > 0 && n < 10000) return n;
+    }
+  }
+  return null;
 }
 
 export default function MercadoDetalheModal({ item, dados, onClose, onAtualizar, onAdotarEmbalagem }: Props) {
   const [atualizando, setAtualizando] = useState(false);
-  const [adotando, setAdotando] = useState<string | null>(null); // key da unidade sendo adotada
+  const [adotando, setAdotando] = useState<string | null>(null);
   const [dadosAtuais, setDadosAtuais] = useState(dados);
+  // Estado do prompt de razão — armazena a embalagem aguardando confirmação
+  const [embPendingRazao, setEmbPendingRazao] = useState<EstatisticasPorUnidade | null>(null);
+  const [razaoInput, setRazaoInput] = useState<string>('');
 
   const handleAdotar = async (emb: EstatisticasPorUnidade) => {
     if (!onAdotarEmbalagem) return;
-    const key = `${emb.unidade}-${emb.capacidade}`;
+    const unidadeAtualNorm = (item.unidade || '').toLowerCase();
+    const embUnidadeNorm = emb.unidade.toLowerCase();
+    // Se a unidade do item já bate com a embalagem do mercado, aplica direto (razão = 1)
+    if (unidadeAtualNorm === embUnidadeNorm) {
+      const key = `${emb.unidade}-${emb.capacidade}`;
+      setAdotando(key);
+      try {
+        await onAdotarEmbalagem(emb, 1);
+      } finally {
+        setAdotando(null);
+      }
+      return;
+    }
+    // Unidades diferentes — abre prompt de razão pra dividir o preço proporcionalmente
+    const razaoSugerida = extrairRazaoDoNome(item.nome || '') || extrairRazaoDoNome(item.embalagemDescricao || '');
+    setRazaoInput(razaoSugerida ? String(razaoSugerida) : '');
+    setEmbPendingRazao(emb);
+  };
+
+  const confirmarAdocaoComRazao = async () => {
+    if (!embPendingRazao || !onAdotarEmbalagem) return;
+    const razao = parseInt(razaoInput, 10);
+    if (isNaN(razao) || razao <= 0) {
+      alert('Informe um número válido (ex: 48 para "caixa com 48 copos")');
+      return;
+    }
+    const key = `${embPendingRazao.unidade}-${embPendingRazao.capacidade}`;
     setAdotando(key);
     try {
-      await onAdotarEmbalagem(emb);
+      await onAdotarEmbalagem(embPendingRazao, razao);
+      setEmbPendingRazao(null);
+      setRazaoInput('');
     } finally {
       setAdotando(null);
     }
@@ -278,65 +330,118 @@ export default function MercadoDetalheModal({ item, dados, onClose, onAtualizar,
                   const key = `${u.unidade}-${u.capacidade}`;
                   const jaEhAtual = item.unidade?.toLowerCase() === u.unidade.toLowerCase()
                     && (item.fatorConversao || 0) === u.capacidade;
+                  const estaAguardandoRazao = embPendingRazao
+                    && embPendingRazao.unidade === u.unidade
+                    && embPendingRazao.capacidade === u.capacidade;
                   return (
-                    <div key={idx} className="p-2.5 flex items-center gap-3 text-xs hover:bg-blue-50/30 transition">
-                      <Package className="w-4 h-4 text-blue-600 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold text-gray-800">
-                          {u.unidade}
-                          {u.capacidade > 0 && (
-                            <span className="text-blue-700 font-normal ml-1">
-                              {u.capacidade} {u.siglaMedida.toLowerCase()}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-gray-500">{u.totalCotacoes} cotação(ões)</div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="font-bold text-blue-700">{fmt(u.estatisticas.mediano)}</div>
-                        <div className="text-[10px] text-gray-500">
-                          {fmt(u.estatisticas.minimo)} – {fmt(u.estatisticas.maximo)}
-                        </div>
-                      </div>
-                      {u.precoPorUnidadeBaseMediano > 0 && (
-                        <div className="text-right pl-3 border-l border-gray-200 shrink-0">
-                          <div className="font-mono text-[11px] font-bold text-green-700">
-                            R$ {u.precoPorUnidadeBaseMediano.toFixed(4)}
+                    <div key={idx}>
+                      <div className="p-2.5 flex items-center gap-3 text-xs hover:bg-blue-50/30 transition">
+                        <Package className="w-4 h-4 text-blue-600 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-gray-800">
+                            {u.unidade}
+                            {u.capacidade > 0 && (
+                              <span className="text-blue-700 font-normal ml-1">
+                                {u.capacidade} {u.siglaMedida.toLowerCase()}
+                              </span>
+                            )}
                           </div>
-                          <div className="text-[10px] text-gray-500">por {u.siglaMedida.toLowerCase()}</div>
+                          <div className="text-[10px] text-gray-500">{u.totalCotacoes} cotação(ões)</div>
                         </div>
-                      )}
-                      {onAdotarEmbalagem && (
-                        <button
-                          type="button"
-                          onClick={() => handleAdotar(u)}
-                          disabled={adotando !== null || jaEhAtual}
-                          className={`shrink-0 px-3 py-1.5 text-[10px] font-bold uppercase rounded transition flex items-center gap-1 ${
-                            jaEhAtual
-                              ? 'bg-green-100 text-green-700 cursor-default'
-                              : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm disabled:opacity-50'
-                          }`}
-                          title={jaEhAtual
-                            ? 'Essa já é a embalagem do seu item'
-                            : `Adotar ${u.unidade}${u.capacidade ? ' ' + u.capacidade + u.siglaMedida.toLowerCase() : ''} como unidade do item`}
-                        >
-                          {jaEhAtual ? (
-                            <>
-                              <CheckCircle2 className="w-3 h-3" />
-                              em uso
-                            </>
-                          ) : adotando === key ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              salvando…
-                            </>
-                          ) : (
-                            <>
-                              <Package className="w-3 h-3" />
-                              adotar
-                            </>
-                          )}
-                        </button>
+                        <div className="text-right shrink-0">
+                          <div className="font-bold text-blue-700">{fmt(u.estatisticas.mediano)}</div>
+                          <div className="text-[10px] text-gray-500">
+                            {fmt(u.estatisticas.minimo)} – {fmt(u.estatisticas.maximo)}
+                          </div>
+                        </div>
+                        {u.precoPorUnidadeBaseMediano > 0 && (
+                          <div className="text-right pl-3 border-l border-gray-200 shrink-0">
+                            <div className="font-mono text-[11px] font-bold text-green-700">
+                              R$ {u.precoPorUnidadeBaseMediano.toFixed(4)}
+                            </div>
+                            <div className="text-[10px] text-gray-500">por {u.siglaMedida.toLowerCase()}</div>
+                          </div>
+                        )}
+                        {onAdotarEmbalagem && (
+                          <button
+                            type="button"
+                            onClick={() => handleAdotar(u)}
+                            disabled={adotando !== null || jaEhAtual || !!embPendingRazao}
+                            className={`shrink-0 px-3 py-1.5 text-[10px] font-bold uppercase rounded transition flex items-center gap-1 ${
+                              jaEhAtual
+                                ? 'bg-green-100 text-green-700 cursor-default'
+                                : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm disabled:opacity-50'
+                            }`}
+                            title={jaEhAtual
+                              ? 'Essa já é a embalagem do seu item'
+                              : `Adotar ${u.unidade}${u.capacidade ? ' ' + u.capacidade + u.siglaMedida.toLowerCase() : ''} como unidade do item`}
+                          >
+                            {jaEhAtual ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3" />
+                                em uso
+                              </>
+                            ) : adotando === key ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                salvando…
+                              </>
+                            ) : (
+                              <>
+                                <Package className="w-3 h-3" />
+                                adotar
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Prompt de razão (aparece quando unidades diferem) */}
+                      {estaAguardandoRazao && (
+                        <div className="border-t border-blue-200 bg-blue-50/50 p-3 space-y-2">
+                          <div className="text-xs text-blue-900 leading-relaxed">
+                            Sua unidade atual é <strong>{item.unidade}</strong> com valor{' '}
+                            <strong>{fmt(item.valorUnitario)}</strong>. Pra adotar{' '}
+                            <strong>{u.unidade}{u.capacidade > 0 ? ` ${u.capacidade} ${u.siglaMedida.toLowerCase()}` : ''}</strong>{' '}
+                            e o sistema dividir o preço proporcionalmente, informe:
+                          </div>
+                          <div className="text-xs font-semibold text-blue-900">
+                            Quantos <strong>{u.unidade.toLowerCase()}{u.capacidade > 0 ? ` ${u.capacidade}${u.siglaMedida.toLowerCase()}` : ''}</strong>{' '}
+                            há em <strong>1 {item.unidade}</strong>?
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={razaoInput}
+                              onChange={e => setRazaoInput(e.target.value)}
+                              placeholder="ex: 48"
+                              className="w-24 px-2 py-1 border border-blue-300 rounded text-sm font-mono"
+                              autoFocus
+                            />
+                            <span className="text-[11px] text-gray-600 flex-1">
+                              {razaoInput && !isNaN(parseInt(razaoInput, 10)) && parseInt(razaoInput, 10) > 0 && (
+                                <>Novo preço: <strong className="text-green-700">{fmt(item.valorUnitario / parseInt(razaoInput, 10))}</strong>/{u.unidade.toLowerCase()}</>
+                              )}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => { setEmbPendingRazao(null); setRazaoInput(''); }}
+                              className="px-2 py-1 text-[11px] font-bold text-gray-600 hover:bg-gray-100 rounded"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={confirmarAdocaoComRazao}
+                              disabled={adotando !== null}
+                              className="px-3 py-1 text-[11px] font-bold bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {adotando === key ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Confirmar'}
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                   );

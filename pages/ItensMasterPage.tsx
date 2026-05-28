@@ -104,27 +104,53 @@ export default function ItensMasterPage() {
     setEmbalagensDisponiveis(null);
   };
 
-  // Adoção de embalagem direto pelo modal de detalhe de mercado (item ja salvo)
-  const handleAdotarEmbalagemModal = async (item: ItemMaster, emb: EstatisticasPorUnidade) => {
+  // Adoção de embalagem direto pelo modal de detalhe de mercado (item ja salvo).
+  // razao = quantas embalagens do mercado cabem em 1 unidade atual do item.
+  // Ex: caixa 48 copos -> razao=48, valorUnitario dividido por 48.
+  const handleAdotarEmbalagemModal = async (item: ItemMaster, emb: EstatisticasPorUnidade, razao?: number) => {
     const novaUnidade = emb.unidade.toLowerCase();
     const novaDescricao = emb.capacidade > 0
       ? `${emb.unidade.toLowerCase()} ${emb.capacidade}${emb.siglaMedida.toLowerCase()}`
       : emb.unidade.toLowerCase();
-    await setDoc(doc(db, 'items', item.id), {
+    const fator = razao && razao > 1 ? razao : 1;
+    const novoValor = item.valorUnitario / fator;
+
+    const updates: Record<string, unknown> = {
       unidade: novaUnidade,
       embalagemDescricao: novaDescricao,
       fatorConversao: emb.capacidade > 0 ? emb.capacidade : null,
       unidadeBase: emb.siglaMedida || null,
-    }, { merge: true });
+    };
+    if (fator > 1) {
+      updates.valorUnitario = Number(novoValor.toFixed(4));
+    }
+    await setDoc(doc(db, 'items', item.id), updates, { merge: true });
 
     // Atualiza estado local pra refletir imediatamente (sem recarregar tudo)
     setItems(prev => prev.map(it => it.id === item.id
-      ? { ...it, unidade: novaUnidade, embalagemDescricao: novaDescricao, fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined, unidadeBase: emb.siglaMedida || undefined }
+      ? {
+          ...it,
+          unidade: novaUnidade,
+          embalagemDescricao: novaDescricao,
+          fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined,
+          unidadeBase: emb.siglaMedida || undefined,
+          ...(fator > 1 ? { valorUnitario: Number(novoValor.toFixed(4)) } : {})
+        }
       : it));
 
     // Atualiza o item refletido no modal para que o badge "em uso" apareça
     setMercadoDetalhe(prev => prev && prev.item.id === item.id
-      ? { ...prev, item: { ...prev.item, unidade: novaUnidade, embalagemDescricao: novaDescricao, fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined, unidadeBase: emb.siglaMedida || undefined } }
+      ? {
+          ...prev,
+          item: {
+            ...prev.item,
+            unidade: novaUnidade,
+            embalagemDescricao: novaDescricao,
+            fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined,
+            unidadeBase: emb.siglaMedida || undefined,
+            ...(fator > 1 ? { valorUnitario: Number(novoValor.toFixed(4)) } : {})
+          }
+        }
       : prev);
   };
 
@@ -1228,7 +1254,7 @@ export default function ItensMasterPage() {
             setMercado(prev => ({ ...prev, [novo.codigoCatmat]: novo }));
             setMercadoDetalhe(prev => prev ? { ...prev, dados: novo } : null);
           }}
-          onAdotarEmbalagem={(emb) => handleAdotarEmbalagemModal(mercadoDetalhe.item, emb)}
+          onAdotarEmbalagem={(emb, razao) => handleAdotarEmbalagemModal(mercadoDetalhe.item, emb, razao)}
         />
       )}
 
