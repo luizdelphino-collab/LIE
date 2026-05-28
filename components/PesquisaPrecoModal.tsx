@@ -1615,48 +1615,104 @@ function gerarCertidaoCotaçãoPDF(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(71, 85, 105);
-  doc.text("FONTES CONSULTADAS", 15, y);
+  doc.text("FONTES CONSULTADAS NESTA PESQUISA", 15, y);
   y += 4;
 
-  // Mapeia r.fonte pra portal/URL exibida
-  const fontesUsadas: Array<{ label: string; url: string }> = [];
-  if (r.fonte === 'pncp' || r.fonte === 'pncp-contratacao' || r.fonte === 'pncp-ata') {
-    fontesUsadas.push({ label: 'Portal Nacional de Contratações Públicas (PNCP)', url: 'https://pncp.gov.br' });
-  }
-  if (r.fonte === 'compras.gov.br') {
-    fontesUsadas.push({ label: 'Compras.gov.br — Dados Abertos', url: 'https://dadosabertos.compras.gov.br' });
-  }
-  if (r.fonte === 'tce-pe') {
-    fontesUsadas.push({ label: 'TCE-PE — Tribunal de Contas de Pernambuco', url: 'https://sistemas.tce.pe.gov.br/DadosAbertos/' });
-  }
-  const fontesManuaisMap: Record<string, string> = {
-    'contrato-publico': 'Contrato público similar (anexado)',
-    'convenio': 'Convênio (anexado)',
-    'termo-fomento': 'Termo de Fomento (anexado)',
-    'fomento': 'Termo de Fomento (anexado)',
-    'tabela-preco': 'Tabela de Preços (anexada)',
-    'manual': 'Orçamento de Fornecedor (anexado)',
+  // Determina qual fonte trouxe ESTA cotacao especifica
+  const fonteOrigemDestaCotacao = (() => {
+    if (r.fonte === 'pncp' || r.fonte === 'pncp-contratacao') return 'PNCP — Contratações';
+    if (r.fonte === 'pncp-ata') return 'PNCP — Atas de Registro de Preço';
+    if (r.fonte === 'compras.gov.br') return 'Compras.gov.br — Preços Praticados';
+    if (r.fonte === 'tce-pe') return 'TCE-PE — Tribunal de Contas';
+    if (r.fonte === 'contrato-publico') return 'Contrato Público (anexado)';
+    if (r.fonte === 'convenio') return 'Convênio (anexado)';
+    if (r.fonte === 'termo-fomento' || r.fonte === 'fomento') return 'Termo de Fomento (anexado)';
+    if (r.fonte === 'tabela-preco') return 'Tabela de Preços (anexada)';
+    if (r.fonte === 'manual') return 'Orçamento de Fornecedor (anexado)';
+    return r.fonte;
+  })();
+
+  // Lista FIXA de TODOS os portais que o sistema consulta em paralelo
+  // (independente de qual deles retornou ESTA cotacao especifica)
+  type FonteCert = { label: string; url: string; origemDesta: boolean };
+  const fontes: FonteCert[] = [
+    {
+      label: 'Compras.gov.br — Dados Abertos (Preços Praticados)',
+      url: 'https://dadosabertos.compras.gov.br/modulo-pesquisa-preco/',
+      origemDesta: r.fonte === 'compras.gov.br',
+    },
+    {
+      label: 'PNCP — Contratações (Lei 14.133/21)',
+      url: 'https://dadosabertos.compras.gov.br/modulo-contratacoes/',
+      origemDesta: r.fonte === 'pncp' || r.fonte === 'pncp-contratacao',
+    },
+    {
+      label: 'PNCP — Atas de Registro de Preços (ARP)',
+      url: 'https://dadosabertos.compras.gov.br/modulo-arp/',
+      origemDesta: r.fonte === 'pncp-ata',
+    },
+    {
+      label: 'Portal Nacional de Contratações Públicas (PNCP)',
+      url: 'https://pncp.gov.br',
+      origemDesta: false, // portal de exibicao, nao retorna cotacoes — links pra contratacoes
+    },
+    {
+      label: 'TCE-PE — Tribunal de Contas (Dados Abertos)',
+      url: 'https://sistemas.tce.pe.gov.br/DadosAbertos/',
+      origemDesta: r.fonte === 'tce-pe',
+    },
+    {
+      label: 'Catálogo CATMAT/CATSER (Compras.gov.br)',
+      url: 'https://catalogo.compras.gov.br',
+      origemDesta: false, // usado pra validar catalogo, nao pra cotacao
+    },
+  ];
+
+  // Adiciona fontes manuais quando aplicavel (sempre origem desta cotacao)
+  const fontesManuaisLabel: Record<string, string> = {
+    'contrato-publico': 'Contrato público similar — documento anexado pela entidade',
+    'convenio': 'Convênio — documento anexado pela entidade',
+    'termo-fomento': 'Termo de Fomento — documento anexado pela entidade',
+    'fomento': 'Termo de Fomento — documento anexado pela entidade',
+    'tabela-preco': 'Tabela de Preços — documento anexado pela entidade',
+    'manual': 'Orçamento de Fornecedor — documento anexado pela entidade',
   };
-  if (fontesManuaisMap[r.fonte]) {
-    fontesUsadas.push({ label: fontesManuaisMap[r.fonte], url: r.localizacaoUrl || '' });
-  }
-  // CATMAT/CATSER sempre consultado quando ha codigoCatalogoItem
-  if (r.codigoCatalogoItem) {
-    fontesUsadas.push({ label: 'Catálogo CATMAT/CATSER (Compras.gov.br)', url: 'https://catalogo.compras.gov.br' });
+  if (fontesManuaisLabel[r.fonte]) {
+    fontes.push({
+      label: fontesManuaisLabel[r.fonte],
+      url: r.localizacaoUrl || '',
+      origemDesta: true,
+    });
   }
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.5);
-  doc.setTextColor(60, 60, 60);
-  fontesUsadas.forEach((f, idx) => {
-    doc.text(`${idx + 1}. ${f.label}`, 15, y);
-    if (f.url) {
-      doc.setTextColor(2, 132, 199);
-      doc.textWithLink(f.url.length > 75 ? f.url.substring(0, 72) + '…' : f.url, 105, y, { url: f.url });
+  fontes.forEach((f, idx) => {
+    // Numero + label
+    if (f.origemDesta) {
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(16, 185, 129); // verde = origem desta cotacao
+      doc.text(`▸ ${idx + 1}. ${f.label}`, 15, y);
+    } else {
+      doc.setFont('helvetica', 'normal');
       doc.setTextColor(60, 60, 60);
+      doc.text(`   ${idx + 1}. ${f.label}`, 15, y);
+    }
+    // URL clicavel
+    if (f.url) {
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(2, 132, 199);
+      const urlExibida = f.url.length > 50 ? f.url.substring(0, 47) + '…' : f.url;
+      doc.textWithLink(urlExibida, 130, y, { url: f.url });
     }
     y += 3.5;
   });
+
+  y += 2;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(6);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`▸ Fonte de origem desta cotação (destaque verde): ${fonteOrigemDestaCotacao}`, 15, y);
 
   // Selo carimbo
   doc.setDrawColor(16, 185, 129);
