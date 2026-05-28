@@ -14,8 +14,27 @@ export interface CotacaoMercado {
   uasg: string;
   cnpjOrgao: string;
   identificadorCompra: string;
+  numeroControlePNCP?: string;
   dataHomologacao: string;
+  dataPublicacao?: string;
+  dataVigenciaFinalAta?: string;
   modalidade: string;
+  situacao?: string;
+  criterioJulgamento?: string;
+  modoDisputa?: string;
+  amparoLegal?: string;
+  leiAplicada?: string;
+  objetoCompra?: string;
+  poder?: string;
+  esfera?: string;
+  uf?: string;
+  municipio?: string;
+  fornecedorNome?: string;
+  fornecedorCnpj?: string;
+  inscricaoEstadualFornecedor?: string;
+  codigoCatalogoItem?: string;
+  quantidade?: number;
+  unidadeMedida?: string;
   valorUnitario: number;
   // Unidades — essencial pra comparação correta
   unidadeFornecimento: string;        // "GARRAFA", "CAIXA", etc.

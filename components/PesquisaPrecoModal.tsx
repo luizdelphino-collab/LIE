@@ -4,6 +4,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { storage, db } from '../lib/firebase';
 import { buscarMateriaisLocal, consultarPrecosPraticados, obterArquivosContratacao } from '../lib/apiCompras';
+import { coletarMercadoItem, type CotacaoMercado, type MercadoResposta } from '../lib/mercadoApi';
 import type { ItemMaster, ItemProjeto, PrecoReferencia } from '../types';
 import type { GovernmentMaterial } from '../lib/apiCompras';
 import { jsPDF } from 'jspdf';
@@ -41,6 +42,57 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
   const limiteInferior = item.valorUnitario;
   const limiteSuperior = item.valorUnitario * MULTIPLICADOR_OUTLIER;
   const dentroDaFaixa = (v: number) => v >= limiteInferior && v <= limiteSuperior;
+
+  // Estado da resposta unificada do mercado (mesma fonte da coluna Mercado Gov)
+  const [mercadoResposta, setMercadoResposta] = useState<MercadoResposta | null>(null);
+
+  /**
+   * Converte CotacaoMercado (formato do coletarMercadoItem) para PrecoReferencia
+   * (formato usado pela cesta + certidao). Garante que Mercado Gov e Balanca
+   * usem EXATAMENTE os mesmos dados — uma fonte de verdade.
+   */
+  const cotacaoMercadoParaPrecoRef = (c: CotacaoMercado): PrecoReferencia => {
+    // Monta link PNCP a partir do numeroControle quando possivel
+    const numCtrl = c.numeroControlePNCP || '';
+    let linkPncp = c.linkPncp || '';
+    const m = numCtrl.match(/^(\d{14})-[\dA-Z]+-(\d+)\/(\d{4})$/);
+    if (m && !linkPncp.includes('pncp.gov.br/app')) {
+      const tipo = c.fonte === 'pncp-ata' ? 'atas' : 'editais';
+      linkPncp = `https://pncp.gov.br/app/${tipo}/${m[1]}/${m[3]}/${m[2]}`;
+    }
+    return {
+      fonte: (c.fonte || 'compras.gov.br') as PrecoReferencia['fonte'],
+      orgaoLicitante: c.orgao || 'ÓRGÃO PÚBLICO',
+      uasg: c.uasg || '',
+      cnpjOrgao: c.cnpjOrgao || '',
+      poder: c.poder || '',
+      esfera: c.esfera || '',
+      uf: c.uf || '',
+      municipio: c.municipio || '',
+      modalidade: c.modalidade || '',
+      situacao: c.situacao || '',
+      criterioJulgamento: c.criterioJulgamento || '',
+      modoDisputa: c.modoDisputa || '',
+      amparoLegal: c.amparoLegal || '',
+      leiAplicada: c.leiAplicada || '',
+      objetoCompra: c.objetoCompra || '',
+      codigoCatalogoItem: c.codigoCatalogoItem || '',
+      descricaoItem: c.descricaoItem || '',
+      fornecedorNome: c.fornecedorNome || '',
+      fornecedorCnpj: c.fornecedorCnpj || '',
+      inscricaoEstadualFornecedor: c.inscricaoEstadualFornecedor || '',
+      identificadorCompra: c.identificadorCompra || numCtrl || '',
+      numeroControlePNCP: numCtrl,
+      dataHomologacao: c.dataHomologacao || '',
+      dataVigenciaFinalAta: c.dataVigenciaFinalAta || '',
+      dataPublicacao: c.dataPublicacao || '',
+      quantidade: c.quantidade || 0,
+      unidadeMedida: c.unidadeMedida || c.siglaUnidadeMedida || '',
+      valorUnitario: c.valorUnitario,
+      linkPncpOriginal: linkPncp || undefined,
+      localizacaoUrl: linkPncp || '',
+    };
+  };
   const [activeTab, setActiveTab] = useState<'compras' | 'manual'>('compras');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -172,13 +224,12 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       setPrecosGoverno([]);
       setMateriaisSemente([]);
 
-      // PRIORIDADE 1: se o item ja tem codigoCatmat vinculado, usa diretamente
-      // (ignora o seed local — o CATMAT oficial e a fonte da verdade)
+      // PRIORIDADE 1: se o item ja tem codigoCatmat vinculado, usa coletarMercadoItem
+      // (MESMA fonte da coluna Mercado Gov — uma fonte da verdade, com saneamento TCU
+      // ja aplicado). Cotacoes nao-outlier sao pre-selecionadas pra cesta.
       if (item.codigoCatmat) {
-        // categoria so existe em ItemMaster, nao em ItemProjeto
         const categoriaStr = 'categoria' in item && typeof (item as any).categoria === 'string'
-          ? (item as any).categoria
-          : 'Item do Projeto';
+          ? (item as any).categoria : 'Item do Projeto';
         const materialDoItem: GovernmentMaterial = {
           codigoItem: item.codigoCatmat,
           nome: item.nomeCatmatOficial || item.nome,
@@ -188,22 +239,34 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         };
         setMaterialSelecionado(materialDoItem);
 
-        // Dispara consulta de precos direto pelo CATMAT do item
         setLoading(true);
-        consultarPrecosPraticados(item.codigoCatmat, item.valorUnitario, item.nome)
-          .then(resultadosBrutos => {
-            // FILTRO POR EMBALAGEM: quando item tem fatorConversao, descarta
-            // cotacoes de embalagem incompativel (ex: galao 20L num item de 200ml)
-            const resultados = filtrarCotacoesPorEmbalagem(resultadosBrutos);
-            const descartadasPorEmbalagem = resultadosBrutos.length - resultados.length;
-            if (descartadasPorEmbalagem > 0) {
-              console.info(`[pesquisa-preco] ${descartadasPorEmbalagem} cotacao(oes) descartadas por embalagem incompativel com item (fator=${item.fatorConversao}${item.unidadeBase}).`);
+        coletarMercadoItem(item.codigoCatmat, item.tipoCatmat || 'material')
+          .then(resp => {
+            setMercadoResposta(resp);
+            if (!resp || !resp.cotacoes) {
+              setPrecosGoverno([]);
+              return;
             }
-            resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
-            setPrecosGoverno(resultados);
+            // Converte CotacaoMercado → PrecoReferencia (mesmo formato da cesta)
+            const todasPrecos = resp.cotacoes.map(cotacaoMercadoParaPrecoRef);
+            // Filtro por embalagem (mantem se item tem fatorConversao)
+            const filtradasPorEmb = filtrarCotacoesPorEmbalagem(todasPrecos);
+            filtradasPorEmb.sort((a, b) => b.valorUnitario - a.valorUnitario);
+            setPrecosGoverno(filtradasPorEmb);
 
-            // Auto-selecionar refs DENTRO da faixa [referencia, 2.5×referencia]
-            const elegiveis = resultados.filter(p => dentroDaFaixa(p.valorUnitario));
+            // PRE-SELECAO INTELIGENTE: cesta inicia com cotacoes que:
+            //  1. Estao na faixa elegivel [ref, 2.5×ref]
+            //  2. Estao na embalagem correta (filtro embalagem)
+            //  3. NAO foram marcadas como outlier pelo saneamento TCU
+            const incluidasTCU = new Set(
+              (resp.cotacoes || []).filter(c => !c.outlier).map(c =>
+                `${c.fonte}-${c.identificadorCompra}-${c.valorUnitario}`
+              )
+            );
+            const elegiveis = filtradasPorEmb.filter(p => {
+              const chave = `${p.fonte}-${p.identificadorCompra}-${p.valorUnitario}`;
+              return dentroDaFaixa(p.valorUnitario) && incluidasTCU.has(chave);
+            });
             if (elegiveis.length > 0) {
               setCestaReferencias(prev => {
                 const novas = elegiveis.filter(e =>
@@ -214,7 +277,7 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
             }
           })
           .catch(err => {
-            console.error("Erro ao carregar precos praticados via CATMAT do item:", err);
+            console.error("Erro ao carregar mercado via coletarMercadoItem:", err);
           })
           .finally(() => {
             setLoading(false);
@@ -812,6 +875,11 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                   <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                     <h4 className="text-xs font-bold text-gray-600 uppercase tracking-wider">Preços Públicos Homologados</h4>
                     <div className="flex items-center gap-1.5 flex-wrap">
+                      {mercadoResposta?.saneamento && (
+                        <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Método TCU iterativo (μ±σ): ${mercadoResposta.saneamento.cotacoesIncluidas}/${mercadoResposta.totalCotacoes} cotações saneadas, CV final ${mercadoResposta.saneamento.estatisticasFinais?.coeficienteVariacao?.toFixed(1)}%. Preço de referência saneado: R$ ${mercadoResposta.saneamento.precoReferencia?.toFixed(2)}`}>
+                          🧪 Saneadas TCU: {mercadoResposta.saneamento.cotacoesIncluidas}/{mercadoResposta.totalCotacoes}
+                        </span>
+                      )}
                       <span className="text-[10px] bg-green-50 border border-green-200 text-green-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Faixa elegivel: cotacoes >= R$ ${limiteInferior.toFixed(2)} e <= R$ ${limiteSuperior.toFixed(2)} (2.5x o valor estimado)`}>
                         ✓ Faixa R$ {limiteInferior.toFixed(2)}–{limiteSuperior.toFixed(2)}
                       </span>

@@ -788,8 +788,27 @@ export const coletarMercadoItem = functions
       uasg: string;
       cnpjOrgao: string;
       identificadorCompra: string;
+      numeroControlePNCP: string;
       dataHomologacao: string;
+      dataPublicacao: string;
+      dataVigenciaFinalAta: string;
       modalidade: string;
+      situacao: string;
+      criterioJulgamento: string;
+      modoDisputa: string;
+      amparoLegal: string;
+      leiAplicada: string;
+      objetoCompra: string;
+      poder: string;
+      esfera: string;
+      uf: string;
+      municipio: string;
+      fornecedorNome: string;
+      fornecedorCnpj: string;
+      inscricaoEstadualFornecedor: string;
+      codigoCatalogoItem: string;
+      quantidade: number;
+      unidadeMedida: string;
       valorUnitario: number;
       // Unidades — essencial pra comparação correta
       unidadeFornecimento: string;        // ex: "GARRAFA"
@@ -825,14 +844,49 @@ export const coletarMercadoItem = functions
         // preço por unidade base: se garrafa de 500ml custa R$ 1,15 → R$ 0,0023/ml
         const precoPorUnidadeBase = capacidade > 0 ? valor / capacidade : 0;
 
+        // Heuristica pra detectar lei aplicada (mesma logica do consultarPrecosMulti)
+        const modalidadeStr = String(r.nomeModalidadeCompra || r.modalidade || '').toLowerCase();
+        const amparoStr = String(r.amparoLegalNome || r.amparoLegal || '').toLowerCase();
+        const detectarLei = (): string => {
+          if (amparoStr.includes('14.133') || amparoStr.includes('14133')) return 'Lei 14.133/2021';
+          if (amparoStr.includes('8.666') || amparoStr.includes('8666')) return 'Lei 8.666/1993';
+          if (amparoStr.includes('10.520') || amparoStr.includes('10520')) return 'Lei 10.520/2002';
+          if (amparoStr.includes('13.303') || amparoStr.includes('13303')) return 'Lei 13.303/2016';
+          if (modalidadeStr.includes('pregao') && fonte === 'pncp-contratacao') return 'Lei 14.133/2021';
+          if (modalidadeStr.includes('pregao')) return 'Lei 10.520/2002';
+          if (modalidadeStr.includes('dispensa') || modalidadeStr.includes('inexigibilidade')) {
+            return fonte === 'pncp-contratacao' ? 'Lei 14.133/2021' : 'Lei 8.666/1993';
+          }
+          return fonte === 'pncp-contratacao' || fonte === 'pncp-ata' ? 'Lei 14.133/2021' : '';
+        };
+
         cotacoes.push({
           fonte,
-          orgao: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || 'ÓRGÃO PÚBLICO',
-          uasg: String(r.uasg || r.codigoUasg || ''),
-          cnpjOrgao: String(r.cnpjOrgao || r.orgaoEntidadeCnpj || ''),
-          identificadorCompra: String(r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || ''),
-          dataHomologacao: String(r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || ''),
-          modalidade: String(r.nomeModalidadeCompra || r.modalidade || ''),
+          orgao: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || r.orgaoEntidadeNome || r.nomeOrgaoEntidade || 'ÓRGÃO PÚBLICO',
+          uasg: String(r.uasg || r.codigoUasg || r.codigoUnidadeAdministrativa || ''),
+          cnpjOrgao: String(r.cnpjOrgao || r.orgaoEntidadeCnpj || r.cnpj || ''),
+          identificadorCompra: String(r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || r.numeroAtaRegistroPreco || ''),
+          numeroControlePNCP: String(numCtrl || ''),
+          dataHomologacao: String(r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || r.dataAprovacaoAta || ''),
+          dataPublicacao: String(r.dataPublicacaoPncp || r.dataPublicacao || ''),
+          dataVigenciaFinalAta: String(r.dataVigenciaFinalAta || r.dataFimVigencia || ''),
+          modalidade: String(r.nomeModalidadeCompra || r.modalidade || r.modalidadeCompra || r.modalidadeNome || ''),
+          situacao: String(r.situacaoCompraItem || r.situacaoCompra || r.situacao || (r.temResultado ? 'Homologado' : '')),
+          criterioJulgamento: String(r.criterioJulgamentoNome || r.criterioJulgamento || r.nomeCriterioJulgamento || ''),
+          modoDisputa: String(r.modoDisputaNome || r.modoDisputa || r.nomeModoDisputa || ''),
+          amparoLegal: String(r.amparoLegalNome || r.amparoLegal || ''),
+          leiAplicada: detectarLei(),
+          objetoCompra: String(r.objetoCompra || r.objeto || r.descricaoCompra || ''),
+          poder: String(r.poder || r.orgaoEntidadePoder || ''),
+          esfera: String(r.esfera || r.orgaoEntidadeEsfera || ''),
+          uf: String(r.uf || r.orgaoEntidadeUfSigla || r.estado || r.siglaUf || ''),
+          municipio: String(r.municipio || r.orgaoEntidadeMunicipioNome || r.nomeMunicipio || ''),
+          fornecedorNome: String(r.nomeFornecedor || r.razaoSocialFornecedor || r.fornecedorNome || ''),
+          fornecedorCnpj: String(r.niFornecedor || r.codFornecedor || r.cnpjFornecedor || r.fornecedorCnpj || ''),
+          inscricaoEstadualFornecedor: String(r.inscricaoEstadualFornecedor || r.ieFornecedor || r.inscricaoEstadual || ''),
+          codigoCatalogoItem: String(r.codItemCatalogo || r.codigoItemCatalogo || r.codigoItemCatalogoCompra || ''),
+          quantidade: Number(r.quantidade) || 0,
+          unidadeMedida: String(r.unidadeMedida || r.siglaUnidadeMedida || ''),
           valorUnitario: valor,
           unidadeFornecimento: String(r.nomeUnidadeFornecimento || '').trim().toUpperCase(),
           siglaUnidadeFornecimento: String(r.siglaUnidadeFornecimento || '').trim().toUpperCase(),

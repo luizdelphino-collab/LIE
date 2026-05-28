@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
+exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const puppeteer = require("puppeteer");
@@ -300,6 +300,29 @@ exports.consultarPrecosMulti = functions
             fonteNome === 'pncp-contratacao' ? 'editais' : 'editais';
         const linkPncp = montarLinkPncp(numeroControle, tipoLink);
         const linkFallback = r.linkProcesso || (r.uasg ? `https://pncp.gov.br/app/contratacoes?q=${r.uasg}` : '');
+        // Detecta lei aplicada via modalidade/amparo legal
+        const modalidadeStr = String(r.nomeModalidadeCompra || r.modalidade || r.modalidadeCompra || '').toLowerCase();
+        const amparoStr = String(r.amparoLegalNome || r.amparoLegal || '').toLowerCase();
+        const detectarLei = () => {
+            // Lei 14.133/2021 (Nova Lei de Licitacoes) vs Lei 8.666/93 (Lei Antiga)
+            if (amparoStr.includes('14.133') || amparoStr.includes('14133'))
+                return 'Lei 14.133/2021';
+            if (amparoStr.includes('8.666') || amparoStr.includes('8666'))
+                return 'Lei 8.666/1993';
+            if (amparoStr.includes('10.520') || amparoStr.includes('10520'))
+                return 'Lei 10.520/2002';
+            if (amparoStr.includes('13.303') || amparoStr.includes('13303'))
+                return 'Lei 13.303/2016';
+            // Heuristica por modalidade quando amparo nao disponivel
+            if (modalidadeStr.includes('pregao') && fonteNome === 'pncp-contratacao')
+                return 'Lei 14.133/2021';
+            if (modalidadeStr.includes('pregao'))
+                return 'Lei 10.520/2002';
+            if (modalidadeStr.includes('dispensa') || modalidadeStr.includes('inexigibilidade')) {
+                return fonteNome === 'pncp-contratacao' ? 'Lei 14.133/2021' : 'Lei 8.666/1993';
+            }
+            return fonteNome === 'pncp-contratacao' || fonteNome === 'pncp-ata' ? 'Lei 14.133/2021' : '';
+        };
         return {
             fonte: fonteNome,
             // === Identidade do órgão ===
@@ -309,21 +332,32 @@ exports.consultarPrecosMulti = functions
             poder: r.poder || r.orgaoEntidadePoder || '',
             esfera: r.esfera || r.orgaoEntidadeEsfera || '',
             uf: r.uf || r.orgaoEntidadeUfSigla || r.estado || r.siglaUf || '',
+            municipio: r.municipio || r.orgaoEntidadeMunicipioNome || r.nomeMunicipio || '',
             // === Legalidade da compra ===
             modalidade: r.nomeModalidadeCompra || r.modalidade || r.modalidadeCompra || r.modalidadeNome || '',
             situacao: r.situacaoCompraItem || r.situacaoCompra || r.situacao || (r.temResultado ? 'Homologado' : ''),
+            // NOVOS (GREEN): info juridica adicional do PNCP
+            criterioJulgamento: r.criterioJulgamentoNome || r.criterioJulgamento || r.nomeCriterioJulgamento || '',
+            modoDisputa: r.modoDisputaNome || r.modoDisputa || r.nomeModoDisputa || '',
+            amparoLegal: r.amparoLegalNome || r.amparoLegal || '',
+            leiAplicada: detectarLei(),
+            objetoCompra: r.objetoCompra || r.objeto || r.descricaoCompra || '',
             // === Identidade do item ===
             codigoCatalogoItem: String(r.codItemCatalogo || r.codigoItemCatalogo || r.codigoItemCatalogoCompra || ''),
             descricaoItem: r.descricaoItemCatalogo || r.descricaoItem || r.descricao || '',
             // === Adjudicatário ===
             fornecedorNome: r.nomeFornecedor || r.razaoSocialFornecedor || r.fornecedorNome || '',
             fornecedorCnpj: r.niFornecedor || r.codFornecedor || r.cnpjFornecedor || r.fornecedorCnpj || '',
+            // NOVO (GREEN): inscricao estadual do fornecedor (compliance)
+            inscricaoEstadualFornecedor: r.inscricaoEstadualFornecedor || r.ieFornecedor || r.inscricaoEstadual || '',
             // === Identificadores ===
             identificadorCompra: r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || r.numeroAtaRegistroPreco || '',
             numeroControlePNCP: numeroControle || '',
             // === Temporal ===
             dataHomologacao: r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || r.dataAprovacaoAta || '',
             dataVigenciaFinalAta: r.dataVigenciaFinalAta || r.dataFimVigencia || '',
+            // NOVO (GREEN): data de publicacao no PNCP (separada da homologacao)
+            dataPublicacao: r.dataPublicacaoPncp || r.dataPublicacao || '',
             // === Escala ===
             quantidade: Number(r.quantidade) || 0,
             unidadeMedida: r.unidadeMedida || r.siglaUnidadeMedida || '',
@@ -363,6 +397,101 @@ exports.consultarPrecosMulti = functions
         totaisPorFonte,
         registros: todos
     });
+});
+/**
+ * Busca a lista de arquivos (edital, anexos, ata da sessão) de uma contratação
+ * no PNCP a partir do numeroControlePNCP. Permite extrair o link direto pro
+ * PDF do edital — diferente do `linkPncpOriginal` que aponta pra pagina de
+ * listagem da contratacao.
+ *
+ * Uso (lazy): o frontend chama isso ao homologar a cesta de cotacoes pra
+ * enriquecer cada referencia com `linkEditalPdf` antes de salvar.
+ *
+ * GET /obterArquivosContratacao?numeroControlePNCP={cnpj}-1-{seq}/{ano}
+ *
+ * Resposta:
+ *  { arquivos: [{ tipo, titulo, url, dataPublicacao }], linkEditalPdf }
+ */
+exports.obterArquivosContratacao = functions
+    .runWith({ timeoutSeconds: 30, memory: '256MB' })
+    .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Vary', 'Origin');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'GET') {
+        res.status(405).json({ error: 'Apenas GET é suportado.' });
+        return;
+    }
+    const numeroControle = String(req.query.numeroControlePNCP || '').trim();
+    if (!numeroControle) {
+        res.status(400).json({ error: 'Query param "numeroControlePNCP" obrigatório.' });
+        return;
+    }
+    // Formato esperado: {CNPJ}-1-{sequencial}/{ano}
+    const m = numeroControle.match(/^(\d{14})-[\dA-Z]+-(\d+)\/(\d{4})$/);
+    if (!m) {
+        res.status(400).json({ error: 'Formato invalido de numeroControlePNCP. Esperado: {cnpj}-1-{seq}/{ano}', recebido: numeroControle });
+        return;
+    }
+    const [, cnpj, seq, ano] = m;
+    const headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
+    };
+    // PNCP API: lista arquivos da contratacao
+    const url = `https://pncp.gov.br/pncp-api/v1/orgaos/${cnpj}/compras/${ano}/${seq}/arquivos`;
+    try {
+        const resp = await fetch(url, { headers });
+        if (!resp.ok) {
+            res.status(resp.ok ? 200 : 502).json({
+                numeroControlePNCP: numeroControle,
+                arquivos: [],
+                erro: `PNCP retornou HTTP ${resp.status}`,
+                urlTentado: url,
+            });
+            return;
+        }
+        const data = await resp.json();
+        const lista = Array.isArray(data) ? data : (data?.arquivos || data?.resultado || []);
+        // Normaliza os arquivos pra estrutura previsivel
+        const arquivos = lista.map((a) => ({
+            tipo: a.tipoDocumentoNome || a.tipoDocumento || a.tipo || 'ANEXO',
+            titulo: a.titulo || a.nomeArquivo || a.nome || '',
+            sequencial: a.sequencialDocumento || a.sequencial || null,
+            dataPublicacao: a.dataPublicacaoPncp || a.dataPublicacao || '',
+            url: a.url || (a.sequencialDocumento
+                ? `https://pncp.gov.br/pncp-api/v1/orgaos/${cnpj}/compras/${ano}/${seq}/arquivos/${a.sequencialDocumento}`
+                : ''),
+        })).filter((a) => a.url);
+        // Detecta o PDF do edital (prioridade: EDITAL > AVISO > TERMO_REFERENCIA > primeiro)
+        const acharPorTipo = (regex) => arquivos.find((a) => regex.test(String(a.tipo).toUpperCase()) || regex.test(String(a.titulo).toUpperCase()));
+        const editalPdf = acharPorTipo(/EDITAL/)
+            || acharPorTipo(/AVISO/)
+            || acharPorTipo(/TERMO[_\s]+(DE\s+)?REFERENCIA/)
+            || arquivos[0];
+        res.set('Cache-Control', 'public, max-age=86400'); // 24h — arquivos sao imutaveis
+        res.json({
+            numeroControlePNCP: numeroControle,
+            totalArquivos: arquivos.length,
+            arquivos,
+            linkEditalPdf: editalPdf?.url || '',
+            linkPaginaPncp: `https://pncp.gov.br/app/editais/${cnpj}/${ano}/${seq}`,
+        });
+    }
+    catch (e) {
+        console.error('Falha ao obter arquivos PNCP:', e);
+        res.status(502).json({
+            numeroControlePNCP: numeroControle,
+            arquivos: [],
+            erro: e?.message || String(e),
+        });
+    }
 });
 /**
  * Proxy legado — mantido pra retrocompatibilidade.
@@ -643,14 +772,54 @@ exports.coletarMercadoItem = functions
             const siglaMedida = String(r.siglaUnidadeMedida || r.unidadeMedida || '').trim().toUpperCase();
             // preço por unidade base: se garrafa de 500ml custa R$ 1,15 → R$ 0,0023/ml
             const precoPorUnidadeBase = capacidade > 0 ? valor / capacidade : 0;
+            // Heuristica pra detectar lei aplicada (mesma logica do consultarPrecosMulti)
+            const modalidadeStr = String(r.nomeModalidadeCompra || r.modalidade || '').toLowerCase();
+            const amparoStr = String(r.amparoLegalNome || r.amparoLegal || '').toLowerCase();
+            const detectarLei = () => {
+                if (amparoStr.includes('14.133') || amparoStr.includes('14133'))
+                    return 'Lei 14.133/2021';
+                if (amparoStr.includes('8.666') || amparoStr.includes('8666'))
+                    return 'Lei 8.666/1993';
+                if (amparoStr.includes('10.520') || amparoStr.includes('10520'))
+                    return 'Lei 10.520/2002';
+                if (amparoStr.includes('13.303') || amparoStr.includes('13303'))
+                    return 'Lei 13.303/2016';
+                if (modalidadeStr.includes('pregao') && fonte === 'pncp-contratacao')
+                    return 'Lei 14.133/2021';
+                if (modalidadeStr.includes('pregao'))
+                    return 'Lei 10.520/2002';
+                if (modalidadeStr.includes('dispensa') || modalidadeStr.includes('inexigibilidade')) {
+                    return fonte === 'pncp-contratacao' ? 'Lei 14.133/2021' : 'Lei 8.666/1993';
+                }
+                return fonte === 'pncp-contratacao' || fonte === 'pncp-ata' ? 'Lei 14.133/2021' : '';
+            };
             cotacoes.push({
                 fonte,
-                orgao: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || 'ÓRGÃO PÚBLICO',
-                uasg: String(r.uasg || r.codigoUasg || ''),
-                cnpjOrgao: String(r.cnpjOrgao || r.orgaoEntidadeCnpj || ''),
-                identificadorCompra: String(r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || ''),
-                dataHomologacao: String(r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || ''),
-                modalidade: String(r.nomeModalidadeCompra || r.modalidade || ''),
+                orgao: r.orgaoLicitante || r.nomeOrgao || r.razaoSocialOrgao || r.orgaoEntidadeNome || r.nomeOrgaoEntidade || 'ÓRGÃO PÚBLICO',
+                uasg: String(r.uasg || r.codigoUasg || r.codigoUnidadeAdministrativa || ''),
+                cnpjOrgao: String(r.cnpjOrgao || r.orgaoEntidadeCnpj || r.cnpj || ''),
+                identificadorCompra: String(r.idCompra || r.processo || r.numeroProcesso || r.numeroCompra || r.numeroAta || r.numeroAtaRegistroPreco || ''),
+                numeroControlePNCP: String(numCtrl || ''),
+                dataHomologacao: String(r.dataCompra || r.dataResultado || r.dataPublicacaoPncp || r.dataAssinatura || r.dataAprovacaoAta || ''),
+                dataPublicacao: String(r.dataPublicacaoPncp || r.dataPublicacao || ''),
+                dataVigenciaFinalAta: String(r.dataVigenciaFinalAta || r.dataFimVigencia || ''),
+                modalidade: String(r.nomeModalidadeCompra || r.modalidade || r.modalidadeCompra || r.modalidadeNome || ''),
+                situacao: String(r.situacaoCompraItem || r.situacaoCompra || r.situacao || (r.temResultado ? 'Homologado' : '')),
+                criterioJulgamento: String(r.criterioJulgamentoNome || r.criterioJulgamento || r.nomeCriterioJulgamento || ''),
+                modoDisputa: String(r.modoDisputaNome || r.modoDisputa || r.nomeModoDisputa || ''),
+                amparoLegal: String(r.amparoLegalNome || r.amparoLegal || ''),
+                leiAplicada: detectarLei(),
+                objetoCompra: String(r.objetoCompra || r.objeto || r.descricaoCompra || ''),
+                poder: String(r.poder || r.orgaoEntidadePoder || ''),
+                esfera: String(r.esfera || r.orgaoEntidadeEsfera || ''),
+                uf: String(r.uf || r.orgaoEntidadeUfSigla || r.estado || r.siglaUf || ''),
+                municipio: String(r.municipio || r.orgaoEntidadeMunicipioNome || r.nomeMunicipio || ''),
+                fornecedorNome: String(r.nomeFornecedor || r.razaoSocialFornecedor || r.fornecedorNome || ''),
+                fornecedorCnpj: String(r.niFornecedor || r.codFornecedor || r.cnpjFornecedor || r.fornecedorCnpj || ''),
+                inscricaoEstadualFornecedor: String(r.inscricaoEstadualFornecedor || r.ieFornecedor || r.inscricaoEstadual || ''),
+                codigoCatalogoItem: String(r.codItemCatalogo || r.codigoItemCatalogo || r.codigoItemCatalogoCompra || ''),
+                quantidade: Number(r.quantidade) || 0,
+                unidadeMedida: String(r.unidadeMedida || r.siglaUnidadeMedida || ''),
                 valorUnitario: valor,
                 unidadeFornecimento: String(r.nomeUnidadeFornecimento || '').trim().toUpperCase(),
                 siglaUnidadeFornecimento: String(r.siglaUnidadeFornecimento || '').trim().toUpperCase(),
