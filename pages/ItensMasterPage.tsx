@@ -974,7 +974,8 @@ export default function ItensMasterPage() {
       )}
 
       <div className="bg-white rounded-xl shadow-premium overflow-hidden border border-gray-100">
-        <table className="w-full text-left">
+        <div className="overflow-x-auto">
+        <table className="w-full text-left min-w-[1100px]">
           <thead className="bg-gray-50 text-xs font-bold text-lie-gray uppercase border-b border-gray-200">
             <tr>
               <th className="px-4 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('categoria')}>
@@ -1169,6 +1170,7 @@ export default function ItensMasterPage() {
             ))}
           </tbody>
         </table>
+        </div>
         {sortedItems.length === 0 && (
           <div className="p-12 text-center text-lie-gray italic">Nenhum item encontrado.</div>
         )}
