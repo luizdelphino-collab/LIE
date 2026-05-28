@@ -1419,28 +1419,17 @@ function gerarCertidaoCotaçãoPDF(
   if (r.fornecedorNome) y = drawCampo("Fornecedor Adjudicatário:", r.fornecedorNome, y, { truncate: 80 });
   if (r.fornecedorCnpj) y = drawCampo("CNPJ Fornecedor:", r.fornecedorCnpj, y);
   y = drawCampo("Valor Unitário Homologado:", fmtBrl(r.valorUnitario), y, { destacar: true });
-
-  // ============ SECAO 4: VINCULO COM PROJETO LIE ============
-  y += 2;
-  y = drawSecaoHeader("4. VÍNCULO COM PROJETO DE INCENTIVO AO ESPORTE", y);
-  y = drawCampo("Entidade Proponente:", entidadeNome, y, { truncate: 80 });
-  y = drawCampo("Projeto:", projetoTitulo, y, { truncate: 80 });
-  y = drawCampo("Item do Plano de Trabalho:", (item.nome || '').toUpperCase(), y, { truncate: 80 });
-  if (item.codigoCatmat) {
-    const tipoStr = item.tipoCatmat === 'servico' ? 'CATSER' : 'CATMAT';
-    y = drawCampo(`Código ${tipoStr} Vinculado:`, String(item.codigoCatmat), y);
-    if (item.nomeCatmatOficial) y = drawCampo(`Nome ${tipoStr} Oficial:`, item.nomeCatmatOficial, y, { truncate: 80 });
-    if (item.descricaoCatmatOficial) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100, 116, 139);
-      doc.text(`Descrição ${tipoStr}:`, 15, y);
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
-      const lines = doc.splitTextToSize(item.descricaoCatmatOficial, 130);
-      doc.text(lines.slice(0, 3), COL_VAL_X, y);
-      y += Math.min(lines.length, 3) * 4 + 1;
-    }
+  // Valor total da contratacao (computado: quantidade × valor unitario)
+  if (r.quantidade && r.quantidade > 0) {
+    const valorTotal = r.valorUnitario * r.quantidade;
+    y = drawCampo("Valor Total Contratado:", `${fmtBrl(valorTotal)} (${r.quantidade} ${r.unidadeMedida || ''} × ${fmtBrl(r.valorUnitario)})`, y, { truncate: 80 });
   }
 
   // ============ DECLARACAO LEGAL ============
+  // Sem secao "Vinculo com Projeto" porque a pesquisa vive no Banco de Itens
+  // (etapa 5C) — vale pra todos os projetos. Vinculo institucional aparece
+  // apenas no PDF de consolidacao do projeto, nao nesta certidao individual.
+  void entidadeNome; void projetoTitulo; void item; // evita warning de unused
   y += 3;
   if (y > 230) y = 230; // garante espaco pra declaracao+selo
   doc.setFillColor(248, 250, 252);
@@ -1466,17 +1455,34 @@ function gerarCertidaoCotaçãoPDF(
 
   y += 36;
 
-  // ============ LINK + SELO ============
+  // ============ LINKS CLICAVEIS ============
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(2, 132, 199);
   doc.setFontSize(7);
-  doc.text(`Validação online: https://projetos.lie.com.br/#/validar?token=${token}`, 15, y);
+  const linkValidacao = `https://projetos.lie.com.br/#/validar?token=${token}`;
+  doc.textWithLink(`▸ Validação online da certidão (clique para abrir)`, 15, y, { url: linkValidacao });
+  y += 4;
   if (r.linkPncpOriginal) {
+    doc.textWithLink(`▸ Documento original no PNCP (clique para abrir)`, 15, y, { url: r.linkPncpOriginal });
     y += 4;
-    doc.text(`Origem PNCP: ${r.linkPncpOriginal.substring(0, 110)}`, 15, y);
+    // URL em fonte pequena pra rastreabilidade visual
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.setTextColor(100, 116, 139);
+    doc.text(r.linkPncpOriginal.substring(0, 150), 15, y);
+    y += 3;
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(2, 132, 199); doc.setFontSize(7);
   } else if (r.localizacaoUrl && r.fonte !== 'fomento' && r.fonte !== 'manual') {
+    doc.textWithLink(`▸ Documento da fonte (clique para abrir)`, 15, y, { url: r.localizacaoUrl });
     y += 4;
-    doc.text(`Link da fonte: ${r.localizacaoUrl.substring(0, 110)}`, 15, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.setTextColor(100, 116, 139);
+    doc.text(r.localizacaoUrl.substring(0, 150), 15, y);
+    y += 3;
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(2, 132, 199); doc.setFontSize(7);
+  }
+  // Link Compras.gov.br (busca pelo CATMAT na pesquisa de precos)
+  if (r.codigoCatalogoItem) {
+    const linkComprasGov = `https://catalogo.compras.gov.br/cnbs-web/busca?codigo=${r.codigoCatalogoItem}`;
+    doc.textWithLink(`▸ Verificar CATMAT/CATSER ${r.codigoCatalogoItem} no Catálogo Compras.gov.br`, 15, y, { url: linkComprasGov });
+    y += 4;
   }
 
   // Selo carimbo
