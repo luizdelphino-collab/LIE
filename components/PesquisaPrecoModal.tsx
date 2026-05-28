@@ -29,6 +29,8 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
   const [precosGoverno, setPrecosGoverno] = useState<PrecoReferencia[]>([]);
   
   // Estados da Aba Registro Manual
+  type CategoriaManual = 'contrato-publico' | 'convenio' | 'termo-fomento' | 'tabela-preco' | 'manual';
+  const [categoriaManual, setCategoriaManual] = useState<CategoriaManual>('termo-fomento');
   const [manualOrgao, setManualOrgao] = useState('');
   const [manualIdentificador, setManualIdentificador] = useState('');
   const [manualData, setManualData] = useState('');
@@ -243,7 +245,7 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         identificadorCompra: manualIdentificador,
         dataHomologacao: manualData,
         valorUnitario: valorNum,
-        fonte: 'fomento',
+        fonte: categoriaManual,
         localizacaoUrl: uploadRes.url,
         arquivoNome: uploadRes.fileName
       };
@@ -695,22 +697,141 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
             )}
 
             {/* Conteúdo Aba Registro Manual */}
-            {activeTab === 'manual' && (
+            {activeTab === 'manual' && (() => {
+              // Metadados das 5 categorias de cotação manual (IN 73/2020, IN 65/2021, TCU)
+              const CATEGORIAS_MANUAIS: Array<{
+                valor: CategoriaManual;
+                titulo: string;
+                baseLegal: string;
+                descricao: string;
+                placeholderId: string;
+                labelId: string;
+                placeholderOrgao: string;
+                cor: 'green' | 'teal' | 'blue' | 'amber' | 'red';
+                ultimoRecurso?: boolean;
+              }> = [
+                {
+                  valor: 'contrato-publico',
+                  titulo: 'Contrato público similar',
+                  baseLegal: 'IN 73/2020 art. 5º II',
+                  descricao: 'Contrato já celebrado por outro ente público nos últimos 12 meses (prioritário, TCU 1231/2018)',
+                  labelId: 'Nº do Contrato / Pregão / Processo *',
+                  placeholderId: 'Ex: Pregão Eletrônico nº 045/2025',
+                  placeholderOrgao: 'Ex: PREFEITURA DE SÃO PAULO',
+                  cor: 'green',
+                },
+                {
+                  valor: 'convenio',
+                  titulo: 'Convênio',
+                  baseLegal: 'IN 73/2020 art. 5º II',
+                  descricao: 'Convênio firmado entre entes públicos ou com OSC (Lei 13.019/2014)',
+                  labelId: 'Nº do Convênio *',
+                  placeholderId: 'Ex: Convênio nº 12/2025 - SEMESP',
+                  placeholderOrgao: 'Ex: SECRETARIA MUNICIPAL DE EDUCAÇÃO',
+                  cor: 'teal',
+                },
+                {
+                  valor: 'termo-fomento',
+                  titulo: 'Termo de Fomento / Colaboração',
+                  baseLegal: 'IN 73/2020 art. 5º II + Lei 13.019/2014',
+                  descricao: 'Termo de Fomento ou Colaboração com OSC (típico no setor LIE)',
+                  labelId: 'Nº do Termo de Fomento / Colaboração *',
+                  placeholderId: 'Ex: Termo de Fomento nº 45/2025',
+                  placeholderOrgao: 'Ex: SECRETARIA ESTADUAL DE ESPORTES - SP',
+                  cor: 'blue',
+                },
+                {
+                  valor: 'tabela-preco',
+                  titulo: 'Tabela de Preços',
+                  baseLegal: 'IN 73/2020 art. 5º III',
+                  descricao: 'Tabela de mídia especializada ou de domínio amplo (catálogos, revistas, sites públicos)',
+                  labelId: 'Identificador da Tabela / Edição *',
+                  placeholderId: 'Ex: Tabela SINAPI nov/2025',
+                  placeholderOrgao: 'Ex: CAIXA / IBGE / SINAPI',
+                  cor: 'amber',
+                },
+                {
+                  valor: 'manual',
+                  titulo: '⚠ 3 orçamentos de fornecedores',
+                  baseLegal: 'IN 73/2020 art. 5º IV — ÚLTIMO RECURSO',
+                  descricao: 'Use APENAS quando todas as outras fontes (PNCP, contratos, convênios, fomento, tabelas) falharem. Adicione 3 orçamentos distintos.',
+                  labelId: 'Identificador do Orçamento *',
+                  placeholderId: 'Ex: Orçamento 1/3 - Fornecedor X',
+                  placeholderOrgao: 'Ex: RAZÃO SOCIAL DO FORNECEDOR',
+                  cor: 'red',
+                  ultimoRecurso: true,
+                },
+              ];
+              const catAtual = CATEGORIAS_MANUAIS.find(c => c.valor === categoriaManual) || CATEGORIAS_MANUAIS[2];
+              const coresAviso: Record<typeof catAtual.cor, string> = {
+                green: 'bg-green-50 border-green-200 text-green-900',
+                teal: 'bg-teal-50 border-teal-200 text-teal-900',
+                blue: 'bg-blue-50 border-blue-200 text-blue-900',
+                amber: 'bg-amber-50 border-amber-200 text-amber-900',
+                red: 'bg-red-50 border-red-300 text-red-900',
+              };
+              return (
               <form onSubmit={handleAdicionarManual} className="space-y-4">
-                <div className="p-3 bg-amber-50 text-amber-900 rounded-xl text-xs flex gap-2 border border-amber-200 leading-relaxed">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+                {/* Seletor de categoria */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-2">
+                    Fonte da cotação <span className="text-gray-500 font-normal">(ordem de prioridade legal)</span>
+                  </label>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {CATEGORIAS_MANUAIS.map(cat => {
+                      const ativo = categoriaManual === cat.valor;
+                      const corBorda = ativo
+                        ? cat.ultimoRecurso ? 'border-red-400 bg-red-50' : `border-${cat.cor}-400 bg-${cat.cor}-50`
+                        : 'border-gray-200 bg-white hover:border-gray-300';
+                      return (
+                        <label
+                          key={cat.valor}
+                          className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition ${corBorda}`}
+                        >
+                          <input
+                            type="radio"
+                            name="categoria-manual"
+                            value={cat.valor}
+                            checked={ativo}
+                            onChange={() => setCategoriaManual(cat.valor)}
+                            className={`mt-0.5 ${cat.ultimoRecurso ? 'text-red-600 focus:ring-red-500' : 'text-lie-green focus:ring-lie-green'}`}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-xs font-bold ${cat.ultimoRecurso ? 'text-red-800' : 'text-lie-ink'}`}>
+                              {cat.titulo}
+                              <span className={`ml-1.5 text-[9px] font-semibold uppercase tracking-wider ${cat.ultimoRecurso ? 'text-red-600' : 'text-gray-500'}`}>
+                                {cat.baseLegal}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-gray-600 leading-snug mt-0.5">
+                              {cat.descricao}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Aviso contextual da categoria escolhida */}
+                <div className={`p-3 rounded-xl text-xs flex gap-2 border leading-relaxed ${coresAviso[catAtual.cor]}`}>
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <div>
-                    <strong>Cotação Manual e Legislação:</strong> Ideal para anexar Termos de Fomento, Termos de Colaboração ou Acordos de Cooperação anteriores. O anexo do documento PDF oficial que originou a cotação é <strong>OBRIGATÓRIO</strong> para fins de auditoria no PDF consolidado.
+                    <strong>{catAtual.titulo}:</strong>{' '}
+                    {catAtual.ultimoRecurso
+                      ? <>Esta é a opção <strong>de último recurso</strong>. Antes, verifique se realmente não existe contrato público similar, convênio, termo de fomento, ou tabela de preço que atenda. O TCU (Acórdão 1445/2015) prioriza fontes diversificadas e públicas.</>
+                      : <>O anexo do PDF oficial é <strong>OBRIGATÓRIO</strong> para auditoria no relatório consolidado (IN 65/2021 art. 6º). Fundamentação legal: <strong>{catAtual.baseLegal}</strong>.</>
+                    }
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Órgão Licitante / Entidade Parceira *</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Órgão / Entidade / Fornecedor *</label>
                     <input
                       type="text"
                       required
-                      placeholder="Ex: SECRETARIA ESTADUAL DE ESPORTES - SP"
+                      placeholder={catAtual.placeholderOrgao}
                       value={manualOrgao}
                       onChange={e => setManualOrgao(e.target.value)}
                       className="w-full border-gray-300 rounded-xl text-sm"
@@ -719,11 +840,11 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-gray-700 mb-1">Identificador da Compra / Fomento *</label>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">{catAtual.labelId}</label>
                       <input
                         type="text"
                         required
-                        placeholder="Ex: Termo de Fomento nº 45/2025"
+                        placeholder={catAtual.placeholderId}
                         value={manualIdentificador}
                         onChange={e => setManualIdentificador(e.target.value)}
                         className="w-full border-gray-300 rounded-xl text-sm"
@@ -788,14 +909,17 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                   <button
                     type="submit"
                     disabled={loading || uploadingFile}
-                    className="w-full mt-2 bg-lie-ink hover:bg-lie-ink/90 text-white font-bold text-xs py-2.5 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5"
+                    className={`w-full mt-2 text-white font-bold text-xs py-2.5 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 ${
+                      catAtual.ultimoRecurso ? 'bg-red-600 hover:bg-red-700' : 'bg-lie-ink hover:bg-lie-ink/90'
+                    }`}
                   >
                     <Plus className="w-4 h-4" />
-                    Adicionar Cotação Manual na Cesta
+                    Adicionar à cesta como <strong className="ml-1">{catAtual.titulo}</strong>
                   </button>
                 </div>
               </form>
-            )}
+              );
+            })()}
 
           </div>
 
@@ -811,13 +935,29 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                   Sua cesta está vazia.<br />Adicione ou selecione cotações ao lado.
                 </div>
               ) : (
-                cestaReferencias.map((r, idx) => (
+                cestaReferencias.map((r, idx) => {
+                  const corBadge = (() => {
+                    switch (r.fonte) {
+                      case 'compras.gov.br':
+                      case 'pncp':
+                      case 'pncp-contratacao':
+                      case 'pncp-ata':
+                      case 'tce-pe':
+                        return 'bg-blue-100 text-blue-800';
+                      case 'contrato-publico': return 'bg-green-100 text-green-800';
+                      case 'convenio': return 'bg-teal-100 text-teal-800';
+                      case 'termo-fomento':
+                      case 'fomento': return 'bg-blue-100 text-blue-800';
+                      case 'tabela-preco': return 'bg-amber-100 text-amber-800';
+                      case 'manual': return 'bg-red-100 text-red-800';
+                      default: return 'bg-gray-100 text-gray-800';
+                    }
+                  })();
+                  return (
                   <div key={idx} className="p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between group">
                     <div className="flex-1 pr-2 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
-                          r.fonte === 'fomento' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
-                        }`}>
+                        <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${corBadge}`}>
                           {r.fonte}
                         </span>
                         <span className="text-[10px] text-gray-500 truncate block max-w-[130px] font-mono">
@@ -852,7 +992,8 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                       </button>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
 

@@ -341,7 +341,16 @@ export interface PrecoReferencia {
   quantidade?: number;
   unidadeMedida?: string;
   valorUnitario: number;
-  fonte: 'compras.gov.br' | 'pncp' | 'pncp-contratacao' | 'pncp-ata' | 'tce-pe' | 'fomento' | 'manual';
+  fonte:
+    // Fontes governamentais automaticas (IN 73/2020 art. 5o I e II)
+    | 'compras.gov.br' | 'pncp' | 'pncp-contratacao' | 'pncp-ata' | 'tce-pe'
+    // Fontes manuais categorizadas (IN 73/2020 art. 5o II/III/IV/V)
+    | 'contrato-publico'  // contratos publicos similares de outros entes (II)
+    | 'convenio'          // convenios (II)
+    | 'termo-fomento'     // termos de fomento ou colaboracao - tipico LIE (II)
+    | 'tabela-preco'      // tabelas de precos / midia especializada (III)
+    | 'fomento'           // legado, equivalente a termo-fomento
+    | 'manual';           // ULTIMO RECURSO: 3 orcamentos de fornecedores (IV)
   // Identidade do órgão
   cnpjOrgao?: string;
   poder?: string;

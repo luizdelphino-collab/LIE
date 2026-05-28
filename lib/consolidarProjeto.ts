@@ -604,16 +604,21 @@ async function renderPesquisaCertificadosJsPdf(
 
     addSubSection(state, "COMPARATIVO GERAL DE PREÇOS (PROPOSTO VS. REFERÊNCIAS)");
 
-    const publicRefs = it.referencias?.filter((r: any) => r.fonte === 'compras.gov.br' || r.fonte === 'pncp') || [];
-    const manualRefs = it.referencias?.filter((r: any) => r.fonte === 'fomento') || [];
+    const FONTES_PUBLICAS_AUTO = ['compras.gov.br', 'pncp', 'pncp-contratacao', 'pncp-ata', 'tce-pe'];
+    const FONTES_DOC_PUBLICO = ['contrato-publico', 'convenio', 'termo-fomento', 'fomento', 'tabela-preco'];
+    const FONTE_ULTIMO_RECURSO = 'manual'; // 3 orcamentos de fornecedores
 
-    const avgPublic = publicRefs.length > 0
-      ? publicRefs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / publicRefs.length
+    const publicRefs = it.referencias?.filter((r: any) => FONTES_PUBLICAS_AUTO.includes(r.fonte)) || [];
+    const docPublicoRefs = it.referencias?.filter((r: any) => FONTES_DOC_PUBLICO.includes(r.fonte)) || [];
+    const orcamentoRefs = it.referencias?.filter((r: any) => r.fonte === FONTE_ULTIMO_RECURSO) || [];
+
+    const mediaFn = (refs: any[]) => refs.length > 0
+      ? refs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / refs.length
       : null;
 
-    const avgManual = manualRefs.length > 0
-      ? manualRefs.reduce((acc: number, r: any) => acc + r.valorUnitario, 0) / manualRefs.length
-      : null;
+    const avgPublic = mediaFn(publicRefs);
+    const avgDocPublico = mediaFn(docPublicoRefs);
+    const avgOrcamento = mediaFn(orcamentoRefs);
 
     const formatBrl = (val: number | null) => {
       if (val === null) return '—';
@@ -622,8 +627,9 @@ async function renderPesquisaCertificadosJsPdf(
 
     const compBody = [
       ['Valor Estimado Proposto no Projeto', formatBrl(it.valorUnitario), 'Preço unitário sugerido no Plano de Trabalho'],
-      ['Média de Compras Públicas (Compras.gov.br/PNCP)', formatBrl(avgPublic), `${publicRefs.length} cotação(ões) pública(s) consultada(s)`],
-      ['Média de Parcerias e Fomentos (Upload Manual)', formatBrl(avgManual), `${manualRefs.length} documento(s) de fomento anexo(s)`],
+      ['Média Compras Públicas — IN 73/2020 art. 5º I/II', formatBrl(avgPublic), `${publicRefs.length} cotação(ões) automática(s) (PNCP/Compras.gov.br)`],
+      ['Média Docs Públicos Anexados — IN 73/2020 art. 5º II/III', formatBrl(avgDocPublico), `${docPublicoRefs.length} contrato/convênio/termo/tabela anexado(s)`],
+      ['Média 3 Orçamentos Fornecedores — IN 73/2020 art. 5º IV (último recurso)', formatBrl(avgOrcamento), `${orcamentoRefs.length} orçamento(s) de fornecedor`],
       ['Mediana Geral Homologada (Blindagem de Cesta)', formatBrl(it.medianaReferencia || null), 'Mediana linear de referência da cesta (IN 65)']
     ];
 
