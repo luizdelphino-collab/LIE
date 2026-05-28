@@ -574,6 +574,34 @@ async function renderPesquisaCertificadosJsPdf(
 
     state.y = boxY + 30;
 
+    // Aviso legal especial: item declaradamente sem CATMAT/CATSER -> rota alternativa
+    if (it.semCorrespondenciaCatalogo) {
+      const avisoY = state.y;
+      const avisoH = 30;
+      pdf.setFillColor(250, 245, 255); // roxo bem claro
+      pdf.rect(MARGIN, avisoY, CONTENT_W, avisoH, 'F');
+      pdf.setDrawColor(147, 51, 234); // roxo
+      pdf.setLineWidth(0.5);
+      pdf.rect(MARGIN, avisoY, CONTENT_W, avisoH, 'D');
+
+      pdf.setFontSize(9);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(88, 28, 135); // roxo escuro
+      pdf.text("⚖ PESQUISA DE PREÇO POR ROTA LEGAL ALTERNATIVA — 3 ORÇAMENTOS", MARGIN + 3, avisoY + 5.5);
+
+      pdf.setFontSize(7.5);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(60, 30, 80);
+      const textoLegal = "Item declaradamente sem correspondência no catálogo CATMAT/CATSER. Pesquisa de preço " +
+        "fundamentada em IN SEGES/ME 73/2020 art. 5º IV (pesquisa direta com fornecedores nos últimos 6 meses) " +
+        "ou IN 65/2021 art. 5º V (notas fiscais eletrônicas), em linha com Lei 14.133/21 art. 28 e " +
+        "Acórdão TCU 1445/2015 (fontes diversificadas). Mínimo de 3 cotações de fornecedores anexadas.";
+      const linhas = pdf.splitTextToSize(textoLegal, CONTENT_W - 6);
+      pdf.text(linhas, MARGIN + 3, avisoY + 10.5);
+
+      state.y = avisoY + avisoH + 5;
+    }
+
     addSubSection(state, "COMPARATIVO GERAL DE PREÇOS (PROPOSTO VS. REFERÊNCIAS)");
 
     const publicRefs = it.referencias?.filter((r: any) => r.fonte === 'compras.gov.br' || r.fonte === 'pncp') || [];

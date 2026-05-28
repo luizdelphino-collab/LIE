@@ -56,9 +56,13 @@ export default function CatmatDiagnostico({ items, onAtualizado }: Props) {
   const [concluido, setConcluido] = useState(false);
   const [expandido, setExpandido] = useState(false);
 
-  const comCatmat = items.filter(it => it.codigoCatmat && it.codigoCatmat > 0);
-  const semCatmat = items.filter(it => !it.codigoCatmat || it.codigoCatmat === 0);
-  const cobertura = items.length > 0 ? Math.round((comCatmat.length / items.length) * 100) : 0;
+  // Itens em rota legal alternativa (3 orcamentos) NAO precisam de CATMAT.
+  // Eles sao excluidos da cobertura porque ja estao atendidos por outro caminho legal.
+  const itensQuePrecisamCatmat = items.filter(it => !it.semCorrespondenciaCatalogo);
+  const itensRotaAlternativa = items.filter(it => it.semCorrespondenciaCatalogo);
+  const comCatmat = itensQuePrecisamCatmat.filter(it => it.codigoCatmat && it.codigoCatmat > 0);
+  const semCatmat = itensQuePrecisamCatmat.filter(it => !it.codigoCatmat || it.codigoCatmat === 0);
+  const cobertura = itensQuePrecisamCatmat.length > 0 ? Math.round((comCatmat.length / itensQuePrecisamCatmat.length) * 100) : 100;
 
   const seed = listarTodosSeedLocal() as any[];
 
@@ -163,6 +167,7 @@ export default function CatmatDiagnostico({ items, onAtualizado }: Props) {
 
           <span className="text-xs text-gray-500">
             {comCatmat.length} com CATMAT · {semCatmat.length} sem CATMAT
+            {itensRotaAlternativa.length > 0 && <> · <span className="text-purple-700">{itensRotaAlternativa.length} em rota alternativa (3 orçamentos)</span></>}
           </span>
         </div>
 

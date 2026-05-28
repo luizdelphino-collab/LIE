@@ -689,7 +689,7 @@ export default function ItensMasterPage() {
             <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
               <div className="flex items-start gap-2 mb-3">
                 <ShieldCheck className="w-5 h-5 text-lie-green shrink-0 mt-0.5" />
-                <div>
+                <div className="flex-1">
                   <h3 className="text-sm font-bold text-lie-ink">Código CATMAT / CATSER oficial</h3>
                   <p className="text-xs text-gray-500 leading-snug">
                     Busca direta no catálogo Compras.gov.br por palavra-chave. Obrigatório pra que o
@@ -698,21 +698,67 @@ export default function ItensMasterPage() {
                 </div>
               </div>
 
-              <CatalogoSearchPicker
-                initialTermo={formData.nome}
-                selecionado={
-                  formData.codigoCatmat
-                    ? {
-                        codigoCatmat: formData.codigoCatmat,
-                        tipoCatmat: formData.tipoCatmat || 'material',
-                        nomeCatmatOficial: formData.nomeCatmatOficial || '',
-                        descricaoCatmatOficial: formData.descricaoCatmatOficial || ''
-                      }
-                    : null
-                }
-                onSelect={handleCatalogoSelect}
-                onClear={removerCatmat}
-              />
+              {!formData.semCorrespondenciaCatalogo && (
+                <CatalogoSearchPicker
+                  initialTermo={formData.nome}
+                  selecionado={
+                    formData.codigoCatmat
+                      ? {
+                          codigoCatmat: formData.codigoCatmat,
+                          tipoCatmat: formData.tipoCatmat || 'material',
+                          nomeCatmatOficial: formData.nomeCatmatOficial || '',
+                          descricaoCatmatOficial: formData.descricaoCatmatOficial || ''
+                        }
+                      : null
+                  }
+                  onSelect={handleCatalogoSelect}
+                  onClear={removerCatmat}
+                />
+              )}
+
+              {/* Toggle de rota legal alternativa */}
+              <div className={`mt-3 rounded-lg border ${formData.semCorrespondenciaCatalogo ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'} p-3`}>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!formData.semCorrespondenciaCatalogo}
+                    onChange={e => setFormData(p => ({
+                      ...p,
+                      semCorrespondenciaCatalogo: e.target.checked,
+                      // Se ativando rota alternativa, limpa o CATMAT (incompatíveis)
+                      ...(e.target.checked && {
+                        codigoCatmat: undefined,
+                        tipoCatmat: undefined,
+                        nomeCatmatOficial: undefined,
+                        descricaoCatmatOficial: undefined
+                      })
+                    }))}
+                    className="mt-0.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                  />
+                  <div className="flex-1">
+                    <div className="text-xs font-bold text-lie-ink">
+                      Este item não tem código CATMAT/CATSER correspondente
+                    </div>
+                    <div className="text-[11px] text-gray-600 mt-0.5 leading-relaxed">
+                      Use esta opção para itens que genuinamente não existem no catálogo
+                      Compras.gov.br (ex: carrinho de pipoca para evento, oficinas específicas,
+                      figurino de mascote personalizado). A pesquisa de preço seguirá a{' '}
+                      <strong>rota legal alternativa: 3 orçamentos com fornecedores</strong>,
+                      conforme <strong>IN SEGES/ME 73/2020 art. 5º IV</strong> (pesquisa
+                      direta com fornecedores nos últimos 6 meses) ou{' '}
+                      <strong>IN 65/2021 art. 5º V</strong> (notas fiscais eletrônicas) —
+                      em linha com Lei 14.133/21 art. 28 e Acórdão TCU 1445/2015.
+                    </div>
+                    {formData.semCorrespondenciaCatalogo && (
+                      <div className="mt-2 text-[11px] text-purple-900 bg-white border border-purple-200 rounded p-2 leading-relaxed">
+                        ✓ Item marcado para rota alternativa. Adicione no mínimo{' '}
+                        <strong>3 cotações de fornecedores</strong> pela aba de
+                        <em> Cotações Manuais / Fomento</em> ao gerar o relatório do projeto.
+                      </div>
+                    )}
+                  </div>
+                </label>
+              </div>
             </div>
 
             {/* === BLOCO CONVERSOR DE UNIDADE (opcional mas crítico) === */}
@@ -922,8 +968,20 @@ export default function ItensMasterPage() {
                   {(() => {
                     const cod = it.codigoCatmat;
 
-                    // Sem CATMAT — diferenciar RH de material sem código
+                    // Sem CATMAT — diferenciar 3 sub-estados: rota legal alternativa, RH, sem código
                     if (!cod) {
+                      // 1. Item formalmente marcado como "sem CATMAT — rota de 3 orçamentos"
+                      if (it.semCorrespondenciaCatalogo) {
+                        return (
+                          <span
+                            className="text-[9px] text-purple-700 font-semibold leading-tight block text-right cursor-help"
+                            title="Item sem correspondência no CATMAT/CATSER por design. Pesquisa de preço segue rota legal de 3 orçamentos com fornecedores (IN 73/2020 art. 5º IV ou IN 65/2021 art. 5º V)."
+                          >
+                            📑 3 orçamentos
+                          </span>
+                        );
+                      }
+                      // 2. Recurso Humano — sem licitação pública por natureza
                       const isRH = isRecursoHumano(it);
                       if (isRH) {
                         return (
@@ -932,10 +990,11 @@ export default function ItensMasterPage() {
                           </span>
                         );
                       }
+                      // 3. Item sem código (falta vincular)
                       return (
                         <span
                           className="text-[9px] text-amber-600 font-semibold italic cursor-help"
-                          title="Este item não tem código CATMAT/CATSER. Edite o item e vincule o código para habilitar a comparação de preços de mercado."
+                          title="Este item não tem código CATMAT/CATSER. Edite o item e vincule o código para habilitar a comparação de preços de mercado, ou marque-o como 'sem correspondência no catálogo' para usar a rota legal alternativa."
                         >
                           ⚠ sem CATMAT
                         </span>

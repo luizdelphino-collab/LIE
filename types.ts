@@ -326,6 +326,11 @@ export interface ItemMaster {
   fatorConversao?: number;
   unidadeBase?: string; // ML, G, L, UN, M, M², KG
   embalagemDescricao?: string; // texto livre p/ humano (ex: "Caixa com 48 copos de 200ml")
+  // Item declaradamente sem correspondencia no CATMAT/CATSER. Pesquisa de preco
+  // segue rota legal alternativa: cotacoes com fornecedores (IN SEGES/ME 73/2020
+  // art. 5o IV ou IN 65/2021 art. 5o V — em linha com Lei 14.133/21 art. 28 e
+  // Acordao TCU 1445/2015 sobre fontes diversificadas).
+  semCorrespondenciaCatalogo?: boolean;
 }
 
 export interface PrecoReferencia {
@@ -385,6 +390,9 @@ export interface ItemProjeto {
   fatorConversao?: number;
   unidadeBase?: string;
   embalagemDescricao?: string;
+  // Item sem correspondencia no CATMAT/CATSER (herdado do master): pesquisa
+  // de preco segue rota legal de 3 orcamentos com fornecedores.
+  semCorrespondenciaCatalogo?: boolean;
 
   // Campos de Pesquisa de Preço Público (IN 65/2021)
   pesquisado?: boolean;

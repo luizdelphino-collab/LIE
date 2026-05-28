@@ -273,6 +273,8 @@ export default function ProjetoItensPage() {
         ...(selectedMaster.fatorConversao && { fatorConversao: selectedMaster.fatorConversao }),
         ...(selectedMaster.unidadeBase && { unidadeBase: selectedMaster.unidadeBase }),
         ...(selectedMaster.embalagemDescricao && { embalagemDescricao: selectedMaster.embalagemDescricao }),
+        // Rota legal alternativa (3 orcamentos com fornecedores)
+        ...(selectedMaster.semCorrespondenciaCatalogo && { semCorrespondenciaCatalogo: true }),
         criadoEm: formData.criadoEm || serverTimestamp() as Timestamp
       };
 
@@ -320,6 +322,8 @@ export default function ProjetoItensPage() {
           ...(m.fatorConversao && { fatorConversao: m.fatorConversao }),
           ...(m.unidadeBase && { unidadeBase: m.unidadeBase }),
           ...(m.embalagemDescricao && { embalagemDescricao: m.embalagemDescricao }),
+          // Rota legal alternativa
+          ...(m.semCorrespondenciaCatalogo && { semCorrespondenciaCatalogo: true }),
           criadoEm: serverTimestamp() as Timestamp
         };
 
