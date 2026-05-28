@@ -535,7 +535,7 @@ export const obterArquivosContratacao = functions
  */
 export const traduzirTermoCatmat = functions
   .runWith({
-    timeoutSeconds: 30,
+    timeoutSeconds: 60,  // 60s pra acomodar 3 tentativas de retry + validacoes
     memory: '256MB',
     secrets: ['GEMINI_API_KEY'],
   })
@@ -609,8 +609,27 @@ Responda em JSON puro com esta estrutura exata (sem markdown, sem comentários):
 
 Se não tiver candidatos confiáveis, retorne {"candidatos": []} e nada mais.`;
 
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
+      // Retry com backoff exponencial em caso de 503 (Gemini high demand).
+      // Pega ate 3 tentativas com 1s, 3s, 7s entre elas.
+      const generateWithRetry = async (): Promise<string> => {
+        const delays = [1000, 3000, 7000];
+        let ultimoErro: any = null;
+        for (let tentativa = 0; tentativa < 3; tentativa++) {
+          try {
+            const result = await model.generateContent(prompt);
+            return result.response.text();
+          } catch (err: any) {
+            ultimoErro = err;
+            const msg = String(err?.message || '');
+            const isOverload = msg.includes('503') || msg.includes('overload') || msg.includes('high demand') || msg.includes('UNAVAILABLE');
+            if (!isOverload || tentativa === 2) throw err;
+            console.warn(`Gemini overloaded (tentativa ${tentativa + 1}). Esperando ${delays[tentativa]}ms…`);
+            await new Promise(r => setTimeout(r, delays[tentativa]));
+          }
+        }
+        throw ultimoErro;
+      };
+      const text = await generateWithRetry();
 
       // Parse defensivo do JSON
       let parsed: any;

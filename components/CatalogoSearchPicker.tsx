@@ -50,6 +50,7 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
   const [candidatosIA, setCandidatosIA] = useState<CandidatoIA[] | null>(null);
   const [traduzindoIA, setTraduzindoIA] = useState(false);
   const [erroIA, setErroIA] = useState<string | null>(null);
+  const [statusIA, setStatusIA] = useState<string>(''); // mensagem de progresso
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -133,26 +134,50 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
     );
   };
 
-  // Dispara a busca IA — traduz termo livre em candidatos CATMAT/CATSER via Gemini
+  // Dispara a busca IA — traduz termo livre em candidatos CATMAT/CATSER via Gemini.
+  // Faz retry no client em caso de erro de rede ou 503 transiente. Mostra mensagens
+  // de progresso pra o user saber o que esta acontecendo.
   const buscarComIA = async () => {
     if (!termo || termo.trim().length < 3) return;
     setTraduzindoIA(true);
     setErroIA(null);
     setCandidatosIA(null);
-    try {
-      const resp = await traduzirTermoComIA(termo.trim());
-      if (!resp) {
-        setErroIA('Falha ao consultar IA. Tente de novo em alguns segundos.');
-        return;
+
+    const delays = [0, 2000, 5000]; // 3 tentativas: imediata, +2s, +5s
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      if (delays[tentativa] > 0) {
+        setStatusIA(`Modelo sobrecarregado. Tentativa ${tentativa + 1} de 3 em ${delays[tentativa] / 1000}s…`);
+        await new Promise(r => setTimeout(r, delays[tentativa]));
       }
-      if (resp.candidatos.length === 0) {
-        setErroIA('Nenhum candidato CATMAT/CATSER encontrado. Tente reformular a descrição.');
-        return;
+      setStatusIA(tentativa === 0
+        ? 'Consultando IA (Gemini)…'
+        : `Reconsultando (tentativa ${tentativa + 1} de 3)…`);
+      try {
+        const resp = await traduzirTermoComIA(termo.trim());
+        if (!resp) {
+          if (tentativa < 2) continue; // tenta de novo
+          setErroIA('Falha ao consultar IA após 3 tentativas. Tente de novo em alguns minutos.');
+          break;
+        }
+        setStatusIA('Validando códigos contra catálogo oficial…');
+        // pequeno delay artificial só pra mostrar a mensagem (validacao ja rodou no server)
+        await new Promise(r => setTimeout(r, 250));
+        if (resp.candidatos.length === 0) {
+          setErroIA(`Nenhum candidato CATMAT/CATSER válido. Os códigos sugeridos foram descartados pela validação anti-alucinação${
+            (resp as any).descartados ? ` (${(resp as any).descartados} descartados)` : ''
+          }. Tente reformular a descrição.`);
+          break;
+        }
+        setCandidatosIA(resp.candidatos);
+        break;
+      } catch {
+        if (tentativa < 2) continue;
+        setErroIA('Erro de rede. Verifique conexão e tente de novo.');
+        break;
       }
-      setCandidatosIA(resp.candidatos);
-    } finally {
-      setTraduzindoIA(false);
     }
+    setStatusIA('');
+    setTraduzindoIA(false);
   };
 
   const aplicarCandidatoIA = (c: CandidatoIA) => {
@@ -233,24 +258,37 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
               </button>
             </div>
 
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder={`Digite uma palavra-chave (ex: ${tipo === 'material' ? 'água, ônibus, bola' : 'limpeza, transporte, vigilância'})`}
-                value={termo}
-                onChange={e => setTermo(e.target.value)}
-                className="w-full pl-9 pr-9 py-2 border border-gray-300 rounded-md text-sm focus:ring-lie-green focus:border-lie-green"
-              />
-              {termo && (
-                <button
-                  type="button"
-                  onClick={() => setTermo('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+            <div className="flex gap-1.5">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder={`Digite uma palavra-chave (ex: ${tipo === 'material' ? 'água, ônibus, bola' : 'limpeza, transporte, vigilância'})`}
+                  value={termo}
+                  onChange={e => setTermo(e.target.value)}
+                  className="w-full pl-9 pr-9 py-2 border border-gray-300 rounded-md text-sm focus:ring-lie-green focus:border-lie-green"
+                />
+                {termo && (
+                  <button
+                    type="button"
+                    onClick={() => setTermo('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              {/* Botao IA sempre visivel (quando termo tem >=3 chars) */}
+              <button
+                type="button"
+                onClick={buscarComIA}
+                disabled={termo.trim().length < 3 || traduzindoIA}
+                title="Pedir ao Gemini pra traduzir esta descrição em códigos CATMAT/CATSER candidatos"
+                className="px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-md transition flex items-center gap-1.5 shrink-0"
+              >
+                {traduzindoIA ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                IA
+              </button>
             </div>
 
             {termo.length >= 2 && (
@@ -344,23 +382,10 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
             ))}
 
             {termo.length >= 2 && !buscando && totalResultados === 0 && (
-              <div className="p-6 text-center text-xs text-gray-400 space-y-3">
+              <div className="p-6 text-center text-xs text-gray-400">
                 <AlertCircle className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                <div>
-                  Nenhum {tipo === 'material' ? 'PDM' : 'serviço'} encontrado pra "<strong>{termo}</strong>".
-                  <br />Tente outra palavra-chave ou {tipo === 'material' ? 'troque pra CATSER' : 'troque pra CATMAT'}.
-                </div>
-                <div className="border-t border-gray-200 pt-3">
-                  <button
-                    type="button"
-                    onClick={buscarComIA}
-                    disabled={traduzindoIA}
-                    className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-md transition disabled:opacity-50"
-                  >
-                    {traduzindoIA ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Consultando IA…</>) : (<><Wand2 className="w-3.5 h-3.5" /> Buscar com IA (Gemini)</>)}
-                  </button>
-                  <p className="text-[10px] text-gray-400 mt-1.5">A IA traduz "{termo}" em códigos CATMAT/CATSER apropriados.</p>
-                </div>
+                Nenhum {tipo === 'material' ? 'PDM' : 'serviço'} encontrado pra "<strong>{termo}</strong>".
+                <br />Tente outra palavra-chave, {tipo === 'material' ? 'troque pra CATSER' : 'troque pra CATMAT'}, ou clique no botão <strong className="text-purple-600">🪄 IA</strong> ao lado da busca.
               </div>
             )}
 
@@ -371,22 +396,31 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
             )}
           </div>
 
-          {/* Painel da resposta IA (aparece após clicar "Buscar com IA") */}
-          {(candidatosIA || erroIA) && (
+          {/* Painel da resposta IA (aparece quando esta consultando, com candidatos ou erro) */}
+          {(traduzindoIA || candidatosIA || erroIA) && (
             <div className="border-t border-purple-200 bg-purple-50/40 p-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-purple-900">
                   <Wand2 className="w-3.5 h-3.5" />
-                  Sugestões da IA pra "{termo}"
+                  {traduzindoIA ? 'Buscando com IA…' : `Sugestões da IA pra "${termo}"`}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => { setCandidatosIA(null); setErroIA(null); }}
-                  className="text-purple-700 hover:text-purple-900"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                {!traduzindoIA && (
+                  <button
+                    type="button"
+                    onClick={() => { setCandidatosIA(null); setErroIA(null); }}
+                    className="text-purple-700 hover:text-purple-900"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
+              {/* Status progressivo enquanto consulta */}
+              {traduzindoIA && statusIA && (
+                <div className="flex items-center gap-2 text-[11px] text-purple-800 bg-white border border-purple-200 rounded p-2 mb-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span>{statusIA}</span>
+                </div>
+              )}
               {erroIA && (
                 <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
