@@ -123,8 +123,23 @@ export function gerarCertidaoCotacaoPDF(
   field('Item (LIE):', itemNome);
   field('Descrição oficial:', r.descricaoItem);
   field('Código CATMAT/CATSER:', r.codigoCatalogoItem);
-  const qtdUnid = r.quantidade ? `${r.quantidade}${r.unidadeMedida ? ' ' + r.unidadeMedida : ''}` : '';
-  field('Quantidade adquirida:', qtdUnid);
+  // Compat retroativa: se unidadeMedida salva e capacidade (ML/L/KG/G), usa siglaUnidadeFornecimento
+  const SIGLAS_CAPACIDADE_PDF = ['ML', 'L', 'LT', 'KG', 'G', 'GR', 'M', 'M2', 'M3', 'M²', 'M³'];
+  const unidSalvaPDF = String(r.unidadeMedida || '').toUpperCase();
+  const temEmbPDF = r.siglaUnidadeFornecimento || r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0);
+  const unidQtdPDF = (SIGLAS_CAPACIDADE_PDF.includes(unidSalvaPDF) && temEmbPDF)
+    ? (r.siglaUnidadeFornecimento || 'UN')
+    : (r.unidadeMedida || '');
+  const qtdUnid = r.quantidade ? `${r.quantidade}${unidQtdPDF ? ' ' + unidQtdPDF : ''}` : '';
+  field('Quantidade contratada:', qtdUnid);
+  if (r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0)) {
+    const partesEmb: string[] = [];
+    if (r.nomeUnidadeFornecimento) partesEmb.push(r.nomeUnidadeFornecimento);
+    if (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0) {
+      partesEmb.push(`${r.capacidadeUnidadeFornecimento} ${r.siglaUnidadeMedida || ''}`.trim() + ' por unidade');
+    }
+    field('Embalagem:', partesEmb.join(' — '));
+  }
 
   // === Seção 4: Adjudicatário ===
   if (r.fornecedorNome || r.fornecedorCnpj) {

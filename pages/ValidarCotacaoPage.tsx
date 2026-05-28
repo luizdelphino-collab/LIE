@@ -461,7 +461,15 @@ export default function ValidarCotacaoPage() {
                               )}
                               {(r.quantidade || r.unidadeMedida) && (() => {
                                 // QUANTIDADE — unidade da quantidade (UN/CX/FRD), nao capacidade da embalagem
-                                const unidQtd = r.unidadeMedida || 'UN';
+                                // Compat retroativa: cotacoes antigas salvaram capacidade (ML/L/KG/G) no campo unidadeMedida.
+                                // Detecta esse caso e prefere siglaUnidadeFornecimento, caindo em 'UN' como ultimo recurso.
+                                const SIGLAS_CAPACIDADE = ['ML', 'L', 'LT', 'KG', 'G', 'GR', 'M', 'M2', 'M3', 'M²', 'M³'];
+                                const unidSalva = String(r.unidadeMedida || '').toUpperCase();
+                                const unidEhCapacidade = SIGLAS_CAPACIDADE.includes(unidSalva);
+                                const temEmb = r.siglaUnidadeFornecimento || r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0);
+                                const unidQtd = (unidEhCapacidade && temEmb)
+                                  ? (r.siglaUnidadeFornecimento || 'UN')
+                                  : (r.unidadeMedida || 'UN');
                                 const expandida = expandirUnidadeMedida(unidQtd, r.quantidade || 0);
                                 const siglaOrig = String(unidQtd).toUpperCase();
                                 const mostrarSigla = siglaOrig && expandida && expandida.toUpperCase() !== siglaOrig;

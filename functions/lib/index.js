@@ -1121,7 +1121,9 @@ exports.coletarMercadoItem = functions
                 inscricaoEstadualFornecedor: String(r.inscricaoEstadualFornecedor || r.ieFornecedor || r.inscricaoEstadual || ''),
                 codigoCatalogoItem: String(r.codItemCatalogo || r.codigoItemCatalogo || r.codigoItemCatalogoCompra || ''),
                 quantidade: Number(r.quantidade) || 0,
-                unidadeMedida: String(r.unidadeMedida || r.siglaUnidadeMedida || ''),
+                // unidadeMedida = unidade da QUANTIDADE (UN/CX/GRF/COPO).
+                // siglaUnidadeMedida e unidade da CAPACIDADE (ML/L/KG) — nao pode entrar aqui.
+                unidadeMedida: String(r.siglaUnidadeFornecimento || r.unidadeMedida || 'UN'),
                 valorUnitario: valor,
                 unidadeFornecimento: String(r.nomeUnidadeFornecimento || '').trim().toUpperCase(),
                 siglaUnidadeFornecimento: String(r.siglaUnidadeFornecimento || '').trim().toUpperCase(),
