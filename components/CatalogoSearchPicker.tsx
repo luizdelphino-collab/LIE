@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, Loader2, CheckCircle2, AlertCircle, ChevronRight, ArrowLeft,
-  Package, Wrench, Sparkles, X
+  Package, Wrench, Sparkles, X, Wand2
 } from 'lucide-react';
 import {
   buscarPdmsMultiTermo, buscarServicosMultiTermo, listarItensDoPdm,
   formatarCaracteristicas, gerarSinonimosBusca,
   type PdmMatchComOrigem, type ServicoMatchComOrigem, type ItemDoPdm
 } from '../lib/catalogoApi';
+import { traduzirTermoComIA, type CandidatoIA } from '../lib/apiCompras';
 
 export interface CatalogoSelecao {
   codigoCatmat: number;
@@ -44,6 +45,11 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
   const [carregandoItens, setCarregandoItens] = useState(false);
 
   const [autoBuscaFeita, setAutoBuscaFeita] = useState(false);
+
+  // Tradutor IA (Etapa 4D)
+  const [candidatosIA, setCandidatosIA] = useState<CandidatoIA[] | null>(null);
+  const [traduzindoIA, setTraduzindoIA] = useState(false);
+  const [erroIA, setErroIA] = useState<string | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -124,6 +130,40 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
         descricaoCatmatOficial: nome
       },
       nome
+    );
+  };
+
+  // Dispara a busca IA — traduz termo livre em candidatos CATMAT/CATSER via Gemini
+  const buscarComIA = async () => {
+    if (!termo || termo.trim().length < 3) return;
+    setTraduzindoIA(true);
+    setErroIA(null);
+    setCandidatosIA(null);
+    try {
+      const resp = await traduzirTermoComIA(termo.trim());
+      if (!resp) {
+        setErroIA('Falha ao consultar IA. Tente de novo em alguns segundos.');
+        return;
+      }
+      if (resp.candidatos.length === 0) {
+        setErroIA('Nenhum candidato CATMAT/CATSER encontrado. Tente reformular a descrição.');
+        return;
+      }
+      setCandidatosIA(resp.candidatos);
+    } finally {
+      setTraduzindoIA(false);
+    }
+  };
+
+  const aplicarCandidatoIA = (c: CandidatoIA) => {
+    onSelect(
+      {
+        codigoCatmat: c.codigo,
+        tipoCatmat: c.tipo,
+        nomeCatmatOficial: c.nome,
+        descricaoCatmatOficial: c.descricao,
+      },
+      c.nome,
     );
   };
 
@@ -304,10 +344,23 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
             ))}
 
             {termo.length >= 2 && !buscando && totalResultados === 0 && (
-              <div className="p-6 text-center text-xs text-gray-400">
+              <div className="p-6 text-center text-xs text-gray-400 space-y-3">
                 <AlertCircle className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                Nenhum {tipo === 'material' ? 'PDM' : 'serviço'} encontrado pra "<strong>{termo}</strong>".
-                <br />Tente outra palavra-chave ou troque pra {tipo === 'material' ? 'CATSER (serviço)' : 'CATMAT (material)'}.
+                <div>
+                  Nenhum {tipo === 'material' ? 'PDM' : 'serviço'} encontrado pra "<strong>{termo}</strong>".
+                  <br />Tente outra palavra-chave ou {tipo === 'material' ? 'troque pra CATSER' : 'troque pra CATMAT'}.
+                </div>
+                <div className="border-t border-gray-200 pt-3">
+                  <button
+                    type="button"
+                    onClick={buscarComIA}
+                    disabled={traduzindoIA}
+                    className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-md transition disabled:opacity-50"
+                  >
+                    {traduzindoIA ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Consultando IA…</>) : (<><Wand2 className="w-3.5 h-3.5" /> Buscar com IA (Gemini)</>)}
+                  </button>
+                  <p className="text-[10px] text-gray-400 mt-1.5">A IA traduz "{termo}" em códigos CATMAT/CATSER apropriados.</p>
+                </div>
               </div>
             )}
 
@@ -317,6 +370,61 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
               </div>
             )}
           </div>
+
+          {/* Painel da resposta IA (aparece após clicar "Buscar com IA") */}
+          {(candidatosIA || erroIA) && (
+            <div className="border-t border-purple-200 bg-purple-50/40 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-purple-900">
+                  <Wand2 className="w-3.5 h-3.5" />
+                  Sugestões da IA pra "{termo}"
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setCandidatosIA(null); setErroIA(null); }}
+                  className="text-purple-700 hover:text-purple-900"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {erroIA && (
+                <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  {erroIA}
+                </div>
+              )}
+              {candidatosIA && candidatosIA.length > 0 && (
+                <div className="space-y-1.5">
+                  {candidatosIA.map((c, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => aplicarCandidatoIA(c)}
+                      className="w-full text-left p-2.5 bg-white border border-purple-200 hover:border-purple-400 hover:bg-purple-50 rounded transition group"
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${c.tipo === 'material' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                            {c.tipo === 'material' ? 'CATMAT' : 'CATSER'} {c.codigo}
+                          </span>
+                          <span className="text-[10px] text-purple-700 font-semibold">
+                            confiança {(c.confianca * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-purple-400 opacity-0 group-hover:opacity-100" />
+                      </div>
+                      <div className="text-xs font-bold text-lie-ink">{c.nome}</div>
+                      {c.descricao && <div className="text-[10px] text-gray-600 mt-0.5 leading-snug line-clamp-2">{c.descricao}</div>}
+                      {c.justificativa && <div className="text-[10px] text-purple-700 italic mt-1 leading-snug">▸ {c.justificativa}</div>}
+                    </button>
+                  ))}
+                  <p className="text-[10px] text-gray-500 italic mt-2 text-center">
+                    ⚠ Verifique se o código corresponde ao que você quer. A IA pode errar — clique apenas se a descrição bate com seu item.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 

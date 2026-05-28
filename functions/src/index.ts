@@ -515,6 +515,192 @@ export const obterArquivosContratacao = functions
   });
 
 /**
+ * Tradutor IA: recebe um termo em linguagem natural (ex: "carrinho de pipoca
+ * para evento esportivo") e usa o Gemini Flash pra retornar 3-5 candidatos
+ * de CATMAT/CATSER apropriados. O frontend usa esses candidatos pra
+ * consultar a API de preços (consultarPrecosMulti) e mostrar ao usuário.
+ *
+ * Custo: ~R$ 0,01 por busca (Gemini 2.0 Flash tem free tier de 1500/dia).
+ *
+ * Por que isso é necessário:
+ * - As APIs federais (PNCP, Compras.gov.br) NÃO aceitam busca textual livre
+ * - O Banco de Preços (paid) faz ETL próprio com full-text search; replicar
+ *   é overkill (~50h + infra). Em vez disso, traduzimos texto → códigos
+ *   oficiais via IA, e usamos as APIs federais que aceitam código.
+ *
+ * GET /traduzirTermoCatmat?termo=carrinho+de+pipoca
+ *
+ * Resposta:
+ *  { termo, candidatos: [{ codigo, tipo, nome, descricao, justificativa, confianca }] }
+ */
+export const traduzirTermoCatmat = functions
+  .runWith({
+    timeoutSeconds: 30,
+    memory: '256MB',
+    secrets: ['GEMINI_API_KEY'],
+  })
+  .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin as string | undefined);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Vary', 'Origin');
+
+    if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+    if (req.method !== 'GET') { res.status(405).json({ error: 'Apenas GET é suportado.' }); return; }
+
+    const termo = String(req.query.termo || '').trim();
+    if (!termo || termo.length < 3) {
+      res.status(400).json({ error: 'Query param "termo" obrigatório (>= 3 caracteres).' });
+      return;
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error('GEMINI_API_KEY não disponível no ambiente');
+      res.status(500).json({ error: 'Servidor sem chave Gemini configurada. Contate o admin.' });
+      return;
+    }
+
+    try {
+      // Lazy import pra não carregar o SDK no cold start de outras funcoes
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { GoogleGenerativeAI } = require('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        generationConfig: {
+          temperature: 0.2,       // baixa pra mais determinismo
+          maxOutputTokens: 4096,  // 5 candidatos × descricoes ricas
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const prompt = `Você é um especialista no Catálogo CATMAT/CATSER do governo federal brasileiro (Compras.gov.br).
+Sua tarefa: traduzir o termo livre que o usuário digitou em 3 a 5 candidatos REAIS de CATMAT (material) ou CATSER (serviço).
+
+CONTEXTO: o usuário cadastra itens pra projetos da Lei de Incentivo ao Esporte (LIE/FEDEESP) — eventos esportivos escolares, olimpíadas estudantis, capacitação esportiva, etc. Foque no contexto LIE/esporte/eventos quando relevante.
+
+REGRAS CRÍTICAS:
+1. Você DEVE retornar APENAS códigos CATMAT/CATSER REAIS, que existam no catálogo Compras.gov.br
+2. NÃO INVENTE códigos numéricos — se tiver dúvida, NÃO retorne candidato
+3. NÃO confunda código de grupo (PDM) com código de item — itens CATMAT geralmente têm 6 dígitos
+4. Pra serviços, use códigos CATSER (geralmente 5 dígitos)
+5. Ordene candidatos por confiança (mais provável primeiro)
+6. Cada candidato deve incluir uma justificativa clara
+
+TERMO DO USUÁRIO: "${termo}"
+
+Responda em JSON puro com esta estrutura exata (sem markdown, sem comentários):
+{
+  "candidatos": [
+    {
+      "codigo": 445484,
+      "tipo": "material",
+      "nome": "ÁGUA MINERAL NATURAL",
+      "descricao": "Água mineral natural sem gás, garrafa plástica PET, 500ml, lacrada (Portaria 2914/2011 MS)",
+      "justificativa": "Match direto: usuário pediu 'água para evento'; este é o CATMAT genérico de água mineral",
+      "confianca": 0.95
+    }
+  ]
+}
+
+Se não tiver candidatos confiáveis, retorne {"candidatos": []} e nada mais.`;
+
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+
+      // Parse defensivo do JSON
+      let parsed: any;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        // Tenta extrair JSON de markdown ou texto com lixo
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) {
+          try { parsed = JSON.parse(m[0]); } catch { parsed = null; }
+        }
+      }
+
+      if (!parsed || !Array.isArray(parsed.candidatos)) {
+        res.status(502).json({
+          error: 'Resposta do Gemini não retornou JSON estruturado',
+          rawSnippet: text.substring(0, 500),
+        });
+        return;
+      }
+
+      // Validacao basica: descarta candidatos sem codigo numerico valido
+      const candidatosBrutos = parsed.candidatos
+        .filter((c: any) => c && Number(c.codigo) > 0 && (c.tipo === 'material' || c.tipo === 'servico'))
+        .map((c: any) => ({
+          codigo: Number(c.codigo),
+          tipo: c.tipo as 'material' | 'servico',
+          nome: String(c.nome || ''),
+          descricao: String(c.descricao || ''),
+          justificativa: String(c.justificativa || ''),
+          confianca: Number(c.confianca) || 0.5,
+        }))
+        .slice(0, 5);
+
+      // VALIDACAO ANTI-FRAUDE: chama API oficial do SERPRO pra verificar se cada
+      // codigo retornado pela IA realmente EXISTE no catalogo. Descarta os
+      // alucinados. Esse passo e CRITICO — IAs podem inventar codigos plausiveis.
+      const headersGov = {
+        'Accept': 'application/json',
+        'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
+      };
+      const validacoes = await Promise.all(candidatosBrutos.map(async (c: any) => {
+        try {
+          const url = c.tipo === 'servico'
+            ? `https://cnbs.estaleiro.serpro.gov.br/cnbs-api/servico/v1/dadosServicoPorCodigo?codigo_servico=${c.codigo}`
+            : `https://cnbs.estaleiro.serpro.gov.br/cnbs-api/material/v1/recuperaDadosItemMaterialPorCodigo?codigo_item_material=${c.codigo}`;
+          const resp = await fetch(url, { headers: headersGov });
+          if (!resp.ok) return { ...c, validado: false, motivoDescarte: `HTTP ${resp.status} na validação` };
+          const data = await resp.json();
+          const arr = Array.isArray(data) ? data : [data];
+          const primeiro = arr[0];
+          if (!primeiro || !primeiro.codigoItem && !primeiro.codigoServico) {
+            return { ...c, validado: false, motivoDescarte: 'Código não encontrado no catálogo oficial' };
+          }
+          // Sobrescreve nome/descricao com os oficiais quando disponiveis (mais confiavel que IA)
+          const nomeOficial = primeiro.nomePdm || primeiro.descricaoServicoAcentuado || primeiro.descricaoServico || c.nome;
+          const descOficial = primeiro.descricaoCompleta || primeiro.descricaoItem || primeiro.descricaoServico || c.descricao;
+          return {
+            ...c,
+            nome: nomeOficial,
+            descricao: descOficial,
+            validado: true,
+          };
+        } catch (err: any) {
+          return { ...c, validado: false, motivoDescarte: `Erro na validação: ${err?.message || 'desconhecido'}` };
+        }
+      }));
+
+      const candidatosValidados = validacoes.filter((c: any) => c.validado);
+      const candidatosDescartados = validacoes
+        .filter((c: any) => !c.validado)
+        .map((c: any) => ({ codigo: c.codigo, motivo: c.motivoDescarte }));
+
+      res.set('Cache-Control', 'public, max-age=3600');
+      res.json({
+        termo,
+        modelo: 'gemini-2.5-flash',
+        totalCandidatos: candidatosValidados.length,
+        descartados: candidatosDescartados.length,
+        candidatos: candidatosValidados,
+        ...(candidatosDescartados.length > 0 ? { motivoDescartes: candidatosDescartados } : {}),
+      });
+    } catch (e: any) {
+      console.error('Falha ao chamar Gemini:', e);
+      res.status(502).json({
+        error: 'Falha ao chamar Gemini. Tente novamente.',
+        detalhe: e?.message || String(e),
+      });
+    }
+  });
+
+/**
  * Proxy legado — mantido pra retrocompatibilidade.
  * Usa apenas o endpoint clássico /modulo-pesquisa-preco/1_consultarMaterial.
  * Novos chamadores devem usar `consultarPrecosMulti` (acima).

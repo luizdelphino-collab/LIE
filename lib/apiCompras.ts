@@ -646,6 +646,43 @@ export interface ArquivosContratacaoResposta {
   linkPaginaPncp: string;
 }
 
+/**
+ * Tradutor IA: termo livre -> candidatos CATMAT/CATSER via Gemini.
+ * Usado quando a busca textual no catalogo nao retorna o que o user quer
+ * (porque a API gov nao aceita busca textual livre).
+ */
+export interface CandidatoIA {
+  codigo: number;
+  tipo: 'material' | 'servico';
+  nome: string;
+  descricao: string;
+  justificativa: string;
+  confianca: number;
+}
+export interface TraduzirRespostaIA {
+  termo: string;
+  modelo: string;
+  totalCandidatos: number;
+  candidatos: CandidatoIA[];
+}
+
+export async function traduzirTermoComIA(termo: string): Promise<TraduzirRespostaIA | null> {
+  if (!termo || termo.trim().length < 3) return null;
+  const projectId = storage.app.options.projectId;
+  const url = `https://us-central1-${projectId}.cloudfunctions.net/traduzirTermoCatmat?termo=${encodeURIComponent(termo.trim())}`;
+  try {
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!resp.ok) {
+      console.warn(`traduzirTermoCatmat HTTP ${resp.status}`);
+      return null;
+    }
+    return await resp.json();
+  } catch (e) {
+    console.warn('Falha ao chamar tradutor IA:', e);
+    return null;
+  }
+}
+
 export async function obterArquivosContratacao(numeroControlePNCP: string): Promise<ArquivosContratacaoResposta | null> {
   if (!numeroControlePNCP) return null;
   const projectId = storage.app.options.projectId;
