@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, writeBatch } from 'firebase/firestore';
 import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ShieldCheck, Lightbulb, Package, Scale, Eye } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -333,6 +334,16 @@ export default function ItensMasterPage() {
   useEffect(() => {
     carregarItens();
   }, []);
+
+  // Deep-link: ?edit={itemId} abre direto o form de edição (vindo do projeto)
+  const [searchParams] = useSearchParams();
+  const editFromUrl = searchParams.get('edit');
+  useEffect(() => {
+    if (!editFromUrl || items.length === 0) return;
+    const target = items.find(it => it.id === editFromUrl);
+    if (target) openEdit(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editFromUrl, items.length]);
 
   const handleSort = (field: keyof ItemMaster) => {
     if (sortField === field) {

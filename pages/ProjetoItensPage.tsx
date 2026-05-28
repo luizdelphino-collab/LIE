@@ -625,52 +625,148 @@ export default function ProjetoItensPage() {
             </div>
           ) : editId ? (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {selectedMaster && (
-                <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between mb-2">
-                  <div>
-                    <span className="text-[10px] font-bold text-lie-green uppercase">Item Selecionado</span>
-                    <h3 className="font-bold text-lie-ink">{selectedMaster.nome}</h3>
-                    <p className="text-xs text-gray-500">{selectedMaster.unidade} • {selectedMaster.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+              {/* ===== SEÇÃO 1: DADOS DO BANCO (READ-ONLY) ===== */}
+              <div className="p-4 bg-lie-green/5 rounded-lg border-2 border-lie-green/20">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-lie-green" />
+                    <span className="text-xs font-bold text-lie-green uppercase tracking-wider">Dados do Banco de Itens</span>
+                    <span className="text-[10px] text-gray-500 italic">(sincronizados automaticamente — não editáveis aqui)</span>
                   </div>
+                  {(selectedMaster?.id || formData.itemId) && (
+                    <a
+                      href={`/#/itens?edit=${selectedMaster?.id || formData.itemId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline flex items-center gap-1 shrink-0"
+                      title="Abre o item no Banco em outra aba pra editar nome, valor, CATMAT, embalagem, etc."
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      Editar no Banco
+                    </a>
+                  )}
                 </div>
-              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Memorial de Cálculo *</label>
-                  <textarea 
-                    required 
-                    rows={2} 
-                    placeholder="Ex: 10 alunos x 5 dias x R$ 2,50"
-                    value={formData.memorialCalculo} 
-                    onChange={e => setFormData(p => ({...p, memorialCalculo: e.target.value}))} 
-                    className="w-full border-gray-300 rounded-lg shadow-sm"
-                  />
+                {!selectedMaster && (
+                  <div className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <div>
+                      Este item não existe mais no Banco (foi removido). Os dados abaixo são o snapshot preservado no momento da vinculação.
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2 text-xs">
+                  <div>
+                    <h3 className="font-bold text-lie-ink text-sm leading-tight">{selectedMaster?.nome || formData.nome || '—'}</h3>
+                    {(selectedMaster?.descricao || formData.descricao) && (
+                      <p className="text-[11px] text-gray-600 mt-0.5 leading-snug">{selectedMaster?.descricao || formData.descricao}</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-lie-green/20">
+                    <div>
+                      <span className="text-[10px] text-gray-500 uppercase block">Categoria</span>
+                      <strong className="text-gray-800 text-[11px]">{selectedMaster?.categoria || '—'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-500 uppercase block">Unidade</span>
+                      <strong className="text-gray-800 text-[11px]">{selectedMaster?.unidade || formData.unidade || '—'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-500 uppercase block">Valor Unitário</span>
+                      <strong className="text-lie-green text-[12px] font-mono">
+                        {(selectedMaster?.valorUnitario ?? formData.valorUnitario ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-500 uppercase block">Cód. #</span>
+                      <strong className="text-gray-800 text-[11px] font-mono">#{String(selectedMaster?.codigo ?? '—').padStart(3, '0')}</strong>
+                    </div>
+                  </div>
+
+                  {/* CATMAT/CATSER se existir */}
+                  {(selectedMaster?.codigoCatmat || formData.codigoCatmat) && (
+                    <div className="pt-2 border-t border-lie-green/20">
+                      <span className="text-[10px] text-gray-500 uppercase block">
+                        Código {(selectedMaster?.tipoCatmat || formData.tipoCatmat) === 'servico' ? 'CATSER' : 'CATMAT'} Vinculado
+                      </span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[11px] font-bold font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                          {selectedMaster?.codigoCatmat || formData.codigoCatmat}
+                        </span>
+                        {(selectedMaster?.nomeCatmatOficial || formData.nomeCatmatOficial) && (
+                          <span className="text-[11px] text-gray-700 truncate">{selectedMaster?.nomeCatmatOficial || formData.nomeCatmatOficial}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Embalagem se existir */}
+                  {(selectedMaster?.embalagemDescricao || (selectedMaster?.fatorConversao && selectedMaster?.unidadeBase)) && (
+                    <div className="pt-2 border-t border-lie-green/20">
+                      <span className="text-[10px] text-gray-500 uppercase block">Embalagem oficial</span>
+                      <strong className="text-gray-800 text-[11px]">
+                        {selectedMaster?.embalagemDescricao || `${selectedMaster?.fatorConversao} ${selectedMaster?.unidadeBase || ''}`}
+                      </strong>
+                    </div>
+                  )}
+
+                  {/* Rota legal alternativa se aplicável */}
+                  {(selectedMaster?.semCorrespondenciaCatalogo || formData.semCorrespondenciaCatalogo) && (
+                    <div className="pt-2 border-t border-lie-green/20">
+                      <span className="text-[10px] text-purple-700 font-bold uppercase">📑 Rota legal de 3 orçamentos (IN 73/2020 art. 5º IV)</span>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Quantidade Total *</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    required 
-                    value={formData.quantidade} 
-                    onChange={e => setFormData(p => ({...p, quantidade: parseFloat(e.target.value) || 0}))} 
-                    className="w-full border-gray-300 rounded-lg shadow-sm" 
-                  />
+              </div>
+
+              {/* ===== SEÇÃO 2: DADOS DO PROJETO (EDITÁVEIS) ===== */}
+              <div className="p-4 bg-amber-50/40 rounded-lg border-2 border-amber-200">
+                <div className="flex items-center gap-2 mb-3">
+                  <Edit3 className="w-4 h-4 text-amber-700" />
+                  <span className="text-xs font-bold text-amber-900 uppercase tracking-wider">Dados específicos deste projeto</span>
+                  <span className="text-[10px] text-gray-500 italic">(só estes campos são editados aqui)</span>
                 </div>
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Total do Item (Auto)</label>
-                  <div className="px-4 py-2 bg-gray-100 rounded-lg font-bold text-lie-ink">
-                    {((selectedMaster?.valorUnitario || 0) * (formData.quantidade || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Memorial de Cálculo *</label>
+                    <textarea
+                      required
+                      rows={3}
+                      placeholder="Ex: 20 diárias de competição × 6 jogos × 168 atletas..."
+                      value={formData.memorialCalculo}
+                      onChange={e => setFormData(p => ({...p, memorialCalculo: e.target.value}))}
+                      className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">Justificativa do cálculo da quantidade — visível no PDF do projeto.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Quantidade Total *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={formData.quantidade}
+                      onChange={e => setFormData(p => ({...p, quantidade: parseFloat(e.target.value) || 0}))}
+                      className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Total do Item (Auto)</label>
+                    <div className="px-4 py-2 bg-gray-100 rounded-lg font-bold text-lie-ink text-sm">
+                      {((selectedMaster?.valorUnitario ?? formData.valorUnitario ?? 0) * (formData.quantidade || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+              <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancelar</button>
                 <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-8 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2">
                   {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {saving ? 'Vinculando...' : 'Salvar Alterações'}
+                  {saving ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
               </div>
             </form>
