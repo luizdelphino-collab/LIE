@@ -58,11 +58,20 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
   // Referências ativas selecionadas para a cesta
   const [cestaReferencias, setCestaReferencias] = useState<PrecoReferencia[]>([]);
 
-  // Carregar referências já salvas no item, se existirem
+  // Carregar referências já salvas no item, se existirem.
+  // REGRA ANTI-FRAUDE: cotacoes com valor MENOR que o estimado do item nao
+  // compoem a base de pesquisa (IN 65/2021 art. 6º + posicao do user).
+  // Cotacao abaixo do estimado pode indicar valor inexequivel ou erro;
+  // se entrasse na base, derrubaria a mediana artificialmente.
   useEffect(() => {
     if (isOpen && item) {
       if (item.referencias && Array.isArray(item.referencias)) {
-        setCestaReferencias(item.referencias);
+        const elegiveis = item.referencias.filter(r => r.valorUnitario >= item.valorUnitario);
+        const removidas = item.referencias.length - elegiveis.length;
+        setCestaReferencias(elegiveis);
+        if (removidas > 0) {
+          console.info(`[pesquisa-preco] ${removidas} cotacao(oes) abaixo do estimado R$ ${item.valorUnitario} removidas da cesta ao carregar.`);
+        }
       } else {
         setCestaReferencias([]);
       }
@@ -207,12 +216,13 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         prev.filter(r => `${r.fonte}-${r.identificadorCompra}-${r.valorUnitario}` !== chave)
       );
     } else {
-      // Validar regra de blindagem de preço (deve ser igual ou superior ao estimado do projeto)
+      // BLINDAGEM SUPERIOR: rejeita cotacoes abaixo do estimado.
+      // Valores menores que a referencia nao compoem a base de pesquisa.
       if (ref.valorUnitario < item.valorUnitario) {
-        const confirmacao = window.confirm(
-          `Atenção: O valor de R$ ${ref.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} é INFERIOR ao valor estimado no projeto de R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. \n\nEm conformidade com a Instrução Normativa SEGES/ME nº 65/2021, cotar valores inferiores reduzirá o preço sugerido do projeto na consolidação, podendo inviabilizar a aquisição futura devido à defasagem inflacionária. \n\nDeseja prosseguir com esta cotação mesmo assim?`
+        alert(
+          `Cotacao recusada: R$ ${ref.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} esta abaixo do valor estimado do item (R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).\n\nValores menores que o estimado nao compoem a base de pesquisa.`
         );
-        if (!confirmacao) return;
+        return;
       }
       setCestaReferencias(prev => [...prev, ref]);
     }
@@ -269,12 +279,16 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       return;
     }
 
-    // Validar blindagem superior
+    // BLINDAGEM SUPERIOR (anti-fraude): rejeita cotacoes abaixo do estimado.
+    // Cotacao abaixo do valor de referencia nao compoe a base de pesquisa —
+    // poderia indicar valor inexequivel ou puxar a mediana pra baixo
+    // artificialmente. Use uma cotacao igual ou superior, ou ajuste o valor
+    // estimado do item no Banco se estiver realmente alto.
     if (valorNum < item.valorUnitario) {
-      const confirmacao = window.confirm(
-        `Atenção: O valor de R$ ${valorNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} é INFERIOR ao valor estimado no projeto de R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. \n\nDeseja adicionar esta cotação mesmo assim?`
+      alert(
+        `Cotacao recusada: R$ ${valorNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} esta abaixo do valor estimado do item (R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).\n\nValores menores que o estimado nao compoem a base de pesquisa.\n\nOpcoes:\n  1. Use outra cotacao com valor >= R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n  2. Se o valor estimado do item esta alto demais, ajuste no Banco antes de pesquisar`
       );
-      if (!confirmacao) return;
+      return;
     }
 
     if (!selectedFile) {
@@ -672,16 +686,20 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                         return (
                           <div
                             key={idx}
-                            onClick={() => toggleSelecaoCesta(p)}
-                            className={`p-3 bg-white border rounded-xl hover:border-lie-green cursor-pointer transition-all flex items-center gap-3 ${
-                              isSelected ? 'border-lie-green ring-2 ring-lie-green/10' : 'border-gray-200'
+                            onClick={() => { if (!isLower) toggleSelecaoCesta(p); }}
+                            className={`p-3 bg-white border rounded-xl transition-all flex items-center gap-3 ${
+                              isLower
+                                ? 'border-gray-200 opacity-60 cursor-not-allowed grayscale'
+                                : `cursor-pointer hover:border-lie-green ${isSelected ? 'border-lie-green ring-2 ring-lie-green/10' : 'border-gray-200'}`
                             }`}
+                            title={isLower ? 'Cotacao abaixo do valor estimado — nao compoe a base de pesquisa' : undefined}
                           >
                             <input
                               type="checkbox"
                               checked={isSelected}
+                              disabled={isLower}
                               onChange={() => {}}
-                              className="rounded border-gray-300 text-lie-green focus:ring-lie-green w-4.5 h-4.5 pointer-events-none"
+                              className="rounded border-gray-300 text-lie-green focus:ring-lie-green w-4.5 h-4.5 pointer-events-none disabled:opacity-40"
                             />
                             
                             <div className="flex-1">
@@ -720,7 +738,7 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                                     {p.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                   </span>
                                   {isLower && (
-                                    <span className="block text-[8px] text-amber-500 font-bold uppercase tracking-tight -mt-0.5">Inferior ao estimado</span>
+                                    <span className="block text-[8px] text-red-600 font-bold uppercase tracking-tight -mt-0.5">⊘ Inferior — não elegível</span>
                                   )}
                                 </div>
                               </div>
