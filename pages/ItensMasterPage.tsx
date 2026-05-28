@@ -197,9 +197,10 @@ export default function ItensMasterPage() {
   // Reset pra página 1 quando busca/filtro muda
   useEffect(() => { setPaginaAtual(1); }, [searchTerm, tamanhoPagina]);
 
-  // Quando os itens carregam, busca preços de mercado de quem tem CATMAT validado
-  // (em lote, paralelismo 4, cache de 24h na Cloud Function via Firestore).
-  useEffect(() => {
+  // Carregamento manual do preview Mercado Gov — antes era automatico no carregamento
+  // da pagina, mas o usuario pediu pra ser sob demanda. Cache de 24h na Cloud Function
+  // ainda funciona, mas a chamada so dispara quando o botao for clicado.
+  const carregarMercadoPreview = () => {
     const itensComCatmat = items.filter(it => it.codigoCatmat && !(it.codigoCatmat in mercado));
     if (itensComCatmat.length === 0) return;
 
@@ -222,8 +223,7 @@ export default function ItensMasterPage() {
         return n;
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items]);
+  };
 
   // Estado do limpador de duplicatas
   const [limpezaOpen, setLimpezaOpen] = useState(false);
@@ -697,13 +697,30 @@ export default function ItensMasterPage() {
             </span>
           </button>
 
+          {/* Preview rapido Mercado Gov — apenas leitura, cache 24h */}
+          <button
+            onClick={carregarMercadoPreview}
+            disabled={itensComCatmat.length === 0 || mercadoCarregando.size > 0}
+            title="Carregar preview de mercado (R$/unidade, saneadas) — leitura rapida, nao arquiva certidoes"
+            className="group flex items-center bg-blue-50 border border-blue-200 text-blue-700 rounded-lg p-2 transition-all duration-300 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            {mercadoCarregando.size > 0 ? (
+              <Loader2 className="w-5 h-5 shrink-0 text-blue-600 animate-spin" />
+            ) : (
+              <Eye className="w-5 h-5 shrink-0 text-blue-600" />
+            )}
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Carregar Mercado Gov ({itensComCatmat.length})
+            </span>
+          </button>
+
           {/* Atualizar mercado em lote — pesquisa de preco em todos os itens com CATMAT */}
           <button
             onClick={() => setBatchOpen(true)}
             disabled={itensComCatmat.length === 0}
             title={itensComCatmat.length === 0
               ? 'Nenhum item com CATMAT vinculado'
-              : `Re-pesquisar preco publico em ${itensComCatmat.length} item(ns) — atualiza referencias salvas pra todos os projetos`}
+              : `Re-pesquisar preco publico em ${itensComCatmat.length} item(ns) — arquiva certidoes e atualiza referencias salvas pra todos os projetos`}
             className="group flex items-center bg-emerald-50 border border-emerald-300 text-emerald-700 rounded-lg p-2 transition-all duration-300 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
             <RefreshCcw className="w-5 h-5 shrink-0 text-emerald-600" />
