@@ -9,7 +9,7 @@ import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/Catalo
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
 import CatmatDiagnostico from '../components/CatmatDiagnostico';
 import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
-import { isRecursoHumano } from '../lib/apiCompras';
+import { isRecursoHumano, padronizarItemNomenclatura, type PadronizarItemResposta } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
@@ -91,7 +91,97 @@ export default function ItensMasterPage() {
   const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, current: '' });
   const [batchResults, setBatchResults] = useState<AutoPesquisaResult[]>([]);
 
+  // Padronizacao em lote — IA reescreve nome/desc/unidade pra alinhar com catalogo oficial
+  type PadronizacaoResult = {
+    itemId: string;
+    itemNome: string;
+    status: 'ok' | 'pulado' | 'erro';
+    reason?: string;
+    antes?: { nome: string; descricao: string; unidade: string };
+    depois?: PadronizarItemResposta;
+  };
+  const [padronizarOpen, setPadronizarOpen] = useState(false);
+  const [padronizarRunning, setPadronizarRunning] = useState(false);
+  const [padronizarProgress, setPadronizarProgress] = useState({ done: 0, total: 0, current: '' });
+  const [padronizarResults, setPadronizarResults] = useState<PadronizacaoResult[]>([]);
+
   const itensComCatmat = items.filter(it => it.codigoCatmat && it.codigoCatmat > 0);
+
+  /**
+   * Padronizacao em lote: pra cada item com CATMAT vinculado, pega amostra de
+   * cotacoes do mercado, chama Gemini, e aplica diretamente nome/desc/unidade/embalagem.
+   * Preserva nome original em nomeOriginalLIE/descricaoOriginalLIE pra rollback.
+   */
+  const startPadronizacao = async () => {
+    const alvos = itensComCatmat;
+    if (alvos.length === 0) return;
+    setPadronizarRunning(true);
+    setPadronizarResults([]);
+    setPadronizarProgress({ done: 0, total: alvos.length, current: '' });
+    const results: PadronizacaoResult[] = [];
+    for (let i = 0; i < alvos.length; i++) {
+      const it = alvos[i];
+      setPadronizarProgress({ done: i, total: alvos.length, current: it.nome });
+      try {
+        // Garante que mercado esteja carregado pra esse item — fonte das amostras
+        let mercadoItem = mercado[it.codigoCatmat!];
+        if (!mercadoItem) {
+          mercadoItem = await coletarMercadoItem(it.codigoCatmat!, it.tipoCatmat || 'material');
+          if (mercadoItem) setMercado(prev => ({ ...prev, [it.codigoCatmat!]: mercadoItem! }));
+        }
+        const amostraCotacoes = (mercadoItem?.cotacoes || []).slice(0, 8).map(c => ({
+          descricaoItem: c.descricaoItem,
+          siglaUnidadeFornecimento: c.siglaUnidadeFornecimento,
+          nomeUnidadeFornecimento: c.unidadeFornecimento,
+          capacidadeUnidadeFornecimento: c.capacidadeUnidadeFornecimento,
+          siglaUnidadeMedida: c.siglaUnidadeMedida,
+        }));
+        const resp = await padronizarItemNomenclatura({
+          itemNome: it.nome,
+          itemDescricao: it.descricao || '',
+          itemUnidade: String(it.unidade || ''),
+          codigoCatmat: it.codigoCatmat!,
+          tipoCatmat: (it.tipoCatmat || 'material') as 'material' | 'servico',
+          nomeCatmatOficial: it.nomeCatmatOficial || '',
+          descricaoCatmatOficial: it.descricaoCatmatOficial || '',
+          amostraCotacoes,
+        });
+        if (!resp) {
+          results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'IA nao retornou resposta valida' });
+          setPadronizarResults([...results]);
+          continue;
+        }
+        // Aplica direto no Firestore — preserva originais pra auditoria
+        await setDoc(doc(db, 'items', it.id), {
+          nomeOriginalLIE: (it as any).nomeOriginalLIE || it.nome,
+          descricaoOriginalLIE: (it as any).descricaoOriginalLIE || it.descricao || '',
+          unidadeOriginalLIE: (it as any).unidadeOriginalLIE || it.unidade || '',
+          nome: resp.nomeAlinhado,
+          descricao: resp.descricaoAlinhada,
+          unidade: resp.unidadeAlinhada || it.unidade,
+          embalagemDescricao: resp.embalagemDescricao || it.embalagemDescricao || '',
+          fatorConversao: resp.fatorConversao ?? it.fatorConversao ?? null,
+          unidadeBase: resp.unidadeBase ?? it.unidadeBase ?? null,
+          padronizadoEm: serverTimestamp(),
+          padronizadoModelo: resp.modelo,
+        }, { merge: true });
+        results.push({
+          itemId: it.id,
+          itemNome: it.nome,
+          status: 'ok',
+          antes: { nome: it.nome, descricao: it.descricao || '', unidade: String(it.unidade || '') },
+          depois: resp,
+        });
+        setPadronizarResults([...results]);
+      } catch (e: any) {
+        results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: e?.message || String(e) });
+        setPadronizarResults([...results]);
+      }
+    }
+    setPadronizarProgress({ done: alvos.length, total: alvos.length, current: '' });
+    setPadronizarRunning(false);
+    await carregarItens();
+  };
 
   const startBatchPesquisa = async () => {
     const alvos = itensComCatmat;
@@ -694,6 +784,19 @@ export default function ItensMasterPage() {
             <Wand2 className="w-5 h-5 shrink-0 text-amber-600" />
             <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
               Validar CATMAT em Lote
+            </span>
+          </button>
+
+          {/* Padronizar Nomenclatura — IA reescreve nome/desc/unidade pra alinhar com catalogo oficial */}
+          <button
+            onClick={() => setPadronizarOpen(true)}
+            disabled={itensComCatmat.length === 0}
+            title="IA reescreve nome, descricao e unidade dos itens pra alinhar com o catalogo CATMAT/CATSER oficial. Preserva original em nomeOriginalLIE."
+            className="group flex items-center bg-purple-50 border border-purple-300 text-purple-700 rounded-lg p-2 transition-all duration-300 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            <Wand2 className="w-5 h-5 shrink-0 text-purple-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Padronizar Nomenclatura (IA)
             </span>
           </button>
 
@@ -1363,6 +1466,160 @@ export default function ItensMasterPage() {
         items={items}
         onAtualizado={carregarItens}
       />
+
+      {/* ===== MODAL DE PADRONIZACAO DE NOMENCLATURA (IA) ===== */}
+      {padronizarOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[88vh]">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-500 rounded-lg">
+                  <Wand2 className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Padronizar Nomenclatura (IA)</h3>
+                  <p className="text-xs text-gray-300">
+                    {padronizarRunning
+                      ? `Processando ${padronizarProgress.done + 1} de ${padronizarProgress.total} — ${padronizarProgress.current}`
+                      : padronizarResults.length > 0
+                        ? `Concluido: ${padronizarResults.filter(r => r.status === 'ok').length} alinhado(s), ${padronizarResults.filter(r => r.status === 'erro').length} erro(s)`
+                        : `${itensComCatmat.length} item(ns) serao reescritos pra alinhar com catalogo oficial`
+                    }
+                  </p>
+                </div>
+              </div>
+              {!padronizarRunning && (
+                <button
+                  onClick={() => { setPadronizarOpen(false); setPadronizarResults([]); }}
+                  className="hover:bg-white/10 p-2 rounded-full transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {padronizarRunning && (
+                <div className="space-y-2">
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-purple-500 h-full transition-all duration-300"
+                      style={{ width: `${(padronizarProgress.done / Math.max(padronizarProgress.total, 1)) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Consultando Gemini 2.5 Flash com amostras de cotacoes reais…
+                  </p>
+                </div>
+              )}
+
+              {!padronizarRunning && padronizarResults.length === 0 && (
+                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                  <p>
+                    A IA vai pegar cada item com CATMAT vinculado, ler uma amostra das cotacoes
+                    reais que aparecem no Compras.gov.br, e <strong>reescrever direto</strong> o
+                    nome, descricao, unidade e embalagem pra alinhar com a linguagem do catalogo oficial.
+                  </p>
+                  <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg p-2">
+                    <strong>Por que faz diferenca:</strong> "AGUA COPOS 200ML" + unidade "unidade"
+                    vira "AGUA MINERAL NATURAL" + unidade "copo" + capacidade 200ml — o filtro de
+                    embalagem da pesquisa de preco passa a funcionar corretamente.
+                  </p>
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
+                    <strong>⚠ Reescrita agressiva:</strong> nome/descricao originais sao preservados
+                    em <code>nomeOriginalLIE</code> e <code>descricaoOriginalLIE</code> pra auditoria/rollback,
+                    mas os campos exibidos na UI sao substituidos.
+                  </p>
+                  <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-2">
+                    <strong>Tempo estimado:</strong> 5-15 segundos por item (chamada Gemini + amostra de cotacoes).
+                  </p>
+                </div>
+              )}
+
+              {padronizarResults.length > 0 && (
+                <div className="space-y-2 max-h-[55vh] overflow-y-auto">
+                  {padronizarResults.map((r, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-lg border text-xs ${
+                        r.status === 'ok' ? 'bg-green-50 border-green-200' :
+                        r.status === 'pulado' ? 'bg-gray-50 border-gray-200' :
+                        'bg-red-50 border-red-200'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        {r.status === 'ok' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
+                        {r.status === 'erro' && <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-gray-800">{r.itemNome}</div>
+                          {r.status === 'erro' && (
+                            <div className="text-red-700 mt-0.5">{r.reason}</div>
+                          )}
+                          {r.status === 'ok' && r.antes && r.depois && (
+                            <div className="mt-2 space-y-1.5">
+                              <div className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-0.5">
+                                <span className="text-gray-500 font-semibold">Nome:</span>
+                                <span className="text-gray-700"><span className="line-through text-gray-400">{r.antes.nome}</span> → <strong className="text-purple-700">{r.depois.nomeAlinhado}</strong></span>
+                                <span className="text-gray-500 font-semibold">Unidade:</span>
+                                <span className="text-gray-700"><span className="line-through text-gray-400">{r.antes.unidade}</span> → <strong className="text-purple-700">{r.depois.unidadeAlinhada}</strong></span>
+                                {r.depois.embalagemDescricao && (
+                                  <>
+                                    <span className="text-gray-500 font-semibold">Embalagem:</span>
+                                    <span className="text-purple-700"><strong>{r.depois.embalagemDescricao}</strong></span>
+                                  </>
+                                )}
+                              </div>
+                              {r.depois.justificativa && (
+                                <div className="text-[10px] text-gray-500 italic mt-1 leading-tight">
+                                  {r.depois.justificativa}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
+              {!padronizarRunning && padronizarResults.length === 0 && (
+                <>
+                  <button
+                    onClick={() => setPadronizarOpen(false)}
+                    className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={startPadronizacao}
+                    className="flex-1 py-2 bg-purple-500 text-white font-bold rounded-lg hover:bg-purple-600 transition flex items-center justify-center gap-2"
+                  >
+                    <Wand2 className="w-4 h-4" />
+                    Padronizar {itensComCatmat.length} item(ns)
+                  </button>
+                </>
+              )}
+              {padronizarRunning && (
+                <button disabled className="flex-1 py-2 bg-gray-300 text-gray-500 font-bold rounded-lg cursor-not-allowed">
+                  Processando…
+                </button>
+              )}
+              {!padronizarRunning && padronizarResults.length > 0 && (
+                <button
+                  onClick={() => { setPadronizarOpen(false); setPadronizarResults([]); }}
+                  className="flex-1 py-2 bg-lie-ink text-white font-bold rounded-lg hover:bg-black transition"
+                >
+                  Fechar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== MODAL DE PESQUISA DE PRECO EM LOTE (Banco) ===== */}
       {batchOpen && (

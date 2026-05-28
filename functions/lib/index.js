@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
+exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const puppeteer = require("puppeteer");
@@ -793,6 +793,233 @@ Se não tiver candidatos confiáveis, retorne {"candidatos": []} e nada mais.`;
             error: 'Falha ao chamar Gemini. Tente novamente.',
             detalhe: e?.message || String(e),
         });
+    }
+});
+/**
+ * Padronizacao de nomenclatura de item via Gemini — reescreve nome, descricao
+ * e unidade do item LIE pra alinhar com a forma usada no catalogo CATMAT/CATSER
+ * e nas cotacoes reais da API governamental. Protege contra "unidade difere"
+ * e melhora a precisao das pesquisas de preco.
+ *
+ * POST /padronizarItemNomenclatura
+ * Body: {
+ *   itemNome, itemDescricao, itemUnidade,
+ *   codigoCatmat, tipoCatmat, nomeCatmatOficial, descricaoCatmatOficial,
+ *   amostraCotacoes: [{ descricaoItem, siglaUnidadeFornecimento, nomeUnidadeFornecimento, capacidadeUnidadeFornecimento, siglaUnidadeMedida }]
+ * }
+ *
+ * Resposta: {
+ *   nomeAlinhado, descricaoAlinhada, unidadeAlinhada,
+ *   siglaUnidadeFornecimento, nomeUnidadeFornecimento, capacidadeUnidadeFornecimento,
+ *   siglaUnidadeMedida, embalagemDescricao, fatorConversao, unidadeBase,
+ *   justificativa, modelo
+ * }
+ */
+exports.padronizarItemNomenclatura = functions
+    .runWith({
+    timeoutSeconds: 60,
+    memory: '256MB',
+    secrets: ['GEMINI_API_KEY'],
+})
+    .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Vary', 'Origin');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Apenas POST eh suportado.' });
+        return;
+    }
+    const body = req.body || {};
+    const itemNome = String(body.itemNome || '').trim();
+    const itemDescricao = String(body.itemDescricao || '').trim();
+    const itemUnidade = String(body.itemUnidade || '').trim();
+    const codigoCatmat = Number(body.codigoCatmat);
+    const tipoCatmat = String(body.tipoCatmat || 'material').trim();
+    const nomeCatmatOficial = String(body.nomeCatmatOficial || '').trim();
+    const descricaoCatmatOficial = String(body.descricaoCatmatOficial || '').trim();
+    const amostraCotacoes = Array.isArray(body.amostraCotacoes) ? body.amostraCotacoes.slice(0, 8) : [];
+    if (!itemNome || itemNome.length < 2) {
+        res.status(400).json({ error: 'itemNome obrigatorio (>= 2 chars).' });
+        return;
+    }
+    if (!(codigoCatmat > 0)) {
+        res.status(400).json({ error: 'codigoCatmat obrigatorio.' });
+        return;
+    }
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        console.error('GEMINI_API_KEY nao disponivel');
+        res.status(500).json({ error: 'Servidor sem chave Gemini configurada.' });
+        return;
+    }
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({
+            model: 'gemini-2.5-flash',
+            generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 4096,
+                responseMimeType: 'application/json',
+            },
+        });
+        // Monta amostra de cotacoes em texto compacto
+        const amostraTxt = amostraCotacoes
+            .map((c, i) => {
+            const partes = [];
+            if (c.descricaoItem)
+                partes.push(`desc: "${String(c.descricaoItem).substring(0, 120)}"`);
+            if (c.siglaUnidadeFornecimento)
+                partes.push(`unidFornec: ${c.siglaUnidadeFornecimento}`);
+            if (c.nomeUnidadeFornecimento)
+                partes.push(`unidFornecNome: ${c.nomeUnidadeFornecimento}`);
+            if (c.capacidadeUnidadeFornecimento)
+                partes.push(`cap: ${c.capacidadeUnidadeFornecimento}${c.siglaUnidadeMedida || ''}`);
+            return `${i + 1}) ${partes.join(' | ')}`;
+        })
+            .join('\n');
+        const prompt = `Voce eh um especialista no catalogo CATMAT/CATSER do governo federal brasileiro (Compras.gov.br) e em contratacoes da Lei de Incentivo ao Esporte (LIE/FEDEESP).
+
+TAREFA: Pegar um item cadastrado pelo usuario no sistema LIE e PADRONIZAR sua nomenclatura pra alinhar com a forma usada nas contratacoes publicas reais — facilitando comparacao de preco e auditoria.
+
+ITEM DO USUARIO (LIE):
+- Nome: "${itemNome}"
+- Descricao: "${itemDescricao}"
+- Unidade cadastrada: "${itemUnidade}"
+
+VINCULO OFICIAL (catalogo CATMAT/CATSER):
+- Codigo: ${codigoCatmat} (${tipoCatmat})
+- Nome oficial: "${nomeCatmatOficial}"
+- Descricao oficial: "${descricaoCatmatOficial}"
+
+AMOSTRA DE COTACOES REAIS (como o mercado descreve esse item):
+${amostraTxt || '(sem amostras disponiveis)'}
+
+REGRAS:
+1. Mantenha a IDENTIDADE do item — eh o mesmo objeto, soh muda a forma de descrever
+2. Use linguagem formal/burocratica do catalogo CATMAT/CATSER (caixa alta no nome, descricao tecnica)
+3. Pra UNIDADE: olhe as amostras e identifique a mais frequente. Pra materiais use sigla padrao (UN, KG, CX, etc.); pra servicos use o nome do tipo de servico (DIARIA, EVENTO, SERVICO, etc.)
+4. Pra EMBALAGEM: se as amostras tem capacidade (200ml, 1.5L, etc.) e tudo CONVERGE pra mesma, use ela. Se divergem, use a do item original. Se nao tem, deixe vazio.
+5. fatorConversao = capacidade numerica (ex: 200 pro copo 200ml, 1500 pra garrafa 1.5L); unidadeBase = sigla da capacidade base (ML, G, M). Pra servicos/itens sem capacidade, ambos null.
+6. embalagemDescricao = texto livre legivel (ex: "Garrafa 1,5 litros", "Copo 200ml", "Caixa com 48 unidades"). Pra servicos pode ser o tipo (ex: "Diaria de servico").
+7. justificativa = 1-2 frases explicando o alinhamento
+
+EXEMPLO BOM:
+Input: nome="AGUA COPOS 200ML", desc="agua mineral para evento", unidade="unidade", amostras mostram capacidade=200 sigla=ML, unidFornec=COPO
+Output: nomeAlinhado="AGUA MINERAL NATURAL", descricaoAlinhada="Agua mineral natural sem gas, copo descartavel 200ml, para hidratacao em evento esportivo", unidadeAlinhada="copo", siglaUnidadeFornecimento="COPO", capacidadeUnidadeFornecimento=200, siglaUnidadeMedida="ML", embalagemDescricao="Copo 200ml", fatorConversao=200, unidadeBase="ML"
+
+RESPONDA APENAS COM JSON puro (sem markdown):
+{
+  "nomeAlinhado": "...",
+  "descricaoAlinhada": "...",
+  "unidadeAlinhada": "...",
+  "siglaUnidadeFornecimento": "...",
+  "nomeUnidadeFornecimento": "...",
+  "capacidadeUnidadeFornecimento": 0,
+  "siglaUnidadeMedida": "...",
+  "embalagemDescricao": "...",
+  "fatorConversao": null,
+  "unidadeBase": null,
+  "justificativa": "..."
+}`;
+        // Retry com backoff
+        const generateWithRetry = async () => {
+            const delays = [1000, 3000, 7000];
+            let ultimoErro = null;
+            for (let tentativa = 0; tentativa < 3; tentativa++) {
+                try {
+                    const result = await model.generateContent(prompt);
+                    return result.response.text();
+                }
+                catch (err) {
+                    ultimoErro = err;
+                    const msg = String(err?.message || '');
+                    const isOverload = msg.includes('503') || msg.includes('overload') || msg.includes('UNAVAILABLE');
+                    if (!isOverload || tentativa === 2)
+                        throw err;
+                    console.warn(`Gemini overloaded padronizar (tentativa ${tentativa + 1})`);
+                    await new Promise(r => setTimeout(r, delays[tentativa]));
+                }
+            }
+            throw ultimoErro;
+        };
+        const text = await generateWithRetry();
+        let parsed;
+        try {
+            parsed = JSON.parse(text);
+        }
+        catch {
+            const m = text.match(/\{[\s\S]*\}/);
+            if (m) {
+                try {
+                    parsed = JSON.parse(m[0]);
+                }
+                catch {
+                    parsed = null;
+                }
+            }
+        }
+        if (!parsed || typeof parsed !== 'object') {
+            res.status(502).json({ error: 'Resposta Gemini sem JSON estruturado', rawSnippet: text.substring(0, 500) });
+            return;
+        }
+        // Validacao basica de saneidade
+        const nomeAlinhado = String(parsed.nomeAlinhado || '').trim();
+        if (!nomeAlinhado || nomeAlinhado.length < 2) {
+            res.status(502).json({ error: 'IA retornou nomeAlinhado invalido', rawSnippet: text.substring(0, 500) });
+            return;
+        }
+        // Anti-deriva: nomeAlinhado deve compartilhar pelo menos 1 token significativo com itemNome
+        // (palavras de >=4 letras, sem stopwords) — protege contra alucinacao
+        const STOPWORDS = new Set(['para', 'com', 'sem', 'tipo', 'unidade', 'material', 'evento', 'servico']);
+        const tokens = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .split(/[^a-z0-9]+/).filter(t => t.length >= 4 && !STOPWORDS.has(t));
+        const tokensOriginais = new Set(tokens(itemNome));
+        const tokensAlinhados = new Set(tokens(nomeAlinhado));
+        let sobreposicao = 0;
+        tokensOriginais.forEach(t => { if (tokensAlinhados.has(t))
+            sobreposicao++; });
+        // Tambem aceita se nomeAlinhado bate com nomeCatmatOficial (caso onde reescrita
+        // adotou totalmente o nome oficial — comportamento desejado)
+        const tokensOficial = new Set(tokens(nomeCatmatOficial));
+        let sobreposicaoOficial = 0;
+        tokensAlinhados.forEach(t => { if (tokensOficial.has(t))
+            sobreposicaoOficial++; });
+        if (sobreposicao === 0 && sobreposicaoOficial === 0 && tokensOriginais.size > 0) {
+            res.status(502).json({
+                error: `IA derivou demais: nomeAlinhado "${nomeAlinhado}" nao compartilha nenhum token com original "${itemNome}" nem oficial "${nomeCatmatOficial}"`,
+                rawSnippet: text.substring(0, 500),
+            });
+            return;
+        }
+        res.set('Cache-Control', 'public, max-age=3600');
+        res.json({
+            modelo: 'gemini-2.5-flash',
+            nomeAlinhado,
+            descricaoAlinhada: String(parsed.descricaoAlinhada || '').trim(),
+            unidadeAlinhada: String(parsed.unidadeAlinhada || '').trim(),
+            siglaUnidadeFornecimento: String(parsed.siglaUnidadeFornecimento || '').trim().toUpperCase(),
+            nomeUnidadeFornecimento: String(parsed.nomeUnidadeFornecimento || '').trim(),
+            capacidadeUnidadeFornecimento: Number(parsed.capacidadeUnidadeFornecimento) || 0,
+            siglaUnidadeMedida: String(parsed.siglaUnidadeMedida || '').trim().toUpperCase(),
+            embalagemDescricao: String(parsed.embalagemDescricao || '').trim(),
+            fatorConversao: parsed.fatorConversao === null || parsed.fatorConversao === undefined
+                ? null
+                : Number(parsed.fatorConversao) || null,
+            unidadeBase: String(parsed.unidadeBase || '').trim().toUpperCase() || null,
+            justificativa: String(parsed.justificativa || '').trim(),
+        });
+    }
+    catch (err) {
+        console.error('Erro em padronizarItemNomenclatura:', err);
+        res.status(500).json({ error: err?.message || 'Erro interno' });
     }
 });
 /**

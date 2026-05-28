@@ -683,6 +683,59 @@ export async function traduzirTermoComIA(termo: string): Promise<TraduzirRespost
   }
 }
 
+export interface PadronizarItemInput {
+  itemNome: string;
+  itemDescricao: string;
+  itemUnidade: string;
+  codigoCatmat: number;
+  tipoCatmat: 'material' | 'servico';
+  nomeCatmatOficial: string;
+  descricaoCatmatOficial: string;
+  amostraCotacoes: Array<{
+    descricaoItem?: string;
+    siglaUnidadeFornecimento?: string;
+    nomeUnidadeFornecimento?: string;
+    capacidadeUnidadeFornecimento?: number;
+    siglaUnidadeMedida?: string;
+  }>;
+}
+
+export interface PadronizarItemResposta {
+  modelo: string;
+  nomeAlinhado: string;
+  descricaoAlinhada: string;
+  unidadeAlinhada: string;
+  siglaUnidadeFornecimento: string;
+  nomeUnidadeFornecimento: string;
+  capacidadeUnidadeFornecimento: number;
+  siglaUnidadeMedida: string;
+  embalagemDescricao: string;
+  fatorConversao: number | null;
+  unidadeBase: string | null;
+  justificativa: string;
+}
+
+export async function padronizarItemNomenclatura(input: PadronizarItemInput): Promise<PadronizarItemResposta | null> {
+  const projectId = storage.app.options.projectId;
+  const url = `https://us-central1-${projectId}.cloudfunctions.net/padronizarItemNomenclatura`;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      console.warn(`padronizarItemNomenclatura HTTP ${resp.status}: ${txt.substring(0, 200)}`);
+      return null;
+    }
+    return await resp.json();
+  } catch (e) {
+    console.warn('Falha ao chamar padronizarItemNomenclatura:', e);
+    return null;
+  }
+}
+
 export async function obterArquivosContratacao(numeroControlePNCP: string): Promise<ArquivosContratacaoResposta | null> {
   if (!numeroControlePNCP) return null;
   const projectId = storage.app.options.projectId;
