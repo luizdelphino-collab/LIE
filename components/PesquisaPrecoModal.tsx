@@ -66,33 +66,69 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       } else {
         setCestaReferencias([]);
       }
-      
+
       // Resetar estados de busca
       setSearchTerm(item.nome || '');
       setMaterialSelecionado(null);
       setPrecosGoverno([]);
-      
-      // Buscar no semente local se houver termo
-      if (item.nome) {
+      setMateriaisSemente([]);
+
+      // PRIORIDADE 1: se o item ja tem codigoCatmat vinculado, usa diretamente
+      // (ignora o seed local — o CATMAT oficial e a fonte da verdade)
+      if (item.codigoCatmat) {
+        // categoria so existe em ItemMaster, nao em ItemProjeto
+        const categoriaStr = 'categoria' in item && typeof (item as any).categoria === 'string'
+          ? (item as any).categoria
+          : 'Item do Projeto';
+        const materialDoItem: GovernmentMaterial = {
+          codigoItem: item.codigoCatmat,
+          nome: item.nomeCatmatOficial || item.nome,
+          descricaoItem: item.descricaoCatmatOficial || item.descricao || '',
+          categoria: categoriaStr,
+          unidade: item.unidade || 'unidade',
+        };
+        setMaterialSelecionado(materialDoItem);
+
+        // Dispara consulta de precos direto pelo CATMAT do item
+        setLoading(true);
+        consultarPrecosPraticados(item.codigoCatmat, item.valorUnitario, item.nome)
+          .then(resultados => {
+            resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
+            setPrecosGoverno(resultados);
+
+            // Auto-selecionar refs >= estimado
+            const elegiveis = resultados.filter(p => p.valorUnitario >= item.valorUnitario);
+            if (elegiveis.length > 0) {
+              setCestaReferencias(prev => {
+                const novas = elegiveis.filter(e =>
+                  !prev.some(p => `${p.fonte}-${p.identificadorCompra}-${p.valorUnitario}` === `${e.fonte}-${e.identificadorCompra}-${e.valorUnitario}`)
+                );
+                return [...prev, ...novas];
+              });
+            }
+          })
+          .catch(err => {
+            console.error("Erro ao carregar precos praticados via CATMAT do item:", err);
+          })
+          .finally(() => {
+            setLoading(false);
+          });
+      } else if (item.nome) {
+        // PRIORIDADE 2: sem CATMAT vinculado — fallback pra busca por nome no seed local
         const localResults = buscarMateriaisLocal(item.nome);
         setMateriaisSemente(localResults);
         if (localResults.length > 0) {
-          // Auto-seleciona o primeiro se houver correspondência direta
           const selected = localResults[0];
           setMaterialSelecionado(selected);
-          
-          // Disparar a consulta de preços imediatamente para carregar todas as cotações públicas
           setLoading(true);
           consultarPrecosPraticados(selected.codigoItem, item.valorUnitario, item.nome)
             .then(resultados => {
               resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
               setPrecosGoverno(resultados);
-              
-              // Auto-selecionar todas as referências que são superiores ou iguais ao estimado do projeto
               const elegiveis = resultados.filter(p => p.valorUnitario >= item.valorUnitario);
               if (elegiveis.length > 0) {
                 setCestaReferencias(prev => {
-                  const novas = elegiveis.filter(e => 
+                  const novas = elegiveis.filter(e =>
                     !prev.some(p => `${p.fonte}-${p.identificadorCompra}-${p.valorUnitario}` === `${e.fonte}-${e.identificadorCompra}-${e.valorUnitario}`)
                   );
                   return [...prev, ...novas];
@@ -100,14 +136,14 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
               }
             })
             .catch(err => {
-              console.error("Erro ao carregar preços praticados automaticamente:", err);
+              console.error("Erro ao carregar precos praticados automaticamente:", err);
             })
             .finally(() => {
               setLoading(false);
             });
         }
       }
-      
+
       // Resetar estados do manual
       setManualOrgao('');
       setManualIdentificador('');
