@@ -1393,6 +1393,57 @@ function gerarCertidaoCotaçãoPDF(
   const PG_W = 210;
   const RIGHT_MARGIN = 195;
 
+  // Expande siglas de unidade de medida do catalogo federal pra forma completa.
+  // Evita ambiguidade tipo '700 L' (Litro? Lote? Inicial 'l'?).
+  const expandirUnidade = (sigla: string | undefined | null, qtd: number = 0): string => {
+    const s = String(sigla || '').trim().toUpperCase();
+    const plural = qtd > 1 || qtd === 0;
+    const dict: Record<string, [string, string]> = {
+      'UN': ['Unidade', 'Unidades'],
+      'UND': ['Unidade', 'Unidades'],
+      'L': ['Litro', 'Litros'],
+      'LT': ['Litro', 'Litros'],
+      'ML': ['Mililitro', 'Mililitros'],
+      'MLT': ['Mililitro', 'Mililitros'],
+      'G': ['Grama', 'Gramas'],
+      'GR': ['Grama', 'Gramas'],
+      'KG': ['Quilograma', 'Quilogramas'],
+      'M': ['Metro', 'Metros'],
+      'M2': ['Metro quadrado', 'Metros quadrados'],
+      'M²': ['Metro quadrado', 'Metros quadrados'],
+      'M3': ['Metro cúbico', 'Metros cúbicos'],
+      'M³': ['Metro cúbico', 'Metros cúbicos'],
+      'CX': ['Caixa', 'Caixas'],
+      'PCT': ['Pacote', 'Pacotes'],
+      'PCTE': ['Pacote', 'Pacotes'],
+      'PC': ['Peça', 'Peças'],
+      'FRD': ['Fardo', 'Fardos'],
+      'GAL': ['Galão', 'Galões'],
+      'GLN': ['Galão', 'Galões'],
+      'GFA': ['Garrafa', 'Garrafas'],
+      'GRF': ['Garrafa', 'Garrafas'],
+      'SC': ['Saco', 'Sacos'],
+      'ENV': ['Envelope', 'Envelopes'],
+      'DZ': ['Dúzia', 'Dúzias'],
+      'PR': ['Par', 'Pares'],
+      'CTL': ['Cartela', 'Cartelas'],
+      'AMP': ['Ampola', 'Ampolas'],
+      'FA': ['Frasco', 'Frascos'],
+      'FR': ['Frasco', 'Frascos'],
+      'TBL': ['Tablete', 'Tabletes'],
+      'T': ['Tonelada', 'Toneladas'],
+      'H': ['Hora', 'Horas'],
+      'HR': ['Hora', 'Horas'],
+      'DIA': ['Diária', 'Diárias'],
+      'MES': ['Mês', 'Meses'],
+      'MÊS': ['Mês', 'Meses'],
+      'SERV': ['Serviço', 'Serviços'],
+    };
+    const entrada = dict[s];
+    if (!entrada) return s; // sigla desconhecida — devolve como está
+    return plural ? entrada[1] : entrada[0];
+  };
+
   // ============ CABECALHO ============
   doc.setFillColor(15, 23, 42); // slate-900
   doc.rect(0, 0, PG_W, 32, 'F');
@@ -1517,7 +1568,14 @@ function gerarCertidaoCotaçãoPDF(
     y += Math.min(lines.length, 3) * 4 + 1;
   }
   if (r.quantidade || r.unidadeMedida) {
-    y = drawCampo("Quantidade / Unidade:", `${r.quantidade || '—'} ${r.unidadeMedida || ''}`.trim(), y);
+    const expandida = expandirUnidade(r.unidadeMedida, r.quantidade || 0);
+    const siglaOrig = String(r.unidadeMedida || '').toUpperCase();
+    // Se a expansao mudou a sigla, mostra ambas pra eliminar duvida.
+    // Ex: '700 L' vira '700 Litros' (sigla original: L)
+    const textoUnidade = (siglaOrig && expandida && expandida.toUpperCase() !== siglaOrig)
+      ? `${r.quantidade || '—'} ${expandida} (sigla oficial: ${siglaOrig})`
+      : `${r.quantidade || '—'} ${expandida || siglaOrig}`.trim();
+    y = drawCampo("Quantidade / Unidade:", textoUnidade, y, { truncate: 100 });
   }
   if (r.fornecedorNome) y = drawCampo("Fornecedor Adjudicatário:", r.fornecedorNome, y, { truncate: 80 });
   if (r.fornecedorCnpj) y = drawCampo("CNPJ Fornecedor:", r.fornecedorCnpj, y);

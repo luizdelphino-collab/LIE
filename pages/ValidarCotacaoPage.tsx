@@ -1,4 +1,44 @@
 import React, { useEffect, useState } from 'react';
+
+// Expande siglas de unidade de medida do catalogo federal pra forma completa.
+// Evita ambiguidade tipo '700 L' (Litro? Lote? Inicial 'l'?).
+function expandirUnidadeMedida(sigla: string | undefined | null, qtd: number = 0): string {
+  const s = String(sigla || '').trim().toUpperCase();
+  if (!s) return '';
+  const plural = qtd > 1 || qtd === 0;
+  const dict: Record<string, [string, string]> = {
+    'UN': ['Unidade', 'Unidades'], 'UND': ['Unidade', 'Unidades'],
+    'L': ['Litro', 'Litros'], 'LT': ['Litro', 'Litros'],
+    'ML': ['Mililitro', 'Mililitros'], 'MLT': ['Mililitro', 'Mililitros'],
+    'G': ['Grama', 'Gramas'], 'GR': ['Grama', 'Gramas'],
+    'KG': ['Quilograma', 'Quilogramas'],
+    'M': ['Metro', 'Metros'],
+    'M2': ['Metro quadrado', 'Metros quadrados'], 'M²': ['Metro quadrado', 'Metros quadrados'],
+    'M3': ['Metro cúbico', 'Metros cúbicos'], 'M³': ['Metro cúbico', 'Metros cúbicos'],
+    'CX': ['Caixa', 'Caixas'],
+    'PCT': ['Pacote', 'Pacotes'], 'PCTE': ['Pacote', 'Pacotes'],
+    'PC': ['Peça', 'Peças'],
+    'FRD': ['Fardo', 'Fardos'],
+    'GAL': ['Galão', 'Galões'], 'GLN': ['Galão', 'Galões'],
+    'GFA': ['Garrafa', 'Garrafas'], 'GRF': ['Garrafa', 'Garrafas'],
+    'SC': ['Saco', 'Sacos'],
+    'ENV': ['Envelope', 'Envelopes'],
+    'DZ': ['Dúzia', 'Dúzias'],
+    'PR': ['Par', 'Pares'],
+    'CTL': ['Cartela', 'Cartelas'],
+    'AMP': ['Ampola', 'Ampolas'],
+    'FA': ['Frasco', 'Frascos'], 'FR': ['Frasco', 'Frascos'],
+    'TBL': ['Tablete', 'Tabletes'],
+    'T': ['Tonelada', 'Toneladas'],
+    'H': ['Hora', 'Horas'], 'HR': ['Hora', 'Horas'],
+    'DIA': ['Diária', 'Diárias'],
+    'MES': ['Mês', 'Meses'], 'MÊS': ['Mês', 'Meses'],
+    'SERV': ['Serviço', 'Serviços'],
+  };
+  const entrada = dict[s];
+  if (!entrada) return s;
+  return plural ? entrada[1] : entrada[0];
+}
 import { useSearchParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { Shield, ShieldAlert, ShieldCheck, CheckCircle2, Download, ExternalLink, Calendar, Search, Scale, FileText, ArrowRight, Loader2, Info } from 'lucide-react';
@@ -414,11 +454,17 @@ export default function ValidarCotacaoPage() {
                               {r.descricaoItem && (
                                 <p className="text-slate-300 text-[11px] leading-relaxed mt-1">{r.descricaoItem}</p>
                               )}
-                              {(r.quantidade || r.unidadeMedida) && (
-                                <span className="text-[10px] text-slate-400 mt-1 inline-block">
-                                  <span className="text-slate-500">Qtd:</span> <strong>{r.quantidade || '—'}</strong> {r.unidadeMedida || ''}
-                                </span>
-                              )}
+                              {(r.quantidade || r.unidadeMedida) && (() => {
+                                const expandida = expandirUnidadeMedida(r.unidadeMedida, r.quantidade || 0);
+                                const siglaOrig = String(r.unidadeMedida || '').toUpperCase();
+                                const mostrarSigla = siglaOrig && expandida && expandida.toUpperCase() !== siglaOrig;
+                                return (
+                                  <span className="text-[10px] text-slate-400 mt-1 inline-block">
+                                    <span className="text-slate-500">Qtd:</span> <strong>{r.quantidade || '—'}</strong> {expandida || siglaOrig}
+                                    {mostrarSigla && <span className="text-slate-600 ml-1" title="Sigla original retornada pela API governamental">({siglaOrig})</span>}
+                                  </span>
+                                );
+                              })()}
                             </div>
                           )}
 
