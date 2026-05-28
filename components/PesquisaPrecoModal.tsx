@@ -58,6 +58,89 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
   // Referências ativas selecionadas para a cesta
   const [cestaReferencias, setCestaReferencias] = useState<PrecoReferencia[]>([]);
 
+  /**
+   * Extrai a capacidade da descricao da cotacao via regex.
+   * Retorna em ML, G, KG, L convertendo pra unidade-base do item quando possivel.
+   * Exemplos: "200 ml" → 200 ML, "1 L" → 1000 ML, "20 L" → 20000 ML, "1,5 KG" → 1500 G.
+   */
+  const extrairCapacidadeCotacao = (descricao: string, unidadeBaseItem: string): number | null => {
+    if (!descricao || !unidadeBaseItem) return null;
+    const desc = descricao.toUpperCase();
+    const base = unidadeBaseItem.toUpperCase();
+
+    // Padroes: numero + opcional decimal + espaco opcional + unidade
+    // Ex: "200 ML", "200ML", "1,5L", "0.5 L", "20L", "500 GR", "1 KG"
+    const padrao = /(\d+(?:[\.,]\d+)?)\s*(ML|MILILITRO|L|LITRO|G|GR|GRAMA|KG|QUILO|UN|UNIDADE|M|METRO|M2|M²|M3|M³)\b/gi;
+    const matches: { valor: number; unidade: string }[] = [];
+    let m;
+    while ((m = padrao.exec(desc)) !== null) {
+      const valor = parseFloat(m[1].replace(',', '.'));
+      const unidade = m[2].toUpperCase();
+      if (!isNaN(valor) && valor > 0) matches.push({ valor, unidade });
+    }
+    if (matches.length === 0) return null;
+
+    // Converte cada match pra unidade-base do item
+    const converterPara = (v: number, uOrigem: string, uDestino: string): number | null => {
+      const norm = (u: string): string => {
+        if (['ML', 'MILILITRO'].includes(u)) return 'ML';
+        if (['L', 'LITRO'].includes(u)) return 'L';
+        if (['G', 'GR', 'GRAMA'].includes(u)) return 'G';
+        if (['KG', 'QUILO'].includes(u)) return 'KG';
+        if (['UN', 'UNIDADE'].includes(u)) return 'UN';
+        if (['M', 'METRO'].includes(u)) return 'M';
+        if (['M2', 'M²'].includes(u)) return 'M2';
+        if (['M3', 'M³'].includes(u)) return 'M3';
+        return u;
+      };
+      const o = norm(uOrigem);
+      const d = norm(uDestino);
+      if (o === d) return v;
+      // Conversoes simples
+      if (o === 'L' && d === 'ML') return v * 1000;
+      if (o === 'ML' && d === 'L') return v / 1000;
+      if (o === 'KG' && d === 'G') return v * 1000;
+      if (o === 'G' && d === 'KG') return v / 1000;
+      return null; // sem conversao conhecida
+    };
+
+    // Prefere o match cuja unidade bate com a base (sem conversao)
+    const matchExato = matches.find(x => {
+      const conv = converterPara(x.valor, x.unidade, base);
+      return conv !== null && x.unidade.replace(/[²³2-3]/g, '') === base.replace(/[²³2-3]/g, '');
+    });
+    if (matchExato) return matchExato.valor;
+
+    // Fallback: primeiro match convertivel
+    for (const x of matches) {
+      const conv = converterPara(x.valor, x.unidade, base);
+      if (conv !== null) return conv;
+    }
+    return null;
+  };
+
+  /**
+   * Filtra cotacoes por compatibilidade de embalagem com o item.
+   * Quando o item tem fatorConversao + unidadeBase, mantem apenas cotacoes
+   * cuja capacidade detectada esteja em faixa ±30% da capacidade do item.
+   * Cotacoes sem capacidade detectavel passam por padrao (nao excluimos
+   * por falta de info — exclusao so quando ha info contraditoria).
+   */
+  const filtrarCotacoesPorEmbalagem = (cotacoes: PrecoReferencia[]): PrecoReferencia[] => {
+    if (!item.fatorConversao || !item.unidadeBase || item.fatorConversao <= 0) {
+      return cotacoes; // sem dados de embalagem, nao filtra
+    }
+    const capacidadeItem = item.fatorConversao;
+    const margem = 0.3;
+    const min = capacidadeItem * (1 - margem);
+    const max = capacidadeItem * (1 + margem);
+    return cotacoes.filter(c => {
+      const cap = extrairCapacidadeCotacao(c.descricaoItem || '', item.unidadeBase || '');
+      if (cap === null) return true; // sem info de embalagem na cotacao, mantem
+      return cap >= min && cap <= max;
+    });
+  };
+
   // Carregar referências já salvas no item, se existirem.
   // REGRA ANTI-FRAUDE: cotacoes com valor MENOR que o estimado do item nao
   // compoem a base de pesquisa (IN 65/2021 art. 6º + posicao do user).
@@ -101,7 +184,14 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         // Dispara consulta de precos direto pelo CATMAT do item
         setLoading(true);
         consultarPrecosPraticados(item.codigoCatmat, item.valorUnitario, item.nome)
-          .then(resultados => {
+          .then(resultadosBrutos => {
+            // FILTRO POR EMBALAGEM: quando item tem fatorConversao, descarta
+            // cotacoes de embalagem incompativel (ex: galao 20L num item de 200ml)
+            const resultados = filtrarCotacoesPorEmbalagem(resultadosBrutos);
+            const descartadasPorEmbalagem = resultadosBrutos.length - resultados.length;
+            if (descartadasPorEmbalagem > 0) {
+              console.info(`[pesquisa-preco] ${descartadasPorEmbalagem} cotacao(oes) descartadas por embalagem incompativel com item (fator=${item.fatorConversao}${item.unidadeBase}).`);
+            }
             resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
             setPrecosGoverno(resultados);
 
@@ -131,7 +221,8 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
           setMaterialSelecionado(selected);
           setLoading(true);
           consultarPrecosPraticados(selected.codigoItem, item.valorUnitario, item.nome)
-            .then(resultados => {
+            .then(resultadosBrutos => {
+              const resultados = filtrarCotacoesPorEmbalagem(resultadosBrutos);
               resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
               setPrecosGoverno(resultados);
               const elegiveis = resultados.filter(p => p.valorUnitario >= item.valorUnitario);
@@ -180,7 +271,9 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
     setMaterialSelecionado(mat);
     setLoading(true);
     try {
-      const resultados = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario, item.nome);
+      const resultadosBrutos = await consultarPrecosPraticados(mat.codigoItem, item.valorUnitario, item.nome);
+      // Filtro por embalagem
+      const resultados = filtrarCotacoesPorEmbalagem(resultadosBrutos);
       // Ordenar por valor unitário (descendente) para facilitar blindagem superior
       resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
       setPrecosGoverno(resultados);
@@ -680,7 +773,14 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
 
                 {/* Preços Praticados Retornados da API */}
                 <div className="flex-1 flex flex-col">
-                  <h4 className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Preços Públicos Homologados</h4>
+                  <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                    <h4 className="text-xs font-bold text-gray-600 uppercase tracking-wider">Preços Públicos Homologados</h4>
+                    {item.fatorConversao && item.unidadeBase && (
+                      <span className="text-[10px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Cotacoes com embalagem incompativel com ${item.fatorConversao}${item.unidadeBase} foram descartadas (faixa: ${Math.round(item.fatorConversao * 0.7)}-${Math.round(item.fatorConversao * 1.3)}${item.unidadeBase})`}>
+                        🎯 Filtrado por embalagem ~{item.fatorConversao}{item.unidadeBase.toLowerCase()}
+                      </span>
+                    )}
+                  </div>
 
                   {loading ? (
                     <div className="flex-1 flex flex-col items-center justify-center py-12 text-gray-400 bg-white border border-gray-100 rounded-xl">
