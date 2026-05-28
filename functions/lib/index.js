@@ -597,10 +597,12 @@ Responda em JSON puro com esta estrutura exata (sem markdown, sem comentários):
 }
 
 Se não tiver candidatos confiáveis, retorne {"candidatos": []} e nada mais.`;
-        // Retry com backoff exponencial em caso de 503 (Gemini high demand).
-        // Pega ate 3 tentativas com 1s, 3s, 7s entre elas.
+        // Retry com backoff exponencial em caso de 503 (overload) ou 429 (quota).
+        // 429 precisa de espera longa: free tier Gemini eh 15 RPM = 1 call/4s.
+        // Sinaliza 429 ao chamador via header X-RateLimit pra cliente pausar.
         const generateWithRetry = async () => {
-            const delays = [1000, 3000, 7000];
+            const delaysOverload = [1000, 3000, 7000];
+            const delaysQuota = [8000, 20000, 40000]; // free tier 15 RPM, espera maior
             let ultimoErro = null;
             for (let tentativa = 0; tentativa < 3; tentativa++) {
                 try {
@@ -610,16 +612,38 @@ Se não tiver candidatos confiáveis, retorne {"candidatos": []} e nada mais.`;
                 catch (err) {
                     ultimoErro = err;
                     const msg = String(err?.message || '');
+                    const isQuota = msg.includes('429') || msg.includes('quota') || msg.includes('Too Many Requests') || msg.includes('RESOURCE_EXHAUSTED');
                     const isOverload = msg.includes('503') || msg.includes('overload') || msg.includes('high demand') || msg.includes('UNAVAILABLE');
-                    if (!isOverload || tentativa === 2)
+                    if (!isOverload && !isQuota)
                         throw err;
-                    console.warn(`Gemini overloaded (tentativa ${tentativa + 1}). Esperando ${delays[tentativa]}ms…`);
+                    if (tentativa === 2) {
+                        if (isQuota) {
+                            err.__rateLimit = true;
+                        }
+                        throw err;
+                    }
+                    const delays = isQuota ? delaysQuota : delaysOverload;
+                    console.warn(`Gemini ${isQuota ? 'QUOTA' : 'overloaded'} (tentativa ${tentativa + 1}). Esperando ${delays[tentativa]}ms…`);
                     await new Promise(r => setTimeout(r, delays[tentativa]));
                 }
             }
             throw ultimoErro;
         };
-        const text = await generateWithRetry();
+        let text;
+        try {
+            text = await generateWithRetry();
+        }
+        catch (err) {
+            if (err.__rateLimit) {
+                res.set('Retry-After', '60');
+                res.status(429).json({
+                    error: 'Gemini quota esgotada — free tier limita a 15 chamadas/minuto. Aguarde 60s e tente novamente.',
+                    tipo: 'quota_exceeded'
+                });
+                return;
+            }
+            throw err;
+        }
         // Parse defensivo do JSON
         let parsed;
         try {
@@ -943,9 +967,10 @@ RESPONDA APENAS COM JSON puro (sem markdown):
   "unidadeBase": null,
   "justificativa": "..."
 }`;
-        // Retry com backoff
+        // Retry com backoff — 503 (overload) curto + 429 (quota) longo
         const generateWithRetry = async () => {
-            const delays = [1000, 3000, 7000];
+            const delaysOverload = [1000, 3000, 7000];
+            const delaysQuota = [8000, 20000, 40000];
             let ultimoErro = null;
             for (let tentativa = 0; tentativa < 3; tentativa++) {
                 try {
@@ -955,16 +980,37 @@ RESPONDA APENAS COM JSON puro (sem markdown):
                 catch (err) {
                     ultimoErro = err;
                     const msg = String(err?.message || '');
+                    const isQuota = msg.includes('429') || msg.includes('quota') || msg.includes('Too Many Requests') || msg.includes('RESOURCE_EXHAUSTED');
                     const isOverload = msg.includes('503') || msg.includes('overload') || msg.includes('UNAVAILABLE');
-                    if (!isOverload || tentativa === 2)
+                    if (!isOverload && !isQuota)
                         throw err;
-                    console.warn(`Gemini overloaded padronizar (tentativa ${tentativa + 1})`);
+                    if (tentativa === 2) {
+                        if (isQuota)
+                            err.__rateLimit = true;
+                        throw err;
+                    }
+                    const delays = isQuota ? delaysQuota : delaysOverload;
+                    console.warn(`Gemini ${isQuota ? 'QUOTA' : 'overloaded'} padronizar (tentativa ${tentativa + 1}). Esperando ${delays[tentativa]}ms`);
                     await new Promise(r => setTimeout(r, delays[tentativa]));
                 }
             }
             throw ultimoErro;
         };
-        const text = await generateWithRetry();
+        let text;
+        try {
+            text = await generateWithRetry();
+        }
+        catch (err) {
+            if (err.__rateLimit) {
+                res.set('Retry-After', '60');
+                res.status(429).json({
+                    error: 'Gemini quota esgotada — free tier limita a 15 chamadas/minuto. Aguarde 60s e tente novamente.',
+                    tipo: 'quota_exceeded'
+                });
+                return;
+            }
+            throw err;
+        }
         let parsed;
         try {
             parsed = JSON.parse(text);

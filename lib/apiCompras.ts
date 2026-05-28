@@ -672,12 +672,16 @@ export async function traduzirTermoComIA(termo: string): Promise<TraduzirRespost
   const url = `https://us-central1-${projectId}.cloudfunctions.net/traduzirTermoCatmat?termo=${encodeURIComponent(termo.trim())}`;
   try {
     const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (resp.status === 429) {
+      throw new GeminiQuotaError();
+    }
     if (!resp.ok) {
       console.warn(`traduzirTermoCatmat HTTP ${resp.status}`);
       return null;
     }
     return await resp.json();
   } catch (e) {
+    if (e instanceof GeminiQuotaError) throw e;
     console.warn('Falha ao chamar tradutor IA:', e);
     return null;
   }
@@ -715,6 +719,11 @@ export interface PadronizarItemResposta {
   justificativa: string;
 }
 
+// Erro especial pra cliente saber que bateu na quota Gemini — pra pausar o batch
+export class GeminiQuotaError extends Error {
+  constructor() { super('Gemini quota exceeded'); this.name = 'GeminiQuotaError'; }
+}
+
 export async function padronizarItemNomenclatura(input: PadronizarItemInput): Promise<PadronizarItemResposta | null> {
   const projectId = storage.app.options.projectId;
   const url = `https://us-central1-${projectId}.cloudfunctions.net/padronizarItemNomenclatura`;
@@ -724,6 +733,9 @@ export async function padronizarItemNomenclatura(input: PadronizarItemInput): Pr
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(input),
     });
+    if (resp.status === 429) {
+      throw new GeminiQuotaError();
+    }
     if (!resp.ok) {
       const txt = await resp.text();
       console.warn(`padronizarItemNomenclatura HTTP ${resp.status}: ${txt.substring(0, 200)}`);
@@ -731,6 +743,7 @@ export async function padronizarItemNomenclatura(input: PadronizarItemInput): Pr
     }
     return await resp.json();
   } catch (e) {
+    if (e instanceof GeminiQuotaError) throw e;
     console.warn('Falha ao chamar padronizarItemNomenclatura:', e);
     return null;
   }

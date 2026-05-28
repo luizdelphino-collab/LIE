@@ -9,7 +9,7 @@ import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/Catalo
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
 import CatmatDiagnostico from '../components/CatmatDiagnostico';
 import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
-import { isRecursoHumano, padronizarItemNomenclatura, traduzirTermoComIA, type PadronizarItemResposta } from '../lib/apiCompras';
+import { isRecursoHumano, padronizarItemNomenclatura, traduzirTermoComIA, GeminiQuotaError, type PadronizarItemResposta } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
@@ -104,6 +104,10 @@ export default function ItensMasterPage() {
   const [padronizarRunning, setPadronizarRunning] = useState(false);
   const [padronizarProgress, setPadronizarProgress] = useState({ done: 0, total: 0, current: '' });
   const [padronizarResults, setPadronizarResults] = useState<PadronizacaoResult[]>([]);
+  const [padronizarWaitingQuota, setPadronizarWaitingQuota] = useState(0);  // segundos de espera por quota Gemini
+
+  // Helper sleep
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
   const itensComCatmat = items.filter(it => it.codigoCatmat && it.codigoCatmat > 0);
 
@@ -120,6 +124,34 @@ export default function ItensMasterPage() {
     setPadronizarResults([]);
     setPadronizarProgress({ done: 0, total: alvos.length, current: '' });
     const results: PadronizacaoResult[] = [];
+    // Rate limit: Gemini Flash free tier = 15 RPM = 1 chamada a cada 4s.
+    // Pra itens sem CATMAT, gastamos 2 chamadas (traduzirTermo + padronizar) = 8s/item.
+    // Pra com CATMAT, 1 chamada = 4s/item. Vamos com 4.5s entre itens.
+    const THROTTLE_MS = 4500;
+    let ultimoCallEm = 0;
+    const throttle = async () => {
+      const agora = Date.now();
+      const esperar = Math.max(0, THROTTLE_MS - (agora - ultimoCallEm));
+      if (esperar > 0) await sleep(esperar);
+      ultimoCallEm = Date.now();
+    };
+    // Em quota_exceeded, pausa 60s e retenta. Soh aborta se acontecer 2x seguidas.
+    let quotaErrosConsecutivos = 0;
+    const handleQuota = async (): Promise<boolean> => {
+      quotaErrosConsecutivos++;
+      if (quotaErrosConsecutivos >= 2) {
+        console.error('[padronizar] 2 quota exceeded seguidas — abortando batch');
+        return false;
+      }
+      console.warn('[padronizar] quota Gemini esgotada — pausando 65s');
+      for (let s = 65; s > 0; s--) {
+        setPadronizarWaitingQuota(s);
+        await sleep(1000);
+      }
+      setPadronizarWaitingQuota(0);
+      return true;
+    };
+
     for (let i = 0; i < alvos.length; i++) {
       const it = alvos[i];
       setPadronizarProgress({ done: i, total: alvos.length, current: it.nome });
@@ -133,7 +165,24 @@ export default function ItensMasterPage() {
         if (!codigoCatmat || codigoCatmat <= 0) {
           // BUSCA ATIVA: combina nome + descricao pra dar mais contexto
           const termoBusca = `${it.nome}${it.descricao ? ' — ' + it.descricao : ''}`.substring(0, 200);
-          const traducao = await traduzirTermoComIA(termoBusca);
+          await throttle();
+          let traducao;
+          try {
+            traducao = await traduzirTermoComIA(termoBusca);
+            quotaErrosConsecutivos = 0;  // reset on success
+          } catch (qErr) {
+            if (qErr instanceof GeminiQuotaError) {
+              const podeRetentar = await handleQuota();
+              if (!podeRetentar) {
+                results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'Gemini quota esgotada (2x). Batch abortado — tente novamente em 1h.' });
+                setPadronizarResults([...results]);
+                break;
+              }
+              i--;  // reprocessa este item
+              continue;
+            }
+            throw qErr;
+          }
           const top = traducao?.candidatos?.[0];
           if (!top) {
             results.push({
@@ -175,16 +224,33 @@ export default function ItensMasterPage() {
         }));
 
         // ETAPA 3: padronizar nome/desc/unidade/embalagem
-        const resp = await padronizarItemNomenclatura({
-          itemNome: it.nome,
-          itemDescricao: it.descricao || '',
-          itemUnidade: String(it.unidade || ''),
-          codigoCatmat,
-          tipoCatmat: (tipoCatmat || 'material') as 'material' | 'servico',
-          nomeCatmatOficial,
-          descricaoCatmatOficial,
-          amostraCotacoes,
-        });
+        await throttle();
+        let resp;
+        try {
+          resp = await padronizarItemNomenclatura({
+            itemNome: it.nome,
+            itemDescricao: it.descricao || '',
+            itemUnidade: String(it.unidade || ''),
+            codigoCatmat,
+            tipoCatmat: (tipoCatmat || 'material') as 'material' | 'servico',
+            nomeCatmatOficial,
+            descricaoCatmatOficial,
+            amostraCotacoes,
+          });
+          quotaErrosConsecutivos = 0;
+        } catch (qErr) {
+          if (qErr instanceof GeminiQuotaError) {
+            const podeRetentar = await handleQuota();
+            if (!podeRetentar) {
+              results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'Gemini quota esgotada (2x). Batch abortado — tente novamente em 1h.' });
+              setPadronizarResults([...results]);
+              break;
+            }
+            i--;
+            continue;
+          }
+          throw qErr;
+        }
         if (!resp) {
           results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'IA nao retornou resposta valida na padronizacao' });
           setPadronizarResults([...results]);
@@ -1545,10 +1611,23 @@ export default function ItensMasterPage() {
                       style={{ width: `${(padronizarProgress.done / Math.max(padronizarProgress.total, 1)) * 100}%` }}
                     />
                   </div>
-                  <p className="text-xs text-gray-500 flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Consultando Gemini 2.5 Flash com amostras de cotacoes reais…
-                  </p>
+                  {padronizarWaitingQuota > 0 ? (
+                    <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-xs font-bold text-amber-800">Cota Gemini esgotada (15 chamadas/minuto)</p>
+                        <p className="text-xs text-amber-700 mt-0.5">
+                          Pausando <strong>{padronizarWaitingQuota}s</strong> e retomando automaticamente…
+                          Os itens ja processados foram salvos.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 flex items-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Consultando Gemini 2.5 Flash (4.5s entre itens p/ respeitar quota)…
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1561,6 +1640,11 @@ export default function ItensMasterPage() {
                     <li><strong>Busca ativa:</strong> pra itens SEM CATMAT/CATSER vinculado, IA descobre o codigo oficial a partir do nome + descricao (com validacao anti-alucinacao em 3 camadas).</li>
                     <li><strong>Padronizacao:</strong> reescreve nome, descricao, unidade e embalagem pra alinhar com o catalogo CATMAT/CATSER oficial e as cotacoes reais do mercado.</li>
                   </ol>
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
+                    <strong>⏱ Tempo estimado:</strong> ~5s por item com CATMAT, ~10s sem CATMAT (busca ativa).
+                    Cota Gemini eh 15 chamadas/min — batch faz throttle de 4.5s entre itens. Se travar em quota,
+                    sistema pausa 60s e retoma. <strong>Estimativa total: ~{Math.ceil(items.length * 5 / 60)} a {Math.ceil(items.length * 10 / 60)} minutos</strong> pros {items.length} itens.
+                  </p>
                   <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg p-2">
                     <strong>Por que faz diferenca:</strong> "AGUA COPOS 200ML" + unidade "unidade"
                     vira "AGUA MINERAL NATURAL" + unidade "copo" + capacidade 200ml — o filtro de
