@@ -975,7 +975,7 @@ export default function ItensMasterPage() {
 
       <div className="bg-white rounded-xl shadow-premium overflow-hidden border border-gray-100">
         <div className="overflow-x-auto">
-        <table className="w-full text-left min-w-[1100px]">
+        <table className="w-full text-left min-w-[900px]">
           <thead className="bg-gray-50 text-xs font-bold text-lie-gray uppercase border-b border-gray-200">
             <tr>
               <th className="px-4 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('categoria')}>
@@ -997,12 +997,12 @@ export default function ItensMasterPage() {
               <th className="px-4 py-3 w-36 text-right" title="Mediana do mercado público (Compras.gov.br + PNCP)">
                 <div className="flex items-center gap-1 justify-end">Mercado Gov</div>
               </th>
-              <th className="px-4 py-3 w-24 text-right">Ações</th>
+              <th className="px-4 py-3 w-24 text-right sticky right-0 bg-gray-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)] z-10">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {itensPaginados.map(it => (
-              <tr key={it.id} className="hover:bg-gray-50 transition-colors">
+              <tr key={it.id} className="group hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-3">
                   <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-100 rounded-full text-gray-600 uppercase">{it.categoria}</span>
                 </td>
@@ -1136,7 +1136,7 @@ export default function ItensMasterPage() {
                     return <span className="text-gray-300 italic">…</span>;
                   })()}
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 py-3 text-right sticky right-0 bg-white group-hover:bg-gray-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]">
                   <div className="flex items-center justify-end gap-1">
                     {confirmDeleteId === it.id ? (
                       <>
