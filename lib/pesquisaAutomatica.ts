@@ -13,6 +13,88 @@ export interface AutoPesquisaResult {
   status: AutoPesquisaStatus;
   refsCount?: number;
   reason?: string;
+  // Telemetria de filtro de embalagem — pra UI mostrar quantas cotacoes foram
+  // descartadas e por que (auditoria/transparencia)
+  rejeitadasEmbalagem?: number;
+  rejeitadasSemDados?: number;
+  rejeitadasFaixa?: number;
+}
+
+/**
+ * Converte uma capacidade pra unidade base de referencia (ML, G, M, UN).
+ * Exemplos: 1.5 L → 1500 ML; 2 KG → 2000 G; 200 ML → 200 ML.
+ */
+function normalizarCapacidade(valor: number, sigla: string): { valorBase: number; siglaBase: string } | null {
+  const s = String(sigla || '').trim().toUpperCase();
+  if (!valor || valor <= 0 || !s) return null;
+  // Volume → ML
+  if (s === 'ML' || s === 'MLT') return { valorBase: valor, siglaBase: 'ML' };
+  if (s === 'L' || s === 'LT') return { valorBase: valor * 1000, siglaBase: 'ML' };
+  // Massa → G
+  if (s === 'G' || s === 'GR') return { valorBase: valor, siglaBase: 'G' };
+  if (s === 'KG') return { valorBase: valor * 1000, siglaBase: 'G' };
+  if (s === 'T') return { valorBase: valor * 1000000, siglaBase: 'G' };
+  // Comprimento → M
+  if (s === 'M') return { valorBase: valor, siglaBase: 'M' };
+  if (s === 'CM') return { valorBase: valor / 100, siglaBase: 'M' };
+  if (s === 'MM') return { valorBase: valor / 1000, siglaBase: 'M' };
+  // Outras: assume eh a propria base
+  return { valorBase: valor, siglaBase: s };
+}
+
+/**
+ * Filtra cotacoes cuja embalagem NAO eh equivalente a do item cadastrado.
+ * Protecao auditorial: comparar preco de copo de 200ml com garrafa de 1.5L
+ * eh metodologicamente errado (Lei 14.133 art. 23 §1o, IN 65/2021 art. 5o).
+ *
+ * Regra: capacidade (em unidade base) deve estar dentro de ±15% da do item.
+ * Se o item NAO tem fatorConversao/unidadeBase, o filtro nao se aplica
+ * (item sem embalagem cadastrada — usuario aceita risco).
+ */
+function filtrarEmbalagemEquivalente(
+  precos: PrecoReferencia[],
+  item: { fatorConversao?: number; unidadeBase?: string; embalagemDescricao?: string; nome: string }
+): { aceitas: PrecoReferencia[]; rejeitadasEmbalagem: number; rejeitadasSemDados: number } {
+  // Item sem embalagem cadastrada: nao consegue filtrar — passa todas e marca alerta
+  if (!item.fatorConversao || item.fatorConversao <= 0 || !item.unidadeBase) {
+    console.warn(`[filtro-embalagem] '${item.nome}' SEM embalagem cadastrada — pesquisa aceitara todas as cotacoes (risco auditorial). Cadastre embalagem no Banco.`);
+    return { aceitas: precos, rejeitadasEmbalagem: 0, rejeitadasSemDados: 0 };
+  }
+
+  const baseItem = normalizarCapacidade(item.fatorConversao, item.unidadeBase);
+  if (!baseItem) return { aceitas: precos, rejeitadasEmbalagem: 0, rejeitadasSemDados: 0 };
+
+  const TOLERANCIA = 0.15; // ±15% — abraca pequenas variacoes (200ml vs 250ml NAO; 200ml vs 220ml OK)
+  let rejeitadasEmbalagem = 0;
+  let rejeitadasSemDados = 0;
+  const aceitas: PrecoReferencia[] = [];
+
+  for (const p of precos) {
+    const temDadosEmb = !!(p.capacidadeUnidadeFornecimento && p.capacidadeUnidadeFornecimento > 0 && p.siglaUnidadeMedida);
+    if (!temDadosEmb) {
+      // Cotacao sem dados de embalagem — nao da pra comparar com seguranca
+      rejeitadasSemDados++;
+      console.info(`[filtro-embalagem] '${item.nome}' REJEITA cotacao ${p.identificadorCompra} (sem capacidade/sigla na API)`);
+      continue;
+    }
+    const basePreco = normalizarCapacidade(p.capacidadeUnidadeFornecimento!, p.siglaUnidadeMedida!);
+    if (!basePreco || basePreco.siglaBase !== baseItem.siglaBase) {
+      // Unidade base diferente (ex: item em ML, cotacao em G) — incomparavel
+      rejeitadasSemDados++;
+      console.info(`[filtro-embalagem] '${item.nome}' REJEITA ${p.identificadorCompra}: base ${basePreco?.siglaBase} != ${baseItem.siglaBase}`);
+      continue;
+    }
+    const diff = Math.abs(basePreco.valorBase - baseItem.valorBase) / baseItem.valorBase;
+    if (diff > TOLERANCIA) {
+      rejeitadasEmbalagem++;
+      console.info(`[filtro-embalagem] '${item.nome}' REJEITA ${p.identificadorCompra}: capacidade ${basePreco.valorBase}${basePreco.siglaBase} fora de ±15% de ${baseItem.valorBase}${baseItem.siglaBase}`);
+      continue;
+    }
+    aceitas.push(p);
+  }
+
+  console.info(`[filtro-embalagem] '${item.nome}' aceitou ${aceitas.length}/${precos.length} cotacoes (${rejeitadasEmbalagem} embalagem divergente, ${rejeitadasSemDados} sem dados)`);
+  return { aceitas, rejeitadasEmbalagem, rejeitadasSemDados };
 }
 
 function generateToken(): string {
@@ -335,7 +417,15 @@ export async function pesquisarItemAutomatico(
     const precos = await consultarPrecosPraticados(codigoCatmat, item.valorUnitario, nomeCatmat);
     console.info(`[pesquisa] '${item.nome}' API retornou ${precos.length} cotação(ões) brutas`);
 
-    const elegiveis = precos
+    // FILTRO DE EMBALAGEM — protecao auditorial contra comparacao entre embalagens distintas
+    const filtrado = filtrarEmbalagemEquivalente(precos, {
+      fatorConversao: item.fatorConversao,
+      unidadeBase: item.unidadeBase,
+      embalagemDescricao: item.embalagemDescricao,
+      nome: item.nome
+    });
+    const rejeitadasFaixa = filtrado.aceitas.filter(p => p.valorUnitario < item.valorUnitario).length;
+    const elegiveis = filtrado.aceitas
       .filter(p => p.valorUnitario >= item.valorUnitario)
       .sort((a, b) => b.valorUnitario - a.valorUnitario);
     console.info(`[pesquisa] '${item.nome}' ${elegiveis.length} elegíveis (>= R$ ${item.valorUnitario})`);
@@ -343,10 +433,22 @@ export async function pesquisarItemAutomatico(
     if (elegiveis.length === 0) {
       console.info(`[pesquisa] '${item.nome}' SEM elegíveis — limpando cesta antiga`);
       await limparPesquisaItem(item, codigoCatmat);
+      const motivos: string[] = [];
+      if (filtrado.rejeitadasEmbalagem > 0) motivos.push(`${filtrado.rejeitadasEmbalagem} com embalagem fora de ±15% da cadastrada`);
+      if (filtrado.rejeitadasSemDados > 0) motivos.push(`${filtrado.rejeitadasSemDados} sem dados de embalagem na API`);
+      if (rejeitadasFaixa > 0) motivos.push(`${rejeitadasFaixa} abaixo do valor estimado (R$ ${item.valorUnitario})`);
       const motivo = precos.length === 0
         ? 'A API governamental não retornou nenhuma cotação pra esse código CATMAT.'
-        : `API retornou ${precos.length} cotação(ões), mas todas abaixo do valor estimado (R$ ${item.valorUnitario}).`;
-      return { itemId: item.id, itemNome: item.nome, status: 'sem-refs', reason: motivo };
+        : `API retornou ${precos.length} cotação(ões), nenhuma elegível${motivos.length ? ': ' + motivos.join(', ') : ''}.`;
+      return {
+        itemId: item.id,
+        itemNome: item.nome,
+        status: 'sem-refs',
+        reason: motivo,
+        rejeitadasEmbalagem: filtrado.rejeitadasEmbalagem,
+        rejeitadasSemDados: filtrado.rejeitadasSemDados,
+        rejeitadasFaixa
+      };
     }
 
     const token = generateToken();
@@ -393,7 +495,15 @@ export async function pesquisarItemAutomatico(
     });
 
     console.info(`[pesquisa] '${item.nome}' OK — ${referenciasArquivadas.length} refs salvas`);
-    return { itemId: item.id, itemNome: item.nome, status: 'ok', refsCount: referenciasArquivadas.length };
+    return {
+      itemId: item.id,
+      itemNome: item.nome,
+      status: 'ok',
+      refsCount: referenciasArquivadas.length,
+      rejeitadasEmbalagem: filtrado.rejeitadasEmbalagem,
+      rejeitadasSemDados: filtrado.rejeitadasSemDados,
+      rejeitadasFaixa
+    };
   } catch (e: any) {
     console.error('Falha na pesquisa automática do item', item.nome, e);
     return { itemId: item.id, itemNome: item.nome, status: 'erro', reason: e?.message || String(e) };
@@ -433,7 +543,15 @@ export async function pesquisarItemMasterAutomatico(
     const precos = await consultarPrecosPraticados(codigoCatmat, item.valorUnitario, nomeCatmat);
     console.info(`[pesquisa-banco] '${item.nome}' API retornou ${precos.length} cotacoes brutas`);
 
-    const elegiveis = precos
+    // FILTRO DE EMBALAGEM — protecao auditorial
+    const filtrado = filtrarEmbalagemEquivalente(precos, {
+      fatorConversao: item.fatorConversao,
+      unidadeBase: item.unidadeBase,
+      embalagemDescricao: item.embalagemDescricao,
+      nome: item.nome
+    });
+    const rejeitadasFaixa = filtrado.aceitas.filter(p => p.valorUnitario < item.valorUnitario).length;
+    const elegiveis = filtrado.aceitas
       .filter(p => p.valorUnitario >= item.valorUnitario)
       .sort((a, b) => b.valorUnitario - a.valorUnitario);
 
@@ -446,10 +564,22 @@ export async function pesquisarItemMasterAutomatico(
         medianaReferencia: 0,
         ultimoCodigoVinculado: codigoCatmat
       }, { merge: true });
+      const motivos: string[] = [];
+      if (filtrado.rejeitadasEmbalagem > 0) motivos.push(`${filtrado.rejeitadasEmbalagem} com embalagem fora de ±15% da cadastrada`);
+      if (filtrado.rejeitadasSemDados > 0) motivos.push(`${filtrado.rejeitadasSemDados} sem dados de embalagem na API`);
+      if (rejeitadasFaixa > 0) motivos.push(`${rejeitadasFaixa} abaixo do valor estimado (R$ ${item.valorUnitario})`);
       const motivo = precos.length === 0
         ? 'A API governamental nao retornou nenhuma cotacao pra esse codigo.'
-        : `API retornou ${precos.length} cotacoes, mas todas abaixo do valor estimado (R$ ${item.valorUnitario}).`;
-      return { itemId: item.id, itemNome: item.nome, status: 'sem-refs', reason: motivo };
+        : `API retornou ${precos.length} cotacoes, nenhuma elegivel${motivos.length ? ': ' + motivos.join(', ') : ''}.`;
+      return {
+        itemId: item.id,
+        itemNome: item.nome,
+        status: 'sem-refs',
+        reason: motivo,
+        rejeitadasEmbalagem: filtrado.rejeitadasEmbalagem,
+        rejeitadasSemDados: filtrado.rejeitadasSemDados,
+        rejeitadasFaixa
+      };
     }
 
     const token = generateTokenBanco();
@@ -502,7 +632,15 @@ export async function pesquisarItemMasterAutomatico(
     });
 
     console.info(`[pesquisa-banco] '${item.nome}' OK — ${referenciasArquivadas.length} refs salvas`);
-    return { itemId: item.id, itemNome: item.nome, status: 'ok', refsCount: referenciasArquivadas.length };
+    return {
+      itemId: item.id,
+      itemNome: item.nome,
+      status: 'ok',
+      refsCount: referenciasArquivadas.length,
+      rejeitadasEmbalagem: filtrado.rejeitadasEmbalagem,
+      rejeitadasSemDados: filtrado.rejeitadasSemDados,
+      rejeitadasFaixa
+    };
   } catch (e: any) {
     console.error('Falha na pesquisa automatica do item master', item.nome, e);
     return { itemId: item.id, itemNome: item.nome, status: 'erro', reason: e?.message || String(e) };

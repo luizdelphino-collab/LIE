@@ -1394,25 +1394,36 @@ export default function ItensMasterPage() {
                 </div>
               )}
 
-              {!batchRunning && batchResults.length === 0 && (
-                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
-                  <p>
-                    Pra cada item do Banco com CATMAT/CATSER vinculado, o sistema vai consultar
-                    a API governamental (Compras.gov.br + PNCP) e atualizar a cesta de
-                    referencias salvas no master. <strong>A cesta vale pra todos os projetos</strong>
-                    {' '}que usam esse item.
-                  </p>
-                  <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
-                    <strong>Boa hora pra rodar:</strong> apos correcao das unidades (ML/L vs UN/CX),
-                    os registros salvos antes da correcao serao substituidos por dados frescos
-                    da API — com embalagem detalhada (siglaUnidadeFornecimento + capacidade).
-                  </p>
-                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
-                    <strong>Tempo estimado:</strong> 10-60 segundos por item dependendo de quantas
-                    cotacoes a API retorna.
-                  </p>
-                </div>
-              )}
+              {!batchRunning && batchResults.length === 0 && (() => {
+                const semEmb = itensComCatmat.filter(it => !it.fatorConversao || !it.unidadeBase).length;
+                return (
+                  <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                    <p>
+                      Pra cada item do Banco com CATMAT/CATSER vinculado, o sistema vai consultar
+                      a API governamental (Compras.gov.br + PNCP) e atualizar a cesta de
+                      referencias salvas no master. <strong>A cesta vale pra todos os projetos</strong>
+                      {' '}que usam esse item.
+                    </p>
+                    <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
+                      <strong>Filtro de embalagem ativo (Lei 14.133 art. 23 §1o, IN 65/2021):</strong>{' '}
+                      cotacoes cuja capacidade da embalagem diverge mais de ±15% da cadastrada serao
+                      <strong> rejeitadas automaticamente</strong>. Protege a instituicao em auditoria
+                      contra comparar copo 200ml com garrafa 1.5L.
+                    </p>
+                    {semEmb > 0 && (
+                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
+                        <strong>⚠ Atencao:</strong> {semEmb} item(ns) com CATMAT mas SEM embalagem cadastrada
+                        (fator de conversao + unidade base). Esses NAO serao filtrados — risco auditorial.
+                        Edite o item e use "Adotar embalagem oficial" antes de pesquisar.
+                      </p>
+                    )}
+                    <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-2">
+                      <strong>Tempo estimado:</strong> 10-60 segundos por item dependendo de quantas
+                      cotacoes a API retorna.
+                    </p>
+                  </div>
+                );
+              })()}
 
               {batchResults.length > 0 && (
                 <div className="space-y-2 max-h-[40vh] overflow-y-auto">
@@ -1436,6 +1447,16 @@ export default function ItensMasterPage() {
                           {r.status === 'ok' && `${r.refsCount} referencia(s) homologada(s).`}
                           {r.status !== 'ok' && r.reason}
                         </div>
+                        {((r.rejeitadasEmbalagem || 0) + (r.rejeitadasSemDados || 0) + (r.rejeitadasFaixa || 0)) > 0 && (
+                          <div className="text-[10px] text-gray-500 mt-1 leading-tight">
+                            <span className="font-semibold">Filtros aplicados:</span>{' '}
+                            {(r.rejeitadasEmbalagem || 0) > 0 && <span title="Capacidade da embalagem fora de ±15% da cadastrada — protecao auditorial (Lei 14.133 art. 23)">{r.rejeitadasEmbalagem} embalagem ≠</span>}
+                            {(r.rejeitadasEmbalagem || 0) > 0 && (r.rejeitadasSemDados || 0) > 0 && ' · '}
+                            {(r.rejeitadasSemDados || 0) > 0 && <span title="API governamental nao retornou capacidade/sigla — sem como verificar equivalencia">{r.rejeitadasSemDados} sem dados</span>}
+                            {((r.rejeitadasEmbalagem || 0) > 0 || (r.rejeitadasSemDados || 0) > 0) && (r.rejeitadasFaixa || 0) > 0 && ' · '}
+                            {(r.rejeitadasFaixa || 0) > 0 && <span title="Valor abaixo do estimado — cesta soh aceita >= valor cadastrado">{r.rejeitadasFaixa} fora da faixa</span>}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
