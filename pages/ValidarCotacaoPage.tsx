@@ -1,44 +1,4 @@
 import React, { useEffect, useState } from 'react';
-
-// Expande siglas de unidade de medida do catalogo federal pra forma completa.
-// Evita ambiguidade tipo '700 L' (Litro? Lote? Inicial 'l'?).
-function expandirUnidadeMedida(sigla: string | undefined | null, qtd: number = 0): string {
-  const s = String(sigla || '').trim().toUpperCase();
-  if (!s) return '';
-  const plural = qtd > 1 || qtd === 0;
-  const dict: Record<string, [string, string]> = {
-    'UN': ['Unidade', 'Unidades'], 'UND': ['Unidade', 'Unidades'],
-    'L': ['Litro', 'Litros'], 'LT': ['Litro', 'Litros'],
-    'ML': ['Mililitro', 'Mililitros'], 'MLT': ['Mililitro', 'Mililitros'],
-    'G': ['Grama', 'Gramas'], 'GR': ['Grama', 'Gramas'],
-    'KG': ['Quilograma', 'Quilogramas'],
-    'M': ['Metro', 'Metros'],
-    'M2': ['Metro quadrado', 'Metros quadrados'], 'M²': ['Metro quadrado', 'Metros quadrados'],
-    'M3': ['Metro cúbico', 'Metros cúbicos'], 'M³': ['Metro cúbico', 'Metros cúbicos'],
-    'CX': ['Caixa', 'Caixas'],
-    'PCT': ['Pacote', 'Pacotes'], 'PCTE': ['Pacote', 'Pacotes'],
-    'PC': ['Peça', 'Peças'],
-    'FRD': ['Fardo', 'Fardos'],
-    'GAL': ['Galão', 'Galões'], 'GLN': ['Galão', 'Galões'],
-    'GFA': ['Garrafa', 'Garrafas'], 'GRF': ['Garrafa', 'Garrafas'],
-    'SC': ['Saco', 'Sacos'],
-    'ENV': ['Envelope', 'Envelopes'],
-    'DZ': ['Dúzia', 'Dúzias'],
-    'PR': ['Par', 'Pares'],
-    'CTL': ['Cartela', 'Cartelas'],
-    'AMP': ['Ampola', 'Ampolas'],
-    'FA': ['Frasco', 'Frascos'], 'FR': ['Frasco', 'Frascos'],
-    'TBL': ['Tablete', 'Tabletes'],
-    'T': ['Tonelada', 'Toneladas'],
-    'H': ['Hora', 'Horas'], 'HR': ['Hora', 'Horas'],
-    'DIA': ['Diária', 'Diárias'],
-    'MES': ['Mês', 'Meses'], 'MÊS': ['Mês', 'Meses'],
-    'SERV': ['Serviço', 'Serviços'],
-  };
-  const entrada = dict[s];
-  if (!entrada) return s;
-  return plural ? entrada[1] : entrada[0];
-}
 import { useSearchParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { Shield, ShieldAlert, ShieldCheck, CheckCircle2, Download, ExternalLink, Calendar, Search, Scale, FileText, ArrowRight, Loader2, Info } from 'lucide-react';
@@ -459,57 +419,11 @@ export default function ValidarCotacaoPage() {
                               {r.descricaoItem && (
                                 <p className="text-slate-300 text-[11px] leading-relaxed mt-1">{r.descricaoItem}</p>
                               )}
-                              {(r.quantidade || r.unidadeMedida) && (() => {
-                                // QUANTIDADE — unidade da quantidade (UN/CX/FRD), nao capacidade da embalagem
-                                // Compat retroativa: cotacoes antigas salvaram capacidade (ML/L/KG/G) no campo unidadeMedida.
-                                const SIGLAS_CAPACIDADE = ['ML', 'L', 'LT', 'KG', 'G', 'GR', 'M', 'M2', 'M3', 'M²', 'M³'];
-                                const unidSalva = String(r.unidadeMedida || '').toUpperCase();
-                                const unidEhCapacidade = SIGLAS_CAPACIDADE.includes(unidSalva);
-                                const temEmb = !!(r.siglaUnidadeFornecimento || r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0));
-                                // 1) Tem embalagem: usa siglaUnidadeFornecimento, perfeito
-                                // 2) Capacidade sem embalagem: dados pre-correcao — nao expande "L" pra "Litros",
-                                //    mostra raw + badge de aviso pro usuario re-pesquisar
-                                // 3) Caso normal
-                                const dadosPreFix = unidEhCapacidade && !temEmb;
-                                const unidQtd = (unidEhCapacidade && temEmb)
-                                  ? (r.siglaUnidadeFornecimento || 'UN')
-                                  : (r.unidadeMedida || 'UN');
-                                const expandida = dadosPreFix ? '' : expandirUnidadeMedida(unidQtd, r.quantidade || 0);
-                                const siglaOrig = String(unidQtd).toUpperCase();
-                                const mostrarSigla = !dadosPreFix && siglaOrig && expandida && expandida.toUpperCase() !== siglaOrig;
-                                // EMBALAGEM — separada (ex: cada UN tem 200 ML, embalagem GARRAFA)
-                                const temEmbalagem = r.nomeUnidadeFornecimento ||
-                                  (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0);
-                                return (
-                                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-                                    <div>
-                                      <span className="text-slate-500">Qtd contratada:</span> <strong className="text-slate-300">{r.quantidade || '—'}</strong> {expandida || siglaOrig}
-                                      {mostrarSigla && <span className="text-slate-500 ml-1" title="Sigla original retornada pela API governamental">({siglaOrig})</span>}
-                                      {dadosPreFix && (
-                                        <span
-                                          className="ml-2 inline-block px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/40 rounded"
-                                          title="A unidade salva neste registro e sigla de capacidade (ML/L/KG/G) — provavelmente houve confusao entre quantidade e capacidade da embalagem. Para corrigir, re-pesquise o item no Banco de Itens."
-                                        >
-                                          ⚠ Dados pre-correcao
-                                        </span>
-                                      )}
-                                    </div>
-                                    {temEmbalagem && (
-                                      <div>
-                                        <span className="text-slate-500">Embalagem:</span>{' '}
-                                        {r.nomeUnidadeFornecimento && <strong className="text-slate-300">{r.nomeUnidadeFornecimento}</strong>}
-                                        {r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0 && (
-                                          <span className="ml-1">
-                                            {r.nomeUnidadeFornecimento ? '— ' : ''}
-                                            <strong className="text-slate-300">{r.capacidadeUnidadeFornecimento} {expandirUnidadeMedida(r.siglaUnidadeMedida || '', r.capacidadeUnidadeFornecimento).toLowerCase()}</strong>
-                                            <span className="text-slate-600 ml-1">por unidade</span>
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })()}
+                              {/* Quantidade contratada e Embalagem foram removidas (v1.11.1.1):
+                                  os campos da API governamental misturam unidade de fornecimento
+                                  com capacidade da embalagem de forma inconsistente entre orgaos,
+                                  causando confusao no validador. O valor unitario e o objeto da
+                                  contratacao acima ja sao suficientes pra rastreabilidade. */}
                             </div>
                           )}
 
