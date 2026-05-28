@@ -385,6 +385,19 @@ export interface PrecoReferencia {
   linkPncpOriginal?: string;
   localizacaoUrl: string; // Para manual/fomento, é a URL de upload no Firebase Storage
   arquivoNome?: string;
+  // Campos enriquecidos (etapa pos-5C) extraidos da Cloud Function:
+  municipio?: string;
+  criterioJulgamento?: string;
+  modoDisputa?: string;
+  amparoLegal?: string;
+  leiAplicada?: string;
+  objetoCompra?: string;
+  inscricaoEstadualFornecedor?: string;
+  dataPublicacao?: string;
+  // PDF direto do edital (obtido via obterArquivosContratacao no momento da homologacao)
+  linkEditalPdf?: string;
+  // Lista de arquivos do PNCP (edital + anexos) — populada lazy quando enriquecemos
+  arquivosPNCP?: Array<{ tipo: string; titulo: string; url: string; dataPublicacao?: string }>;
 }
 
 export interface ItemProjeto {

@@ -3,7 +3,7 @@ import { X, Search, Loader2, Check, FileText, Upload, Calendar, AlertCircle, Plu
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { storage, db } from '../lib/firebase';
-import { buscarMateriaisLocal, consultarPrecosPraticados } from '../lib/apiCompras';
+import { buscarMateriaisLocal, consultarPrecosPraticados, obterArquivosContratacao } from '../lib/apiCompras';
 import type { ItemMaster, ItemProjeto, PrecoReferencia } from '../types';
 import type { GovernmentMaterial } from '../lib/apiCompras';
 import { jsPDF } from 'jspdf';
@@ -479,6 +479,28 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       
       // Criar cópia profunda da cesta de referências para atualizar as URLs do Storage
       const referenciasArquivadas = cestaReferencias.map(r => ({ ...r }));
+
+      // 0. Enriquecimento PNCP: pra cada ref com numeroControlePNCP, busca o PDF do
+      // edital + lista de arquivos. Roda em paralelo pra todos. Falha silenciosa
+      // por ref (se o PNCP estiver fora, segue sem o linkEditalPdf).
+      const refsComPNCP = referenciasArquivadas.filter(r => r.numeroControlePNCP);
+      if (refsComPNCP.length > 0) {
+        console.log(`Enriquecendo ${refsComPNCP.length} ref(s) com arquivos PNCP...`);
+        const enriquecimentos = await Promise.all(
+          refsComPNCP.map(async (r) => {
+            const arq = await obterArquivosContratacao(r.numeroControlePNCP!);
+            return { ref: r, arquivos: arq };
+          })
+        );
+        for (const { ref, arquivos } of enriquecimentos) {
+          if (arquivos) {
+            if (arquivos.linkEditalPdf) ref.linkEditalPdf = arquivos.linkEditalPdf;
+            if (arquivos.arquivos && arquivos.arquivos.length > 0) {
+              ref.arquivosPNCP = arquivos.arquivos.slice(0, 10); // top 10 pra nao inflar Firestore
+            }
+          }
+        }
+      }
 
       // 1. Processo de arquivamento automático de comprovantes físicos (Atas Públicas ou Certidões)
       for (let idx = 0; idx < referenciasArquivadas.length; idx++) {
@@ -1382,11 +1404,11 @@ function gerarCertidaoCotaçãoPDF(
   y = drawCampo("Órgão / Entidade Pública:", r.orgaoLicitante, y, { truncate: 80 });
   if (r.cnpjOrgao) y = drawCampo("CNPJ do Órgão:", r.cnpjOrgao, y);
   // Linha com Poder | Esfera | UF lado a lado pra economizar espaco
-  if (r.poder || r.esfera || r.uf) {
+  if (r.poder || r.esfera || r.uf || r.municipio) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100, 116, 139);
-    doc.text("Poder · Esfera · UF:", 15, y);
+    doc.text("Poder · Esfera · UF · Município:", 15, y);
     doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
-    doc.text(`${r.poder || '—'} · ${r.esfera || '—'} · ${r.uf || '—'}`, COL_VAL_X, y);
+    doc.text(`${r.poder || '—'} · ${r.esfera || '—'} · ${r.uf || '—'} · ${r.municipio || '—'}`, COL_VAL_X, y);
     y += 5;
   }
   if (r.uasg) y = drawCampo("Código UASG:", r.uasg, y);
@@ -1397,9 +1419,22 @@ function gerarCertidaoCotaçãoPDF(
   y = drawCampo("Identificador da Compra:", r.identificadorCompra, y, { truncate: 90 });
   if (r.numeroControlePNCP) y = drawCampo("Nº Controle PNCP:", r.numeroControlePNCP, y);
   if (r.modalidade) y = drawCampo("Modalidade:", r.modalidade, y);
+  if (r.criterioJulgamento) y = drawCampo("Critério de Julgamento:", r.criterioJulgamento, y, { truncate: 80 });
+  if (r.modoDisputa) y = drawCampo("Modo de Disputa:", r.modoDisputa, y, { truncate: 80 });
+  if (r.leiAplicada) y = drawCampo("Lei Aplicada:", r.leiAplicada, y, { destacar: true });
+  if (r.amparoLegal && r.amparoLegal !== r.leiAplicada) y = drawCampo("Amparo Legal:", r.amparoLegal, y, { truncate: 80 });
   if (r.situacao) y = drawCampo("Situação:", r.situacao, y);
+  if (r.dataPublicacao) y = drawCampo("Publicação no PNCP:", r.dataPublicacao, y);
   if (r.dataHomologacao) y = drawCampo("Data de Homologação:", r.dataHomologacao, y);
   if (r.dataVigenciaFinalAta) y = drawCampo("Vigência Final (Ata):", r.dataVigenciaFinalAta, y);
+  if (r.objetoCompra) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100, 116, 139);
+    doc.text("Objeto da Contratação:", 15, y);
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
+    const lines = doc.splitTextToSize(r.objetoCompra, 130);
+    doc.text(lines.slice(0, 2), COL_VAL_X, y);
+    y += Math.min(lines.length, 2) * 4 + 1;
+  }
 
   // ============ SECAO 3: ITEM HOMOLOGADO (na licitacao) ============
   y += 2;
@@ -1418,6 +1453,7 @@ function gerarCertidaoCotaçãoPDF(
   }
   if (r.fornecedorNome) y = drawCampo("Fornecedor Adjudicatário:", r.fornecedorNome, y, { truncate: 80 });
   if (r.fornecedorCnpj) y = drawCampo("CNPJ Fornecedor:", r.fornecedorCnpj, y);
+  if (r.inscricaoEstadualFornecedor) y = drawCampo("Inscrição Estadual:", r.inscricaoEstadualFornecedor, y);
   y = drawCampo("Valor Unitário Homologado:", fmtBrl(r.valorUnitario), y, { destacar: true });
   // Valor total da contratacao (computado: quantidade × valor unitario)
   if (r.quantidade && r.quantidade > 0) {
@@ -1462,26 +1498,42 @@ function gerarCertidaoCotaçãoPDF(
   const linkValidacao = `https://projetos.lie.com.br/#/validar?token=${token}`;
   doc.textWithLink(`▸ Validação online da certidão (clique para abrir)`, 15, y, { url: linkValidacao });
   y += 4;
-  if (r.linkPncpOriginal) {
-    doc.textWithLink(`▸ Documento original no PNCP (clique para abrir)`, 15, y, { url: r.linkPncpOriginal });
+  // PRIORIDADE 1: link DIRETO pro PDF do edital (obtido via obterArquivosContratacao)
+  if (r.linkEditalPdf) {
+    doc.textWithLink(`▸ PDF do Edital no PNCP (download direto)`, 15, y, { url: r.linkEditalPdf });
     y += 4;
-    // URL em fonte pequena pra rastreabilidade visual
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.setTextColor(100, 116, 139);
+    doc.text(r.linkEditalPdf.substring(0, 150), 15, y);
+    y += 3;
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(2, 132, 199); doc.setFontSize(7);
+  }
+  // PRIORIDADE 2: pagina da contratacao no PNCP
+  if (r.linkPncpOriginal) {
+    doc.textWithLink(`▸ Página da contratação no PNCP`, 15, y, { url: r.linkPncpOriginal });
+    y += 4;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.setTextColor(100, 116, 139);
     doc.text(r.linkPncpOriginal.substring(0, 150), 15, y);
     y += 3;
     doc.setFont('helvetica', 'bold'); doc.setTextColor(2, 132, 199); doc.setFontSize(7);
   } else if (r.localizacaoUrl && r.fonte !== 'fomento' && r.fonte !== 'manual') {
-    doc.textWithLink(`▸ Documento da fonte (clique para abrir)`, 15, y, { url: r.localizacaoUrl });
+    doc.textWithLink(`▸ Documento da fonte`, 15, y, { url: r.localizacaoUrl });
     y += 4;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.setTextColor(100, 116, 139);
     doc.text(r.localizacaoUrl.substring(0, 150), 15, y);
     y += 3;
     doc.setFont('helvetica', 'bold'); doc.setTextColor(2, 132, 199); doc.setFontSize(7);
   }
+  // Anexos adicionais (se houver)
+  if (r.arquivosPNCP && r.arquivosPNCP.length > 1) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(100, 116, 139);
+    doc.text(`Anexos disponíveis (${r.arquivosPNCP.length}): ${r.arquivosPNCP.map(a => a.tipo).slice(0, 5).join(', ')}${r.arquivosPNCP.length > 5 ? '…' : ''}`, 15, y);
+    y += 3;
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(2, 132, 199); doc.setFontSize(7);
+  }
   // Link Compras.gov.br (busca pelo CATMAT na pesquisa de precos)
   if (r.codigoCatalogoItem) {
     const linkComprasGov = `https://catalogo.compras.gov.br/cnbs-web/busca?codigo=${r.codigoCatalogoItem}`;
-    doc.textWithLink(`▸ Verificar CATMAT/CATSER ${r.codigoCatalogoItem} no Catálogo Compras.gov.br`, 15, y, { url: linkComprasGov });
+    doc.textWithLink(`▸ Verificar CATMAT/CATSER ${r.codigoCatalogoItem} no Catálogo`, 15, y, { url: linkComprasGov });
     y += 4;
   }
 

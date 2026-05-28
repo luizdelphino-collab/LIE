@@ -29,6 +29,17 @@ interface PrecoReferencia {
   linkPncpOriginal?: string;
   localizacaoUrl: string;
   arquivoNome?: string;
+  // Enriquecimentos novos
+  municipio?: string;
+  criterioJulgamento?: string;
+  modoDisputa?: string;
+  amparoLegal?: string;
+  leiAplicada?: string;
+  objetoCompra?: string;
+  inscricaoEstadualFornecedor?: string;
+  dataPublicacao?: string;
+  linkEditalPdf?: string;
+  arquivosPNCP?: Array<{ tipo: string; titulo: string; url: string; dataPublicacao?: string }>;
 }
 
 interface RegistroValidador {
@@ -347,11 +358,12 @@ export default function ValidarCotacaoPage() {
                               <strong className="text-slate-200 text-[13px] font-bold leading-tight block">{r.orgaoLicitante}</strong>
                               {r.cnpjOrgao && <span className="text-[10px] text-slate-500 font-mono">CNPJ: {r.cnpjOrgao}</span>}
                             </div>
-                            {(r.poder || r.esfera || r.uf) && (
+                            {(r.poder || r.esfera || r.uf || r.municipio) && (
                               <div className="flex flex-wrap gap-2 text-[10px]">
                                 {r.poder && <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-slate-400"><span className="text-slate-500">Poder:</span> <strong className="text-slate-300">{r.poder}</strong></span>}
                                 {r.esfera && <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-slate-400"><span className="text-slate-500">Esfera:</span> <strong className="text-slate-300">{r.esfera}</strong></span>}
                                 {r.uf && <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-slate-400"><span className="text-slate-500">UF:</span> <strong className="text-slate-300">{r.uf}</strong></span>}
+                                {r.municipio && <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-slate-400"><span className="text-slate-500">Município:</span> <strong className="text-slate-300">{r.municipio}</strong></span>}
                                 {r.uasg && <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-slate-400"><span className="text-slate-500">UASG:</span> <strong className="text-slate-300 font-mono">{r.uasg}</strong></span>}
                               </div>
                             )}
@@ -372,8 +384,21 @@ export default function ValidarCotacaoPage() {
                             <div className="flex gap-3 flex-wrap text-[10px]">
                               {r.modalidade && <span className="text-slate-400"><span className="text-slate-500">Modalidade:</span> <strong className="text-slate-300">{r.modalidade}</strong></span>}
                               {r.situacao && <span className="text-slate-400"><span className="text-slate-500">Situação:</span> <strong className="text-slate-300">{r.situacao}</strong></span>}
+                              {r.criterioJulgamento && <span className="text-slate-400"><span className="text-slate-500">Critério:</span> <strong className="text-slate-300">{r.criterioJulgamento}</strong></span>}
+                              {r.modoDisputa && <span className="text-slate-400"><span className="text-slate-500">Disputa:</span> <strong className="text-slate-300">{r.modoDisputa}</strong></span>}
                             </div>
+                            {r.leiAplicada && (
+                              <div className="text-[10px]">
+                                <span className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                                  ⚖ {r.leiAplicada}
+                                </span>
+                                {r.amparoLegal && r.amparoLegal !== r.leiAplicada && (
+                                  <span className="text-slate-400 ml-2">· {r.amparoLegal}</span>
+                                )}
+                              </div>
+                            )}
                             <div className="flex gap-3 flex-wrap text-[10px]">
+                              {r.dataPublicacao && <span className="text-slate-400"><span className="text-slate-500">Publicação:</span> <strong className="text-slate-300">{r.dataPublicacao}</strong></span>}
                               {r.dataHomologacao && <span className="text-slate-400"><span className="text-slate-500">Homologação:</span> <strong className="text-slate-300">{r.dataHomologacao}</strong></span>}
                               {r.dataVigenciaFinalAta && <span className="text-slate-400"><span className="text-slate-500">Vigência Final:</span> <strong className="text-slate-300">{r.dataVigenciaFinalAta}</strong></span>}
                             </div>
@@ -402,38 +427,88 @@ export default function ValidarCotacaoPage() {
                             <div className="md:col-span-2 pt-3 border-t border-slate-800/60">
                               <span className="text-[9px] text-slate-500 block uppercase tracking-wider mb-1">Fornecedor Adjudicatário</span>
                               {r.fornecedorNome && <strong className="text-slate-300 text-[11px] block">{r.fornecedorNome}</strong>}
-                              {r.fornecedorCnpj && <span className="text-[10px] text-slate-500 font-mono">CNPJ: {r.fornecedorCnpj}</span>}
+                              <div className="flex gap-3 flex-wrap text-[10px] text-slate-500 mt-0.5">
+                                {r.fornecedorCnpj && <span className="font-mono">CNPJ: <strong className="text-slate-400">{r.fornecedorCnpj}</strong></span>}
+                                {r.inscricaoEstadualFornecedor && <span className="font-mono">IE: <strong className="text-slate-400">{r.inscricaoEstadualFornecedor}</strong></span>}
+                              </div>
                             </div>
                           )}
 
-                          {/* LINHA 4: LINKS PUBLICOS */}
-                          <div className="md:col-span-2 pt-3 border-t border-slate-800/60 flex flex-wrap gap-2">
-                            {r.linkPncpOriginal && (
-                              <a
-                                href={r.linkPncpOriginal}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/20 text-[10px] font-bold uppercase tracking-wider rounded-lg transition"
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                                Edital no PNCP
-                              </a>
-                            )}
-                            {r.localizacaoUrl && r.localizacaoUrl !== r.linkPncpOriginal && (
-                              <a
-                                href={r.localizacaoUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 hover:border-slate-600 text-[10px] font-bold uppercase tracking-wider rounded-lg transition"
-                              >
-                                {r.fonte === 'fomento' || r.fonte === 'manual' || r.fonte === 'contrato-publico' || r.fonte === 'convenio' || r.fonte === 'termo-fomento' || r.fonte === 'tabela-preco'
-                                  ? <><Download className="w-3 h-3" /> Documento PDF</>
-                                  : <><ExternalLink className="w-3 h-3" /> Link da fonte</>
-                                }
-                              </a>
-                            )}
-                            {!r.linkPncpOriginal && !r.localizacaoUrl && (
-                              <span className="text-[10px] text-slate-500 italic">Sem link público disponível para esta cotação.</span>
+                          {/* LINHA 4: OBJETO COMPRA */}
+                          {r.objetoCompra && (
+                            <div className="md:col-span-2 pt-3 border-t border-slate-800/60">
+                              <span className="text-[9px] text-slate-500 block uppercase tracking-wider mb-1">Objeto da Contratação</span>
+                              <p className="text-slate-300 text-[11px] leading-relaxed">{r.objetoCompra}</p>
+                            </div>
+                          )}
+
+                          {/* LINHA 5: LINKS PUBLICOS */}
+                          <div className="md:col-span-2 pt-3 border-t border-slate-800/60 space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              {/* PRIORIDADE 1: PDF direto do edital */}
+                              {r.linkEditalPdf && (
+                                <a
+                                  href={r.linkEditalPdf}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 text-[10px] font-bold uppercase tracking-wider rounded-lg transition"
+                                >
+                                  <Download className="w-3 h-3" />
+                                  PDF do Edital
+                                </a>
+                              )}
+                              {/* PRIORIDADE 2: pagina da contratacao */}
+                              {r.linkPncpOriginal && (
+                                <a
+                                  href={r.linkPncpOriginal}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/20 text-[10px] font-bold uppercase tracking-wider rounded-lg transition"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  Página no PNCP
+                                </a>
+                              )}
+                              {r.localizacaoUrl && r.localizacaoUrl !== r.linkPncpOriginal && r.localizacaoUrl !== r.linkEditalPdf && (
+                                <a
+                                  href={r.localizacaoUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 hover:border-slate-600 text-[10px] font-bold uppercase tracking-wider rounded-lg transition"
+                                >
+                                  {r.fonte === 'fomento' || r.fonte === 'manual' || r.fonte === 'contrato-publico' || r.fonte === 'convenio' || r.fonte === 'termo-fomento' || r.fonte === 'tabela-preco'
+                                    ? <><Download className="w-3 h-3" /> Documento PDF</>
+                                    : <><ExternalLink className="w-3 h-3" /> Link da fonte</>
+                                  }
+                                </a>
+                              )}
+                              {!r.linkEditalPdf && !r.linkPncpOriginal && !r.localizacaoUrl && (
+                                <span className="text-[10px] text-slate-500 italic">Sem link público disponível para esta cotação.</span>
+                              )}
+                            </div>
+
+                            {/* Anexos adicionais do PNCP */}
+                            {r.arquivosPNCP && r.arquivosPNCP.length > 0 && (
+                              <div className="pt-2 border-t border-slate-800/40">
+                                <span className="text-[9px] text-slate-500 block uppercase tracking-wider mb-1">
+                                  Anexos da Contratação ({r.arquivosPNCP.length})
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {r.arquivosPNCP.map((arq, ai) => (
+                                    <a
+                                      key={ai}
+                                      href={arq.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={`${arq.tipo}${arq.titulo ? ': ' + arq.titulo : ''}${arq.dataPublicacao ? ' (' + arq.dataPublicacao + ')' : ''}`}
+                                      className="inline-flex items-center gap-1 px-2 py-1 bg-slate-900 border border-slate-700 text-slate-300 hover:border-slate-600 hover:text-cyan-300 text-[9px] font-bold uppercase tracking-wider rounded transition"
+                                    >
+                                      <Download className="w-2.5 h-2.5" />
+                                      {arq.tipo}
+                                    </a>
+                                  ))}
+                                </div>
+                              </div>
                             )}
                           </div>
                         </div>

@@ -624,6 +624,42 @@ export interface CatmatValidacao {
   motivo?: string;
 }
 
+/**
+ * Busca a lista de arquivos (edital, anexos) de uma contratacao no PNCP
+ * a partir do numeroControlePNCP. Usado pra enriquecer cotacoes com link
+ * direto pro PDF do edital antes de salvar a cesta na homologacao.
+ *
+ * Retorna null se nao houver dados (PNCP fora do ar, numero invalido, etc.)
+ */
+export interface ArquivoPNCP {
+  tipo: string;
+  titulo: string;
+  url: string;
+  dataPublicacao?: string;
+  sequencial?: number;
+}
+export interface ArquivosContratacaoResposta {
+  numeroControlePNCP: string;
+  totalArquivos: number;
+  arquivos: ArquivoPNCP[];
+  linkEditalPdf: string;
+  linkPaginaPncp: string;
+}
+
+export async function obterArquivosContratacao(numeroControlePNCP: string): Promise<ArquivosContratacaoResposta | null> {
+  if (!numeroControlePNCP) return null;
+  const projectId = storage.app.options.projectId;
+  const url = `https://us-central1-${projectId}.cloudfunctions.net/obterArquivosContratacao?numeroControlePNCP=${encodeURIComponent(numeroControlePNCP)}`;
+  try {
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (e) {
+    console.warn('Falha ao obter arquivos PNCP:', e);
+    return null;
+  }
+}
+
 export async function validarCatmatOficial(
   codigo: number,
   tipo: 'material' | 'servico' = 'material'
@@ -707,16 +743,24 @@ export async function consultarPrecosPraticados(
         poder: r.poder || '',
         esfera: r.esfera || '',
         uf: r.uf || '',
+        municipio: r.municipio || '',
         modalidade: r.modalidade || '',
         situacao: r.situacao || '',
+        criterioJulgamento: r.criterioJulgamento || '',
+        modoDisputa: r.modoDisputa || '',
+        amparoLegal: r.amparoLegal || '',
+        leiAplicada: r.leiAplicada || '',
+        objetoCompra: r.objetoCompra || '',
         codigoCatalogoItem: r.codigoCatalogoItem || '',
         descricaoItem: r.descricaoItem || '',
         fornecedorNome: r.fornecedorNome || '',
         fornecedorCnpj: r.fornecedorCnpj || '',
+        inscricaoEstadualFornecedor: r.inscricaoEstadualFornecedor || '',
         identificadorCompra: r.identificadorCompra || r.numeroControlePNCP || '',
         numeroControlePNCP: r.numeroControlePNCP || '',
         dataHomologacao: r.dataHomologacao || '',
         dataVigenciaFinalAta: r.dataVigenciaFinalAta || '',
+        dataPublicacao: r.dataPublicacao || '',
         quantidade: Number(r.quantidade) || 0,
         unidadeMedida: r.unidadeMedida || '',
         valorUnitario: Number(r.valorUnitario) || 0,
