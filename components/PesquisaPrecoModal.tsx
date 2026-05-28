@@ -426,7 +426,13 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
           // geramos localmente uma linda Certidão Digital de Preço Público em PDF e fazemos o upload automático!
           if (!downloadUrl) {
             console.log(`Gerando certidão digital de cotação pública para arquivamento: ${r.identificadorCompra}`);
-            const certidaoBlob = gerarCertidaoCotaçãoPDF(r, item.nome, projetoTitulo || 'Projeto Esportivo', token);
+            const certidaoBlob = gerarCertidaoCotaçãoPDF(
+              r,
+              item,
+              projetoTitulo || (modoBanco ? '(BANCO DE ITENS)' : 'Projeto Esportivo'),
+              entidadeNome || 'Entidade Proponente',
+              token
+            );
             
             const storagePath = `projects/${item.projectId}/referencias_precos/${fileKey}.pdf`;
             const fileRef = ref(storage, storagePath);
@@ -481,6 +487,14 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         quantidade: item.quantidade || null,
         unidade: item.unidade,
         valorUnitarioEstimado: item.valorUnitario,
+        // Vinculo do item LIE com o catalogo oficial (espelho do master)
+        codigoCatmat: item.codigoCatmat || null,
+        tipoCatmat: item.tipoCatmat || null,
+        nomeCatmatOficial: item.nomeCatmatOficial || null,
+        descricaoCatmatOficial: item.descricaoCatmatOficial || null,
+        fatorConversao: item.fatorConversao || null,
+        unidadeBase: item.unidadeBase || null,
+        embalagemDescricao: item.embalagemDescricao || null,
         referencias: referenciasArquivadas,
         mediaReferencia: media,
         medianaReferencia: mediana,
@@ -1139,149 +1153,223 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
   );
 }
 
-function gerarCertidaoCotaçãoPDF(r: PrecoReferencia, itemNome: string, projetoTitulo: string, token: string): Blob {
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4'
-  });
+/**
+ * Gera a Certidao de Comprovacao e Preco Publico em PDF.
+ * Aproveita todos os campos disponiveis do PNCP/Compras.gov.br + dados
+ * do item LIE (CATMAT/CATSER vinculado) + vinculo institucional
+ * (entidade + projeto + denominacao do item).
+ */
+function gerarCertidaoCotaçãoPDF(
+  r: PrecoReferencia,
+  item: ItemPesquisavel,
+  projetoTitulo: string,
+  entidadeNome: string,
+  token: string
+): Blob {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
-  // Cabeçalho Neutro e Oficial
+  const fmtBrl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const truncar = (s: string | undefined | null, n: number) => (s || '—').toString().substring(0, n);
+  const COL_LABEL_X = 15;
+  const COL_VAL_X = 62;
+  const PG_W = 210;
+  const RIGHT_MARGIN = 195;
+
+  // ============ CABECALHO ============
   doc.setFillColor(15, 23, 42); // slate-900
-  doc.rect(0, 0, 210, 35, 'F');
+  doc.rect(0, 0, PG_W, 32, 'F');
 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text("REGISTRO NACIONAL DE PREÇOS PÚBLICOS", 15, 15);
-  
-  doc.setFontSize(7.5);
+  doc.text("REGISTRO NACIONAL DE PREÇOS PÚBLICOS", 15, 14);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(34, 211, 238); // cyan-400
-  doc.text("PORTAL NEUTRO DE AUDITORIA E CONFORMIDADE LEGAL — INSTRUÇÃO NORMATIVA SEGES/ME Nº 65/2021", 15, 22);
+  doc.setTextColor(34, 211, 238);
+  doc.text("PORTAL DE AUDITORIA E CONFORMIDADE LEGAL — IN SEGES/ME Nº 65/2021 · LEI 14.133/21 · ACÓRDÃO TCU 1445/2015", 15, 21);
 
-  // Corpo da Certidão
-  doc.setTextColor(30, 41, 59); // slate-800
-  doc.setFontSize(14);
+  // Tipo de fonte (badge no cabecalho a direita)
+  const fonteLabel = (() => {
+    switch (r.fonte) {
+      case 'compras.gov.br': return 'COMPRAS.GOV.BR';
+      case 'pncp':
+      case 'pncp-contratacao': return 'PNCP — CONTRATAÇÃO';
+      case 'pncp-ata': return 'PNCP — ATA';
+      case 'tce-pe': return 'TCE-PE';
+      case 'contrato-publico': return 'CONTRATO PÚBLICO';
+      case 'convenio': return 'CONVÊNIO';
+      case 'termo-fomento':
+      case 'fomento': return 'TERMO DE FOMENTO';
+      case 'tabela-preco': return 'TABELA DE PREÇOS';
+      case 'manual': return 'ORÇAMENTO FORNECEDOR';
+      default: return String(r.fonte).toUpperCase();
+    }
+  })();
+  doc.setFillColor(34, 211, 238);
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(6.5);
   doc.setFont('helvetica', 'bold');
-  doc.text("CERTIDÃO DE COMPROVAÇÃO E PREÇO PÚBLICO", 15, 50);
+  const fonteW = doc.getTextWidth(fonteLabel) + 4;
+  doc.rect(PG_W - 15 - fonteW, 16, fonteW, 6, 'F');
+  doc.text(fonteLabel, PG_W - 13 - fonteW + 2, 20);
 
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139); // slate-500
-  doc.text(`Identificador do Registro (Token): ${token}`, 15, 56);
-
-  // Tabela de Detalhes
-  doc.setDrawColor(226, 232, 240); // slate-200
-  doc.setLineWidth(0.3);
-  doc.line(15, 62, 195, 62);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(71, 85, 105); // slate-600
-  doc.text("DADOS DO ÓRGÃO E DA CONTRATAÇÃO", 15, 69);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text("Órgão Licitante / Parceiro:", 15, 77);
-  doc.setFont('helvetica', 'bold');
+  // ============ TITULO ============
   doc.setTextColor(30, 41, 59);
-  doc.text(r.orgaoLicitante.substring(0, 70), 65, 77);
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.text("CERTIDÃO DE COMPROVAÇÃO DE PREÇO PÚBLICO", 15, 42);
 
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text("Identificador da Compra:", 15, 84);
+  doc.text(`Identificador do Registro (Token): ${token}`, 15, 48);
+
+  // ============ SECAO 1: ORGAO E CONTRATACAO ============
+  let y = 56;
+  const drawSecaoHeader = (titulo: string, yPos: number) => {
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.line(15, yPos, RIGHT_MARGIN, yPos);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(titulo, 15, yPos + 5);
+    return yPos + 9;
+  };
+
+  const drawCampo = (label: string, valor: string, yPos: number, options?: { destacar?: boolean; xLabel?: number; xVal?: number; truncate?: number }) => {
+    const xL = options?.xLabel ?? COL_LABEL_X;
+    const xV = options?.xVal ?? COL_VAL_X;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text(label, xL, yPos);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(options?.destacar ? 16 : 30, options?.destacar ? 185 : 41, options?.destacar ? 129 : 59);
+    doc.text(truncar(valor, options?.truncate ?? 90), xV, yPos);
+    return yPos + 5;
+  };
+
+  y = drawSecaoHeader("1. DADOS DO ÓRGÃO LICITANTE / CONTRATANTE PÚBLICO", y);
+  y = drawCampo("Órgão / Entidade Pública:", r.orgaoLicitante, y, { truncate: 80 });
+  if (r.cnpjOrgao) y = drawCampo("CNPJ do Órgão:", r.cnpjOrgao, y);
+  // Linha com Poder | Esfera | UF lado a lado pra economizar espaco
+  if (r.poder || r.esfera || r.uf) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100, 116, 139);
+    doc.text("Poder · Esfera · UF:", 15, y);
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
+    doc.text(`${r.poder || '—'} · ${r.esfera || '—'} · ${r.uf || '—'}`, COL_VAL_X, y);
+    y += 5;
+  }
+  if (r.uasg) y = drawCampo("Código UASG:", r.uasg, y);
+
+  // ============ SECAO 2: PROCESSO / CONTRATACAO ============
+  y += 2;
+  y = drawSecaoHeader("2. PROCESSO DE CONTRATAÇÃO E HOMOLOGAÇÃO", y);
+  y = drawCampo("Identificador da Compra:", r.identificadorCompra, y, { truncate: 90 });
+  if (r.numeroControlePNCP) y = drawCampo("Nº Controle PNCP:", r.numeroControlePNCP, y);
+  if (r.modalidade) y = drawCampo("Modalidade:", r.modalidade, y);
+  if (r.situacao) y = drawCampo("Situação:", r.situacao, y);
+  if (r.dataHomologacao) y = drawCampo("Data de Homologação:", r.dataHomologacao, y);
+  if (r.dataVigenciaFinalAta) y = drawCampo("Vigência Final (Ata):", r.dataVigenciaFinalAta, y);
+
+  // ============ SECAO 3: ITEM HOMOLOGADO (na licitacao) ============
+  y += 2;
+  y = drawSecaoHeader("3. ITEM HOMOLOGADO NA LICITAÇÃO", y);
+  if (r.codigoCatalogoItem) y = drawCampo("Código Catálogo (CATMAT/CATSER):", r.codigoCatalogoItem, y);
+  if (r.descricaoItem) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100, 116, 139);
+    doc.text("Descrição (conforme edital):", 15, y);
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
+    const lines = doc.splitTextToSize(r.descricaoItem, 130);
+    doc.text(lines.slice(0, 3), COL_VAL_X, y);
+    y += Math.min(lines.length, 3) * 4 + 1;
+  }
+  if (r.quantidade || r.unidadeMedida) {
+    y = drawCampo("Quantidade / Unidade:", `${r.quantidade || '—'} ${r.unidadeMedida || ''}`.trim(), y);
+  }
+  if (r.fornecedorNome) y = drawCampo("Fornecedor Adjudicatário:", r.fornecedorNome, y, { truncate: 80 });
+  if (r.fornecedorCnpj) y = drawCampo("CNPJ Fornecedor:", r.fornecedorCnpj, y);
+  y = drawCampo("Valor Unitário Homologado:", fmtBrl(r.valorUnitario), y, { destacar: true });
+
+  // ============ SECAO 4: VINCULO COM PROJETO LIE ============
+  y += 2;
+  y = drawSecaoHeader("4. VÍNCULO COM PROJETO DE INCENTIVO AO ESPORTE", y);
+  y = drawCampo("Entidade Proponente:", entidadeNome, y, { truncate: 80 });
+  y = drawCampo("Projeto:", projetoTitulo, y, { truncate: 80 });
+  y = drawCampo("Item do Plano de Trabalho:", (item.nome || '').toUpperCase(), y, { truncate: 80 });
+  if (item.codigoCatmat) {
+    const tipoStr = item.tipoCatmat === 'servico' ? 'CATSER' : 'CATMAT';
+    y = drawCampo(`Código ${tipoStr} Vinculado:`, String(item.codigoCatmat), y);
+    if (item.nomeCatmatOficial) y = drawCampo(`Nome ${tipoStr} Oficial:`, item.nomeCatmatOficial, y, { truncate: 80 });
+    if (item.descricaoCatmatOficial) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100, 116, 139);
+      doc.text(`Descrição ${tipoStr}:`, 15, y);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
+      const lines = doc.splitTextToSize(item.descricaoCatmatOficial, 130);
+      doc.text(lines.slice(0, 3), COL_VAL_X, y);
+      y += Math.min(lines.length, 3) * 4 + 1;
+    }
+  }
+
+  // ============ DECLARACAO LEGAL ============
+  y += 3;
+  if (y > 230) y = 230; // garante espaco pra declaracao+selo
+  doc.setFillColor(248, 250, 252);
+  doc.rect(15, y, 180, 32, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.rect(15, y, 180, 32, 'S');
+
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
   doc.setTextColor(30, 41, 59);
-  doc.text(r.identificadorCompra, 65, 84);
+  doc.text("DECLARAÇÃO DE ECONOMICIDADE E CONFORMIDADE LEGAL", 20, y + 5);
 
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text("Código UASG / Parceiro:", 15, 91);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(30, 41, 59);
-  doc.text(r.uasg || "Não especificado", 65, 91);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text("Data de Homologação:", 15, 98);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(30, 41, 59);
-  doc.text(r.dataHomologacao, 65, 98);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text("Valor Unitário de Referência:", 15, 105);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(16, 185, 129); // emerald-500
-  doc.text(r.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 65, 105);
-
-  doc.line(15, 112, 195, 112);
-
-  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
   doc.setTextColor(71, 85, 105);
-  doc.text("ASSOCIAÇÃO TÉCNICA E FINALIDADE", 15, 119);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text("Item do Plano de Trabalho:", 15, 127);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(30, 41, 59);
-  doc.text(itemNome.toUpperCase().substring(0, 65), 65, 127);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text("Projeto Vinculado:", 15, 134);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(30, 41, 59);
-  doc.text(projetoTitulo.toUpperCase().substring(0, 65), 65, 134);
-
-  doc.line(15, 141, 195, 141);
-
-  // Declaração de Fé Pública e Economicidade
-  doc.setFillColor(248, 250, 252); // slate-50
-  doc.rect(15, 148, 180, 38, 'F');
-  doc.setDrawColor(203, 213, 225); // slate-300
-  doc.rect(15, 148, 180, 38, 'S');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(30, 41, 59);
-  doc.text("DECLARAÇÃO DE ECONOMICIDADE E CONFORMIDADE LEGAL", 20, 155);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  doc.setTextColor(71, 85, 105);
-  const textStr = "Atesta-se, sob as diretrizes de integridade administrativa, que o preço público acima referenciado foi coletado, validado e arquivado para instrução do processo de cotação de mercado. Esta referência atende de forma integral ao Art. 5º da Instrução Normativa SEGES/ME nº 65/2021, integrando de forma regular a cesta estatística de preços públicos homologados. O presente registro de conformidade encontra-se blindado e auditável pelo link público abaixo.";
+  const textStr = "Atesta-se que o preço público acima referenciado foi coletado integralmente do " +
+    `${r.fonte === 'pncp' || r.fonte === 'pncp-contratacao' || r.fonte === 'pncp-ata' ? 'Portal Nacional de Contratações Públicas (PNCP)' : (r.fonte === 'compras.gov.br' ? 'Portal de Compras do Governo Federal' : 'documento publico oficial anexo')}, ` +
+    "compondo a cesta estatística de preços públicos homologados conforme Art. 5º da IN SEGES/ME 65/2021, " +
+    "Art. 23 da Lei 14.133/21 e Acórdãos TCU 1445/2015 e 1231/2018 (fontes diversificadas, pesquisa ampla). " +
+    "Registro auditável pelo link público abaixo.";
   const textLines = doc.splitTextToSize(textStr, 170);
-  doc.text(textLines, 20, 161);
+  doc.text(textLines, 20, y + 11);
 
-  // Link de Validação
+  y += 36;
+
+  // ============ LINK + SELO ============
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(2, 132, 199); // sky-600
-  doc.setFontSize(7.5);
-  doc.text(`Acesse para validação externa: https://projetos.lie.com.br/#/validar?token=${token}`, 15, 195);
+  doc.setTextColor(2, 132, 199);
+  doc.setFontSize(7);
+  doc.text(`Validação online: https://projetos.lie.com.br/#/validar?token=${token}`, 15, y);
+  if (r.linkPncpOriginal) {
+    y += 4;
+    doc.text(`Origem PNCP: ${r.linkPncpOriginal.substring(0, 110)}`, 15, y);
+  } else if (r.localizacaoUrl && r.fonte !== 'fomento' && r.fonte !== 'manual') {
+    y += 4;
+    doc.text(`Link da fonte: ${r.localizacaoUrl.substring(0, 110)}`, 15, y);
+  }
 
-  // Carimbo/Selo de Rastreabilidade Vetorial
-  doc.setDrawColor(16, 185, 129); // emerald-500
+  // Selo carimbo
+  doc.setDrawColor(16, 185, 129);
   doc.setLineWidth(0.5);
-  doc.rect(140, 210, 55, 22);
-  
+  doc.rect(140, 260, 55, 22);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.5);
   doc.setTextColor(16, 185, 129);
-  doc.text("PREÇO PÚBLICO", 143, 215);
-  doc.text("VALIDADO & HOMOLOGADO", 143, 219);
-  
+  doc.text("PREÇO PÚBLICO", 143, 265);
+  doc.text("VALIDADO & HOMOLOGADO", 143, 269);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(5.5);
   doc.setTextColor(100, 116, 139);
-  doc.text(`Token: ${token.substring(0, 16)}`, 143, 224);
-  doc.text(`Data Reg: ${new Date().toLocaleDateString('pt-BR')}`, 143, 228);
+  doc.text(`Token: ${token.substring(0, 16)}…`, 143, 274);
+  doc.text(`Reg: ${new Date().toLocaleDateString('pt-BR')}`, 143, 278);
 
-  // Rodapé Neutro
-  doc.setTextColor(148, 163, 184); // slate-400
-  doc.setFontSize(6.5);
-  doc.text("Documento oficial de rastreabilidade gerado eletronicamente nos termos da legislação federal de licitações. Brasília-DF.", 15, 280);
+  // Rodape
+  doc.setTextColor(148, 163, 184);
+  doc.setFontSize(6);
+  doc.text("Documento de rastreabilidade gerado eletronicamente. Brasília-DF.", 15, 288);
 
   return doc.output('blob');
 }
