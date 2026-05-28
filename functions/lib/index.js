@@ -885,35 +885,49 @@ exports.padronizarItemNomenclatura = functions
             return `${i + 1}) ${partes.join(' | ')}`;
         })
             .join('\n');
-        const prompt = `Voce eh um especialista no catalogo CATMAT/CATSER do governo federal brasileiro (Compras.gov.br) e em contratacoes da Lei de Incentivo ao Esporte (LIE/FEDEESP).
+        const prompt = `Voce eh um especialista no catalogo CATMAT/CATSER do governo federal brasileiro (Compras.gov.br) e em contratacoes da Lei de Incentivo ao Esporte (LIE/FEDEESP) — eventos esportivos escolares, olimpiadas estudantis, capacitacao, FEDEESP, INTERCEUS.
 
-TAREFA: Pegar um item cadastrado pelo usuario no sistema LIE e PADRONIZAR sua nomenclatura pra alinhar com a forma usada nas contratacoes publicas reais — facilitando comparacao de preco e auditoria.
+TAREFA: Pegar um item cadastrado pelo usuario LIE e PADRONIZAR sua nomenclatura pra alinhar com a forma usada nas contratacoes publicas reais — facilitando comparacao de preco e auditoria.
 
-ITEM DO USUARIO (LIE):
+ITEM DO USUARIO:
 - Nome: "${itemNome}"
 - Descricao: "${itemDescricao}"
 - Unidade cadastrada: "${itemUnidade}"
 
-VINCULO OFICIAL (catalogo CATMAT/CATSER):
+VINCULO OFICIAL CATMAT/CATSER:
 - Codigo: ${codigoCatmat} (${tipoCatmat})
 - Nome oficial: "${nomeCatmatOficial}"
 - Descricao oficial: "${descricaoCatmatOficial}"
 
 AMOSTRA DE COTACOES REAIS (como o mercado descreve esse item):
-${amostraTxt || '(sem amostras disponiveis)'}
+${amostraTxt || '(sem amostras disponiveis — use seu conhecimento do catalogo e do contexto LIE)'}
 
-REGRAS:
-1. Mantenha a IDENTIDADE do item — eh o mesmo objeto, soh muda a forma de descrever
-2. Use linguagem formal/burocratica do catalogo CATMAT/CATSER (caixa alta no nome, descricao tecnica)
-3. Pra UNIDADE: olhe as amostras e identifique a mais frequente. Pra materiais use sigla padrao (UN, KG, CX, etc.); pra servicos use o nome do tipo de servico (DIARIA, EVENTO, SERVICO, etc.)
-4. Pra EMBALAGEM: se as amostras tem capacidade (200ml, 1.5L, etc.) e tudo CONVERGE pra mesma, use ela. Se divergem, use a do item original. Se nao tem, deixe vazio.
-5. fatorConversao = capacidade numerica (ex: 200 pro copo 200ml, 1500 pra garrafa 1.5L); unidadeBase = sigla da capacidade base (ML, G, M). Pra servicos/itens sem capacidade, ambos null.
-6. embalagemDescricao = texto livre legivel (ex: "Garrafa 1,5 litros", "Copo 200ml", "Caixa com 48 unidades"). Pra servicos pode ser o tipo (ex: "Diaria de servico").
-7. justificativa = 1-2 frases explicando o alinhamento
+REGRAS DE PADRONIZACAO:
+1. ANALISE A DESCRICAO ATIVAMENTE — eh ela que define o objeto real, nao soh o nome curto. Ex: nome "COBERTURA" sozinho eh ambiguo (pode ser cobertura de bolo ou cobertura jornalistica) — a descricao desambigua. SEMPRE use a descricao como fonte de verdade.
+2. SEJA FLEXIVEL com sinonimos e variacoes:
+   - "CERTIFICADOS DE PARTICIPACAO" = "CONFECCAO DE CERTIFICADOS PERSONALIZADOS"
+   - "COORDENADOR ACADEMICO" = "SERVICO DE COORDENACAO PEDAGOGICA"
+   - "COBERTURA JORNALISTICA" = "SERVICO DE ASSESSORIA DE IMPRENSA / COBERTURA DE EVENTO"
+   - "COBERTURA FOTO E FILMAGEM" = "SERVICO DE PRODUCAO AUDIOVISUAL / COBERTURA FOTOGRAFICA E FILMICA DE EVENTO"
+   - "MEDALHA" = "MEDALHA PERSONALIZADA / MEDALHA ESPORTIVA PREMIACAO"
+   - "MONTAGEM E DESMONTAGEM DE EVENTO" = "LOCACAO E MONTAGEM DE ESTRUTURAS PARA EVENTO"
+   - "KIT LANCHE" = "FORNECIMENTO DE LANCHE PREPARADO / KIT ALIMENTACAO"
+3. Use linguagem formal/burocratica do catalogo (caixa alta no nome, descricao tecnica em frase completa).
+4. UNIDADE: prefira a unidade dominante nas amostras. Pra materiais use sigla padrao (UN, KG, CX, COPO, GRF). Pra servicos use o tipo (SERVICO, DIARIA, EVENTO, JOGO, DIA).
+5. EMBALAGEM: se amostras CONVERGEM em capacidade (200ml, 1.5L), use ela. Se nao, use a do item original. Servicos sem embalagem deixe vazio.
+6. fatorConversao = numero da capacidade (200 pro copo 200ml). unidadeBase = ML/G/M. Servicos: ambos null.
+7. embalagemDescricao = texto humano (ex: "Copo 200ml", "Caixa com 48 unidades", "Diaria de servico").
+8. justificativa = 1-2 frases explicando o raciocinio.
 
-EXEMPLO BOM:
-Input: nome="AGUA COPOS 200ML", desc="agua mineral para evento", unidade="unidade", amostras mostram capacidade=200 sigla=ML, unidFornec=COPO
-Output: nomeAlinhado="AGUA MINERAL NATURAL", descricaoAlinhada="Agua mineral natural sem gas, copo descartavel 200ml, para hidratacao em evento esportivo", unidadeAlinhada="copo", siglaUnidadeFornecimento="COPO", capacidadeUnidadeFornecimento=200, siglaUnidadeMedida="ML", embalagemDescricao="Copo 200ml", fatorConversao=200, unidadeBase="ML"
+EXEMPLOS BONS:
+Input: nome="MEDALHAS", desc="medalha de premiacao para evento esportivo", unidade="unidade", sem amostras
+Output: nomeAlinhado="MEDALHA PERSONALIZADA PREMIACAO", descricaoAlinhada="Medalha esportiva personalizada para premiacao em evento esportivo, com gravacao da modalidade e classificacao.", unidadeAlinhada="unidade", siglaUnidadeFornecimento="UN", embalagemDescricao="Unidade individual", fatorConversao=null, unidadeBase=null
+
+Input: nome="COBERTURA JORNALISTICA", desc="servico de cobertura de evento esportivo com producao de releases", unidade="evento", sem amostras
+Output: nomeAlinhado="SERVICO DE ASSESSORIA DE IMPRENSA E COBERTURA JORNALISTICA", descricaoAlinhada="Servico de cobertura jornalistica de evento esportivo, incluindo producao de releases, materias e divulgacao em midias.", unidadeAlinhada="evento", siglaUnidadeFornecimento="EVENTO", embalagemDescricao="Servico por evento", fatorConversao=null, unidadeBase=null
+
+Input: nome="COORDENADOR ACADEMICO", desc="profissional para coordenacao pedagogica de evento educacional", unidade="diaria"
+Output: nomeAlinhado="SERVICO DE COORDENACAO PEDAGOGICA ACADEMICA", descricaoAlinhada="Servico profissional de coordenacao pedagogica para evento educacional/esportivo, com planejamento e supervisao das atividades.", unidadeAlinhada="diaria", siglaUnidadeFornecimento="DIARIA", embalagemDescricao="Diaria de servico", fatorConversao=null, unidadeBase=null
 
 RESPONDA APENAS COM JSON puro (sem markdown):
 {
@@ -976,25 +990,45 @@ RESPONDA APENAS COM JSON puro (sem markdown):
             res.status(502).json({ error: 'IA retornou nomeAlinhado invalido', rawSnippet: text.substring(0, 500) });
             return;
         }
-        // Anti-deriva: nomeAlinhado deve compartilhar pelo menos 1 token significativo com itemNome
-        // (palavras de >=4 letras, sem stopwords) — protege contra alucinacao
-        const STOPWORDS = new Set(['para', 'com', 'sem', 'tipo', 'unidade', 'material', 'evento', 'servico']);
-        const tokens = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-            .split(/[^a-z0-9]+/).filter(t => t.length >= 4 && !STOPWORDS.has(t));
-        const tokensOriginais = new Set(tokens(itemNome));
-        const tokensAlinhados = new Set(tokens(nomeAlinhado));
-        let sobreposicao = 0;
-        tokensOriginais.forEach(t => { if (tokensAlinhados.has(t))
-            sobreposicao++; });
-        // Tambem aceita se nomeAlinhado bate com nomeCatmatOficial (caso onde reescrita
-        // adotou totalmente o nome oficial — comportamento desejado)
-        const tokensOficial = new Set(tokens(nomeCatmatOficial));
-        let sobreposicaoOficial = 0;
-        tokensAlinhados.forEach(t => { if (tokensOficial.has(t))
-            sobreposicaoOficial++; });
-        if (sobreposicao === 0 && sobreposicaoOficial === 0 && tokensOriginais.size > 0) {
+        // Anti-deriva por SIMILARIDADE Dice (bigramas) — tolera variacoes morfologicas
+        // ("CERTIFICADOS" vs "CERTIFICADO", "COORDENADOR" vs "COORDENACAO") que o
+        // match exato de tokens rejeitaria injustamente. Compara nome+descricao
+        // do usuario contra nome+descricao alinhados pela IA, tambem aceita match
+        // com a referencia oficial CATMAT/CATSER.
+        const descricaoAlinhadaSan = String(parsed.descricaoAlinhada || '').trim();
+        const normSan = (s) => (s || '')
+            .toLowerCase()
+            .normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+        const bigramSet = (s) => {
+            const limpo = normSan(s).replace(/\s/g, '');
+            const out = new Set();
+            for (let i = 0; i < limpo.length - 1; i++)
+                out.add(limpo.substring(i, i + 2));
+            return out;
+        };
+        const diceSan = (a, b) => {
+            const ba = bigramSet(a);
+            const bb = bigramSet(b);
+            if (ba.size === 0 || bb.size === 0)
+                return 0;
+            let inter = 0;
+            ba.forEach(g => { if (bb.has(g))
+                inter++; });
+            return (2 * inter) / (ba.size + bb.size);
+        };
+        const textoUsuario = `${itemNome} ${itemDescricao}`;
+        const textoOficial = `${nomeCatmatOficial} ${descricaoCatmatOficial}`;
+        const textoAlinhado = `${nomeAlinhado} ${descricaoAlinhadaSan}`;
+        const scoreVsUsuario = diceSan(textoUsuario, textoAlinhado);
+        const scoreVsOficial = diceSan(textoOficial, textoAlinhado);
+        const THRESHOLD = 0.18; // bem permissivo — pega soh casos absurdos
+        if (Math.max(scoreVsUsuario, scoreVsOficial) < THRESHOLD) {
             res.status(502).json({
-                error: `IA derivou demais: nomeAlinhado "${nomeAlinhado}" nao compartilha nenhum token com original "${itemNome}" nem oficial "${nomeCatmatOficial}"`,
+                error: `IA derivou demais (similaridade muito baixa): usuario=${(scoreVsUsuario * 100).toFixed(0)}%, oficial=${(scoreVsOficial * 100).toFixed(0)}%`,
+                alinhado: { nome: nomeAlinhado, descricao: descricaoAlinhadaSan },
+                original: { nome: itemNome, descricao: itemDescricao },
+                oficial: { nome: nomeCatmatOficial, descricao: descricaoCatmatOficial },
                 rawSnippet: text.substring(0, 500),
             });
             return;

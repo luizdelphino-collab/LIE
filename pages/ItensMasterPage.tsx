@@ -9,7 +9,7 @@ import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/Catalo
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
 import CatmatDiagnostico from '../components/CatmatDiagnostico';
 import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
-import { isRecursoHumano, padronizarItemNomenclatura, type PadronizarItemResposta } from '../lib/apiCompras';
+import { isRecursoHumano, padronizarItemNomenclatura, traduzirTermoComIA, type PadronizarItemResposta } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
@@ -108,12 +108,13 @@ export default function ItensMasterPage() {
   const itensComCatmat = items.filter(it => it.codigoCatmat && it.codigoCatmat > 0);
 
   /**
-   * Padronizacao em lote: pra cada item com CATMAT vinculado, pega amostra de
-   * cotacoes do mercado, chama Gemini, e aplica diretamente nome/desc/unidade/embalagem.
-   * Preserva nome original em nomeOriginalLIE/descricaoOriginalLIE pra rollback.
+   * Padronizacao em lote AGRESSIVA: processa TODOS os itens.
+   * - Item COM CATMAT: pega amostra de cotacoes + chama Gemini padronizar
+   * - Item SEM CATMAT: chama IA pra DESCOBRIR codigo, vincula, e padroniza
+   * Preserva originais em nomeOriginalLIE/descricaoOriginalLIE/unidadeOriginalLIE.
    */
   const startPadronizacao = async () => {
-    const alvos = itensComCatmat;
+    const alvos = items;  // TODOS os itens, nao soh com CATMAT
     if (alvos.length === 0) return;
     setPadronizarRunning(true);
     setPadronizarResults([]);
@@ -123,11 +124,47 @@ export default function ItensMasterPage() {
       const it = alvos[i];
       setPadronizarProgress({ done: i, total: alvos.length, current: it.nome });
       try {
-        // Garante que mercado esteja carregado pra esse item — fonte das amostras
-        let mercadoItem = mercado[it.codigoCatmat!];
+        // ETAPA 1: garantir codigoCatmat — se nao tem, IA descobre proativamente
+        let codigoCatmat = it.codigoCatmat;
+        let tipoCatmat = it.tipoCatmat;
+        let nomeCatmatOficial = it.nomeCatmatOficial || '';
+        let descricaoCatmatOficial = it.descricaoCatmatOficial || '';
+
+        if (!codigoCatmat || codigoCatmat <= 0) {
+          // BUSCA ATIVA: combina nome + descricao pra dar mais contexto
+          const termoBusca = `${it.nome}${it.descricao ? ' — ' + it.descricao : ''}`.substring(0, 200);
+          const traducao = await traduzirTermoComIA(termoBusca);
+          const top = traducao?.candidatos?.[0];
+          if (!top) {
+            results.push({
+              itemId: it.id,
+              itemNome: it.nome,
+              status: 'erro',
+              reason: 'IA nao encontrou CATMAT/CATSER compativel a partir do nome+descricao'
+            });
+            setPadronizarResults([...results]);
+            continue;
+          }
+          codigoCatmat = top.codigo;
+          tipoCatmat = top.tipo;
+          nomeCatmatOficial = top.nome;
+          descricaoCatmatOficial = top.descricao;
+          // Salva o vinculo imediatamente
+          await setDoc(doc(db, 'items', it.id), {
+            codigoCatmat,
+            tipoCatmat,
+            nomeCatmatOficial,
+            descricaoCatmatOficial,
+            vinculadoPorIA: true,
+            vinculadoEm: serverTimestamp(),
+          }, { merge: true });
+        }
+
+        // ETAPA 2: pega amostra de cotacoes do mercado (se houver)
+        let mercadoItem = mercado[codigoCatmat];
         if (!mercadoItem) {
-          mercadoItem = await coletarMercadoItem(it.codigoCatmat!, it.tipoCatmat || 'material');
-          if (mercadoItem) setMercado(prev => ({ ...prev, [it.codigoCatmat!]: mercadoItem! }));
+          mercadoItem = await coletarMercadoItem(codigoCatmat, tipoCatmat || 'material');
+          if (mercadoItem) setMercado(prev => ({ ...prev, [codigoCatmat!]: mercadoItem! }));
         }
         const amostraCotacoes = (mercadoItem?.cotacoes || []).slice(0, 8).map(c => ({
           descricaoItem: c.descricaoItem,
@@ -136,22 +173,23 @@ export default function ItensMasterPage() {
           capacidadeUnidadeFornecimento: c.capacidadeUnidadeFornecimento,
           siglaUnidadeMedida: c.siglaUnidadeMedida,
         }));
+
+        // ETAPA 3: padronizar nome/desc/unidade/embalagem
         const resp = await padronizarItemNomenclatura({
           itemNome: it.nome,
           itemDescricao: it.descricao || '',
           itemUnidade: String(it.unidade || ''),
-          codigoCatmat: it.codigoCatmat!,
-          tipoCatmat: (it.tipoCatmat || 'material') as 'material' | 'servico',
-          nomeCatmatOficial: it.nomeCatmatOficial || '',
-          descricaoCatmatOficial: it.descricaoCatmatOficial || '',
+          codigoCatmat,
+          tipoCatmat: (tipoCatmat || 'material') as 'material' | 'servico',
+          nomeCatmatOficial,
+          descricaoCatmatOficial,
           amostraCotacoes,
         });
         if (!resp) {
-          results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'IA nao retornou resposta valida' });
+          results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'IA nao retornou resposta valida na padronizacao' });
           setPadronizarResults([...results]);
           continue;
         }
-        // Aplica direto no Firestore — preserva originais pra auditoria
         await setDoc(doc(db, 'items', it.id), {
           nomeOriginalLIE: (it as any).nomeOriginalLIE || it.nome,
           descricaoOriginalLIE: (it as any).descricaoOriginalLIE || it.descricao || '',
@@ -787,11 +825,11 @@ export default function ItensMasterPage() {
             </span>
           </button>
 
-          {/* Padronizar Nomenclatura — IA reescreve nome/desc/unidade pra alinhar com catalogo oficial */}
+          {/* Padronizar Nomenclatura — IA busca CATMAT ativamente + reescreve nome/desc/unidade */}
           <button
             onClick={() => setPadronizarOpen(true)}
-            disabled={itensComCatmat.length === 0}
-            title="IA reescreve nome, descricao e unidade dos itens pra alinhar com o catalogo CATMAT/CATSER oficial. Preserva original em nomeOriginalLIE."
+            disabled={items.length === 0}
+            title="IA processa TODOS os itens: busca CATMAT/CATSER ativamente pra quem nao tem vinculo, depois reescreve nome/descricao/unidade pra alinhar com catalogo oficial. Preserva originais em nomeOriginalLIE."
             className="group flex items-center bg-purple-50 border border-purple-300 text-purple-700 rounded-lg p-2 transition-all duration-300 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
             <Wand2 className="w-5 h-5 shrink-0 text-purple-600" />
@@ -1483,7 +1521,7 @@ export default function ItensMasterPage() {
                       ? `Processando ${padronizarProgress.done + 1} de ${padronizarProgress.total} — ${padronizarProgress.current}`
                       : padronizarResults.length > 0
                         ? `Concluido: ${padronizarResults.filter(r => r.status === 'ok').length} alinhado(s), ${padronizarResults.filter(r => r.status === 'erro').length} erro(s)`
-                        : `${itensComCatmat.length} item(ns) serao reescritos pra alinhar com catalogo oficial`
+                        : `${items.length} item(ns) serao processados (busca ativa CATMAT + alinhamento de nomenclatura)`
                     }
                   </p>
                 </div>
@@ -1517,10 +1555,12 @@ export default function ItensMasterPage() {
               {!padronizarRunning && padronizarResults.length === 0 && (
                 <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
                   <p>
-                    A IA vai pegar cada item com CATMAT vinculado, ler uma amostra das cotacoes
-                    reais que aparecem no Compras.gov.br, e <strong>reescrever direto</strong> o
-                    nome, descricao, unidade e embalagem pra alinhar com a linguagem do catalogo oficial.
+                    A IA processa <strong>todos os {items.length} itens</strong> em 2 etapas:
                   </p>
+                  <ol className="text-xs text-gray-600 space-y-1 ml-4 list-decimal">
+                    <li><strong>Busca ativa:</strong> pra itens SEM CATMAT/CATSER vinculado, IA descobre o codigo oficial a partir do nome + descricao (com validacao anti-alucinacao em 3 camadas).</li>
+                    <li><strong>Padronizacao:</strong> reescreve nome, descricao, unidade e embalagem pra alinhar com o catalogo CATMAT/CATSER oficial e as cotacoes reais do mercado.</li>
+                  </ol>
                   <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg p-2">
                     <strong>Por que faz diferenca:</strong> "AGUA COPOS 200ML" + unidade "unidade"
                     vira "AGUA MINERAL NATURAL" + unidade "copo" + capacidade 200ml — o filtro de
@@ -1599,7 +1639,7 @@ export default function ItensMasterPage() {
                     className="flex-1 py-2 bg-purple-500 text-white font-bold rounded-lg hover:bg-purple-600 transition flex items-center justify-center gap-2"
                   >
                     <Wand2 className="w-4 h-4" />
-                    Padronizar {itensComCatmat.length} item(ns)
+                    Padronizar {items.length} item(ns)
                   </button>
                 </>
               )}
