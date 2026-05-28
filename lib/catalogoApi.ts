@@ -312,6 +312,174 @@ export async function sugerirMelhorMatch(nome: string): Promise<SugestaoCatalogo
   return melhor;
 }
 
+// ============================================================================
+// Busca multi-termo — sinônimos LIE → linguagem burocrática do catálogo
+// ============================================================================
+//
+// O catálogo do SERPRO exige match quase exato. "carrinho de pipoca" retorna
+// vazio, mas "fornecimento alimentação evento" retorna o CATSER certo. Esse
+// dicionário mapeia termos do dia-a-dia LIE pros termos catalogados, e a
+// função buscarPdmsMultiTermo/buscarServicosMultiTermo disparam todas as
+// buscas em paralelo, deduplicando os resultados.
+
+const DICIONARIO_SINONIMOS_LIE: Record<string, string[]> = {
+  // ----- Alimentação / eventos -----
+  'pipoca': ['fornecimento alimentação evento', 'serviço alimentação esportivo', 'venda alimento'],
+  'algodão doce': ['fornecimento alimentação evento', 'serviço alimentação esportivo'],
+  'lanche': ['fornecimento alimentação preparada', 'kit lanche', 'refeição'],
+  'água': ['água mineral natural', 'água potável', 'bebida não alcoólica'],
+  'refeição': ['fornecimento alimentação preparada', 'serviço alimentação'],
+  // ----- Transporte -----
+  'ônibus': ['transporte fretamento passageiros', 'locação ônibus rodoviário', 'serviço transporte coletivo'],
+  'van': ['transporte fretamento passageiros', 'locação van', 'transporte escolar'],
+  'fretamento': ['transporte fretamento passageiros', 'locação veículo passageiros'],
+  // ----- Audiovisual / cobertura -----
+  'cobertura': ['serviço fotografia evento', 'filmagem audiovisual', 'cobertura jornalística'],
+  'filmagem': ['produção audiovisual evento', 'cobertura audiovisual', 'captação imagens'],
+  'fotografia': ['serviço fotográfico evento', 'cobertura fotográfica'],
+  'jornalística': ['assessoria imprensa', 'serviço jornalismo', 'cobertura comunicação'],
+  'audiovisual': ['produção audiovisual', 'serviço captação imagens'],
+  'transmissão': ['serviço streaming evento', 'transmissão ao vivo'],
+  'streaming': ['transmissão ao vivo', 'captação cinematográfica'],
+  // ----- Comunicação visual / impressos -----
+  'backdrop': ['lona vinílica impressa', 'painel comunicação visual', 'comunicação visual evento'],
+  'banner': ['lona impressa', 'comunicação visual personalizada'],
+  'windbanner': ['bandeira promocional haste', 'wind banner', 'comunicação visual bandeira'],
+  'placa': ['placa comunicação visual', 'placa homenagem gravada'],
+  'medalha': ['medalha esportiva premiação', 'medalha personalizada'],
+  'troféu': ['troféu personalizado premiação', 'troféu esportivo'],
+  'certificado': ['confecção certificado personalizado', 'impressão diploma'],
+  'súmula': ['impressão formulário', 'confecção bloco impresso'],
+  'camiseta': ['camiseta personalizada poliéster', 'uniforme camiseta'],
+  // ----- Estruturas evento -----
+  'box truss': ['locação estrutura box truss alumínio', 'treliça alumínio evento'],
+  'palco': ['locação palco praticável', 'estrutura modular evento'],
+  'painel led': ['locação painel led', 'telão LED alta definição'],
+  'som': ['locação sistema som evento', 'sonorização evento'],
+  'polionda': ['painel polipropileno ondulado', 'placa comunicação visual'],
+  // ----- Saúde -----
+  'ambulância': ['locação ambulância remoção', 'serviço transporte ambulância'],
+  'socorrista': ['serviço primeiros socorros evento', 'atendimento pré-hospitalar'],
+  'saúde': ['serviço médico evento', 'atendimento saúde evento'],
+  // ----- Recurso humano -----
+  'árbitro': ['serviço arbitragem esportiva', 'profissional árbitro'],
+  'arbitragem': ['serviço arbitragem esportiva educacional'],
+  'anotador': ['serviço anotador esportivo', 'profissional registro partidas'],
+  'coordenador': ['serviço coordenação executiva', 'gestão projeto'],
+  'professor': ['profissional educação física', 'consultoria acadêmica'],
+  'monitor': ['serviço monitoria esportiva', 'profissional pedagógico'],
+  'segurança': ['serviço segurança privada', 'vigilância evento'],
+  'limpeza': ['serviço limpeza conservação evento', 'higienização espaço'],
+  'locução': ['serviço locução evento', 'mestre cerimônias narração'],
+  'mascote': ['serviço animação evento', 'caracterização mascote'],
+  'figurino': ['confecção fantasia mascote', 'produção figurino caracterizado'],
+  // ----- TI / web -----
+  'website': ['desenvolvimento manutenção website', 'hospedagem portal web'],
+  'sistema': ['desenvolvimento sistema web', 'plataforma digital'],
+  'inscrições': ['serviço plataforma inscrição online', 'sistema cadastro online'],
+};
+
+/**
+ * Gera variantes de busca a partir de um termo do usuário.
+ * Retorna no máximo 5 termos pra controlar o número de chamadas paralelas.
+ * Estratégia:
+ *   1. Termo original (sempre primeiro)
+ *   2. Sinônimos do dicionário LIE quando alguma chave bate
+ *   3. Palavras individuais ≥3 letras quando termo é multi-palavra
+ */
+export function gerarSinonimosBusca(termo: string): string[] {
+  const limpo = (termo || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
+  if (!limpo) return [];
+
+  const variantes: string[] = [termo.trim()];
+
+  // 1. Sinônimos do dicionário
+  for (const [chave, sins] of Object.entries(DICIONARIO_SINONIMOS_LIE)) {
+    if (limpo.includes(chave)) {
+      for (const s of sins) {
+        if (!variantes.includes(s)) variantes.push(s);
+      }
+    }
+  }
+
+  // 2. Palavras individuais (se termo tem >1 palavra)
+  const palavras = limpo.split(/\s+/).filter(p => p.length >= 4 && !['para', 'pelo', 'pela', 'com', 'sem', 'dos', 'das'].includes(p));
+  if (palavras.length > 1) {
+    for (const p of palavras) {
+      if (!variantes.includes(p)) variantes.push(p);
+    }
+  }
+
+  return variantes.slice(0, 5);
+}
+
+export interface PdmMatchComOrigem extends PdmMatch {
+  /** Qual termo (original ou sinônimo) trouxe esse resultado */
+  termoOrigem: string;
+  /** 1.0 = termo original, 0.7 = sinônimo */
+  scoreRelevancia: number;
+}
+
+export interface ServicoMatchComOrigem extends ServicoMatch {
+  termoOrigem: string;
+  scoreRelevancia: number;
+}
+
+/**
+ * Busca PDMs com expansão automática de sinônimos LIE. Dispara N buscas em
+ * paralelo, deduplicar por codigoPdm (mantém a primeira ocorrência = maior score).
+ */
+export async function buscarPdmsMultiTermo(termoOriginal: string): Promise<PdmMatchComOrigem[]> {
+  const variantes = gerarSinonimosBusca(termoOriginal);
+  if (variantes.length === 0) return [];
+
+  const respostas = await Promise.all(
+    variantes.map(async (termo, idx) => {
+      const r = await buscarPdmsPorPalavra(termo);
+      const score = idx === 0 ? 1.0 : 0.7;
+      return r.map(pdm => ({ ...pdm, termoOrigem: termo, scoreRelevancia: score } as PdmMatchComOrigem));
+    })
+  );
+
+  // Dedupe por codigoPdm — mantém o de maior score
+  const mapa = new Map<number, PdmMatchComOrigem>();
+  for (const lista of respostas) {
+    for (const item of lista) {
+      const existente = mapa.get(item.codigoPdm);
+      if (!existente || item.scoreRelevancia > existente.scoreRelevancia) {
+        mapa.set(item.codigoPdm, item);
+      }
+    }
+  }
+
+  return Array.from(mapa.values()).sort((a, b) => b.scoreRelevancia - a.scoreRelevancia);
+}
+
+export async function buscarServicosMultiTermo(termoOriginal: string): Promise<ServicoMatchComOrigem[]> {
+  const variantes = gerarSinonimosBusca(termoOriginal);
+  if (variantes.length === 0) return [];
+
+  const respostas = await Promise.all(
+    variantes.map(async (termo, idx) => {
+      const r = await buscarServicosPorPalavra(termo);
+      const score = idx === 0 ? 1.0 : 0.7;
+      return r.map(s => ({ ...s, termoOrigem: termo, scoreRelevancia: score } as ServicoMatchComOrigem));
+    })
+  );
+
+  const mapa = new Map<number, ServicoMatchComOrigem>();
+  for (const lista of respostas) {
+    for (const item of lista) {
+      const existente = mapa.get(item.codigoServico);
+      if (!existente || item.scoreRelevancia > existente.scoreRelevancia) {
+        mapa.set(item.codigoServico, item);
+      }
+    }
+  }
+
+  return Array.from(mapa.values()).sort((a, b) => b.scoreRelevancia - a.scoreRelevancia);
+}
+
 /**
  * Formata as características de um item numa string legível.
  * Ex: "Tipo: Sem Gás • Material Embalagem: Plástico"

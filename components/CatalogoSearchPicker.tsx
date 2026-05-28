@@ -4,9 +4,9 @@ import {
   Package, Wrench, Sparkles, X
 } from 'lucide-react';
 import {
-  buscarPdmsPorPalavra, buscarServicosPorPalavra, listarItensDoPdm,
-  formatarCaracteristicas,
-  type PdmMatch, type ServicoMatch, type ItemDoPdm
+  buscarPdmsMultiTermo, buscarServicosMultiTermo, listarItensDoPdm,
+  formatarCaracteristicas, gerarSinonimosBusca,
+  type PdmMatchComOrigem, type ServicoMatchComOrigem, type ItemDoPdm
 } from '../lib/catalogoApi';
 
 export interface CatalogoSelecao {
@@ -35,11 +35,11 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
   const [termo, setTermo] = useState(initialTermo || '');
   const [tipo, setTipo] = useState<'material' | 'servico'>('material');
   const [buscando, setBuscando] = useState(false);
-  const [pdms, setPdms] = useState<PdmMatch[]>([]);
-  const [servicos, setServicos] = useState<ServicoMatch[]>([]);
+  const [pdms, setPdms] = useState<PdmMatchComOrigem[]>([]);
+  const [servicos, setServicos] = useState<ServicoMatchComOrigem[]>([]);
 
   const [modo, setModo] = useState<Modo>('busca');
-  const [pdmSelecionado, setPdmSelecionado] = useState<PdmMatch | null>(null);
+  const [pdmSelecionado, setPdmSelecionado] = useState<PdmMatchComOrigem | null>(null);
   const [itensPdm, setItensPdm] = useState<ItemDoPdm[]>([]);
   const [carregandoItens, setCarregandoItens] = useState(false);
 
@@ -60,10 +60,10 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
       setBuscando(true);
       try {
         if (tipo === 'material') {
-          const r = await buscarPdmsPorPalavra(termo);
+          const r = await buscarPdmsMultiTermo(termo);
           setPdms(r);
         } else {
-          const r = await buscarServicosPorPalavra(termo);
+          const r = await buscarServicosMultiTermo(termo);
           setServicos(r);
         }
       } finally {
@@ -81,7 +81,7 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
     }
   }, [initialTermo, autoBuscaFeita, selecionado]);
 
-  const abrirItensDoPdm = async (pdm: PdmMatch) => {
+  const abrirItensDoPdm = async (pdm: PdmMatchComOrigem) => {
     setPdmSelecionado(pdm);
     setModo('itens-pdm');
     setCarregandoItens(true);
@@ -99,7 +99,7 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
     setItensPdm([]);
   };
 
-  const aplicarItem = (item: ItemDoPdm, pdm: PdmMatch) => {
+  const aplicarItem = (item: ItemDoPdm, pdm: PdmMatchComOrigem) => {
     const caract = formatarCaracteristicas(item);
     const desc = item.descricaoCompleta
       || (caract ? `${pdm.nomePdm.toUpperCase()} — ${caract}` : pdm.nomePdm.toUpperCase());
@@ -114,7 +114,7 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
     );
   };
 
-  const aplicarServico = (s: ServicoMatch) => {
+  const aplicarServico = (s: ServicoMatchComOrigem) => {
     const nome = s.descricaoServicoAcentuado || s.descricaoServico || '';
     onSelect(
       {
@@ -214,12 +214,23 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
             </div>
 
             {termo.length >= 2 && (
-              <div className="text-[11px] text-gray-500 flex items-center gap-1">
+              <div className="text-[11px] text-gray-500 flex items-center gap-1 flex-wrap">
                 {buscando ? (
-                  <><Loader2 className="w-3 h-3 animate-spin" /> Buscando no catálogo Compras.gov.br…</>
+                  <><Loader2 className="w-3 h-3 animate-spin" /> Buscando em até 5 variantes do termo…</>
                 ) : (
                   <>
                     {totalResultados} {tipo === 'material' ? 'PDM(s)' : 'serviço(s)'} encontrado(s)
+                    {(() => {
+                      const sins = gerarSinonimosBusca(termo);
+                      if (sins.length > 1) {
+                        return (
+                          <span className="text-[10px] text-blue-700" title={`Variantes consultadas: ${sins.join(' · ')}`}>
+                            (busca expandida com {sins.length - 1} sinônimo{sins.length > 2 ? 's' : ''})
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                     {totalResultados > 0 && tipo === 'material' && ' — clique pra ver os itens'}
                   </>
                 )}
@@ -240,8 +251,16 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
                   PDM {pdm.codigoPdm}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold text-sm text-lie-ink truncate group-hover:text-amber-700">
+                  <div className="font-bold text-sm text-lie-ink truncate group-hover:text-amber-700 flex items-center gap-1.5">
                     {pdm.nomePdm}
+                    {pdm.scoreRelevancia < 1 && (
+                      <span
+                        className="text-[9px] font-semibold uppercase tracking-wide text-blue-700 bg-blue-50 border border-blue-200 px-1 py-0 rounded normal-case"
+                        title={`Encontrado via sinônimo: "${pdm.termoOrigem}"`}
+                      >
+                        via "{pdm.termoOrigem}"
+                      </span>
+                    )}
                   </div>
                   {(pdm.nomeClasse || pdm.descricaoGrupo) && (
                     <div className="text-[11px] text-gray-500 mt-0.5">
@@ -265,8 +284,16 @@ export default function CatalogoSearchPicker({ initialTermo, onSelect, onClear, 
                   CATSER {s.codigoServico}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold text-sm text-lie-ink truncate group-hover:text-amber-700">
+                  <div className="font-bold text-sm text-lie-ink truncate group-hover:text-amber-700 flex items-center gap-1.5">
                     {s.descricaoServicoAcentuado || s.descricaoServico}
+                    {s.scoreRelevancia < 1 && (
+                      <span
+                        className="text-[9px] font-semibold uppercase tracking-wide text-blue-700 bg-blue-50 border border-blue-200 px-1 py-0 rounded normal-case"
+                        title={`Encontrado via sinônimo: "${s.termoOrigem}"`}
+                      >
+                        via "{s.termoOrigem}"
+                      </span>
+                    )}
                   </div>
                   {s.nomeGrupo && (
                     <div className="text-[11px] text-gray-500 mt-0.5">Grupo: {s.nomeGrupo}</div>
