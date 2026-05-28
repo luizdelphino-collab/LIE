@@ -551,8 +551,8 @@ exports.traduzirTermoCatmat = functions
         const model = genAI.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: {
-                temperature: 0.2, // baixa pra mais determinismo
-                maxOutputTokens: 4096, // 5 candidatos × descricoes ricas
+                temperature: 0.2,
+                maxOutputTokens: 8192, // bem alto pra evitar truncamento
                 responseMimeType: 'application/json',
             },
         });
@@ -568,6 +568,8 @@ REGRAS CRÍTICAS:
 4. Pra serviços, use códigos CATSER (geralmente 5 dígitos)
 5. Ordene candidatos por confiança (mais provável primeiro)
 6. Cada candidato deve incluir uma justificativa clara
+7. SEMPRE escreva tipo SEM acento: "servico" (não "serviço"). Use sempre lowercase.
+8. Mantenha descricao e justificativa CURTAS (max 100 caracteres cada) pra evitar truncamento
 
 TERMO DO USUÁRIO: "${termo}"
 
@@ -578,8 +580,8 @@ Responda em JSON puro com esta estrutura exata (sem markdown, sem comentários):
       "codigo": 445484,
       "tipo": "material",
       "nome": "ÁGUA MINERAL NATURAL",
-      "descricao": "Água mineral natural sem gás, garrafa plástica PET, 500ml, lacrada (Portaria 2914/2011 MS)",
-      "justificativa": "Match direto: usuário pediu 'água para evento'; este é o CATMAT genérico de água mineral",
+      "descricao": "Água mineral natural sem gás, 500ml",
+      "justificativa": "Match direto: água para hidratação",
       "confianca": 0.95
     }
   ]
@@ -612,24 +614,63 @@ Se não tiver candidatos confiáveis, retorne {"candidatos": []} e nada mais.`;
             });
             return;
         }
-        // Validacao basica: descarta candidatos sem codigo numerico valido
+        // Normaliza tipo (IA as vezes retorna "serviço" com acento ou variantes)
+        const normalizarTipo = (t) => {
+            const s = String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+            if (s === 'material' || s === 'catmat')
+                return 'material';
+            if (s === 'servico' || s === 'catser')
+                return 'servico';
+            return null;
+        };
+        // Validacao basica: descarta candidatos sem codigo numerico ou tipo invalido
         const candidatosBrutos = parsed.candidatos
-            .filter((c) => c && Number(c.codigo) > 0 && (c.tipo === 'material' || c.tipo === 'servico'))
-            .map((c) => ({
-            codigo: Number(c.codigo),
-            tipo: c.tipo,
-            nome: String(c.nome || ''),
-            descricao: String(c.descricao || ''),
-            justificativa: String(c.justificativa || ''),
-            confianca: Number(c.confianca) || 0.5,
-        }))
+            .map((c) => {
+            const tipo = normalizarTipo(c?.tipo);
+            if (!c || !(Number(c.codigo) > 0) || !tipo)
+                return null;
+            return {
+                codigo: Number(c.codigo),
+                tipo,
+                nome: String(c.nome || ''),
+                descricao: String(c.descricao || ''),
+                justificativa: String(c.justificativa || ''),
+                confianca: Number(c.confianca) || 0.5,
+            };
+        })
+            .filter((c) => c !== null)
             .slice(0, 5);
-        // VALIDACAO ANTI-FRAUDE: chama API oficial do SERPRO pra verificar se cada
-        // codigo retornado pela IA realmente EXISTE no catalogo. Descarta os
-        // alucinados. Esse passo e CRITICO — IAs podem inventar codigos plausiveis.
+        // VALIDACAO ANTI-FRAUDE em 2 camadas:
+        // CAMADA 1: codigo existe no catalogo oficial do SERPRO?
+        // CAMADA 2: nome/descricao oficial bate semanticamente com o que a IA
+        //          gerou? Se a IA disse "maquina de pipoca" mas o codigo oficial
+        //          e "Peca Equipamento Hospitalar", e claramente alucinacao.
+        //          Heuristica: Dice coefficient (bigramas) >= 0.20 entre nome IA
+        //          e nome oficial — bem permissivo mas pega casos absurdos.
         const headersGov = {
             'Accept': 'application/json',
             'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
+        };
+        const normalizar = (s) => (s || '')
+            .toLowerCase()
+            .normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        const bigramas = (s) => {
+            const limpo = normalizar(s).replace(/\s/g, '');
+            const set = new Set();
+            for (let i = 0; i < limpo.length - 1; i++)
+                set.add(limpo.substring(i, i + 2));
+            return set;
+        };
+        const diceScore = (a, b) => {
+            const ba = bigramas(a);
+            const bb = bigramas(b);
+            if (ba.size === 0 || bb.size === 0)
+                return 0;
+            let inter = 0;
+            ba.forEach(g => { if (bb.has(g))
+                inter++; });
+            return (2 * inter) / (ba.size + bb.size);
         };
         const validacoes = await Promise.all(candidatosBrutos.map(async (c) => {
             try {
@@ -637,21 +678,64 @@ Se não tiver candidatos confiáveis, retorne {"candidatos": []} e nada mais.`;
                     ? `https://cnbs.estaleiro.serpro.gov.br/cnbs-api/servico/v1/dadosServicoPorCodigo?codigo_servico=${c.codigo}`
                     : `https://cnbs.estaleiro.serpro.gov.br/cnbs-api/material/v1/recuperaDadosItemMaterialPorCodigo?codigo_item_material=${c.codigo}`;
                 const resp = await fetch(url, { headers: headersGov });
-                if (!resp.ok)
+                if (!resp.ok) {
                     return { ...c, validado: false, motivoDescarte: `HTTP ${resp.status} na validação` };
-                const data = await resp.json();
+                }
+                // Trata response vazio (codigo nao encontrado retorna body vazio em alguns casos)
+                const txt = await resp.text();
+                if (!txt || txt.trim().length === 0) {
+                    return { ...c, validado: false, motivoDescarte: 'Código não encontrado no catálogo' };
+                }
+                let data;
+                try {
+                    data = JSON.parse(txt);
+                }
+                catch {
+                    return { ...c, validado: false, motivoDescarte: 'Resposta inválida do catálogo' };
+                }
                 const arr = Array.isArray(data) ? data : [data];
                 const primeiro = arr[0];
-                if (!primeiro || !primeiro.codigoItem && !primeiro.codigoServico) {
+                if (!primeiro || (!primeiro.codigoItem && !primeiro.codigoServico)) {
                     return { ...c, validado: false, motivoDescarte: 'Código não encontrado no catálogo oficial' };
                 }
-                // Sobrescreve nome/descricao com os oficiais quando disponiveis (mais confiavel que IA)
-                const nomeOficial = primeiro.nomePdm || primeiro.descricaoServicoAcentuado || primeiro.descricaoServico || c.nome;
-                const descOficial = primeiro.descricaoCompleta || primeiro.descricaoItem || primeiro.descricaoServico || c.descricao;
+                const nomeOficial = String(primeiro.nomePdm || primeiro.descricaoServicoAcentuado || primeiro.descricaoServico || '');
+                const descOficial = String(primeiro.descricaoCompleta || primeiro.descricaoItem || primeiro.descricaoServico || '');
+                // CAMADA 2: validacao semantica via Dice score
+                const nomeIA = c.nome || '';
+                const descIA = c.descricao || '';
+                const textoIA = `${nomeIA} ${descIA}`;
+                const textoOficial = `${nomeOficial} ${descOficial}`;
+                // 2.a — Similaridade IA (o que a IA achou que o codigo era) vs Oficial
+                const scoreIA = diceScore(textoIA, textoOficial);
+                const THRESHOLD_IA = 0.35;
+                if (scoreIA < THRESHOLD_IA) {
+                    return {
+                        ...c,
+                        validado: false,
+                        motivoDescarte: `IA disse "${nomeIA.substring(0, 40)}" mas oficial é "${nomeOficial.substring(0, 40)}" (similarity ${(scoreIA * 100).toFixed(0)}%)`,
+                    };
+                }
+                // 2.b — Similaridade TERMO DO USUARIO vs Nome Oficial.
+                // Isso evita o caso onde a IA gerou uma descricao falsa coerente
+                // (ex: "Pipoca salgada") pra um codigo que NA verdade e
+                // "Reagente Clinico". O termo do user "carrinho pipoca festa" nao bate
+                // com "Reagente Clinico" — descarta.
+                const scoreTermo = diceScore(termo, nomeOficial);
+                const THRESHOLD_TERMO = 0.20;
+                if (scoreTermo < THRESHOLD_TERMO) {
+                    return {
+                        ...c,
+                        validado: false,
+                        motivoDescarte: `Termo do usuário "${termo.substring(0, 40)}" não casa com nome oficial "${nomeOficial.substring(0, 40)}" (similarity ${(scoreTermo * 100).toFixed(0)}%)`,
+                    };
+                }
+                // Passou nas 3 camadas — sobrescreve nome/desc com os oficiais
                 return {
                     ...c,
-                    nome: nomeOficial,
-                    descricao: descOficial,
+                    nome: nomeOficial || c.nome,
+                    descricao: descOficial || c.descricao,
+                    similaridadeIA: Math.round(scoreIA * 100),
+                    similaridadeTermo: Math.round(scoreTermo * 100),
                     validado: true,
                 };
             }
