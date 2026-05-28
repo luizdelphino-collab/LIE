@@ -13,6 +13,8 @@ import { isRecursoHumano } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
+import { pesquisarItemMasterAutomatico, type AutoPesquisaResult } from '../lib/pesquisaAutomatica';
+import { Sparkles, RefreshCcw } from 'lucide-react';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -82,6 +84,33 @@ export default function ItensMasterPage() {
 
   // Pesquisa de preço no Banco (etapa 5C): cesta vive no master, vale pra todos projetos
   const [pesquisaItem, setPesquisaItem] = useState<ItemMaster | null>(null);
+
+  // Pesquisa em lote (batch update) — atualiza mercado de todos os itens elegiveis
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, current: '' });
+  const [batchResults, setBatchResults] = useState<AutoPesquisaResult[]>([]);
+
+  const itensComCatmat = items.filter(it => it.codigoCatmat && it.codigoCatmat > 0);
+
+  const startBatchPesquisa = async () => {
+    const alvos = itensComCatmat;
+    if (alvos.length === 0) return;
+    setBatchRunning(true);
+    setBatchResults([]);
+    setBatchProgress({ done: 0, total: alvos.length, current: '' });
+    const results: AutoPesquisaResult[] = [];
+    for (let i = 0; i < alvos.length; i++) {
+      const it = alvos[i];
+      setBatchProgress({ done: i, total: alvos.length, current: it.nome });
+      const res = await pesquisarItemMasterAutomatico(it);
+      results.push(res);
+      setBatchResults([...results]);
+    }
+    setBatchProgress({ done: alvos.length, total: alvos.length, current: '' });
+    setBatchRunning(false);
+    await carregarItens();
+  };
 
   const buscarEmbalagensOficiais = async () => {
     if (!formData.codigoCatmat) return;
@@ -665,6 +694,21 @@ export default function ItensMasterPage() {
             <Wand2 className="w-5 h-5 shrink-0 text-amber-600" />
             <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
               Validar CATMAT em Lote
+            </span>
+          </button>
+
+          {/* Atualizar mercado em lote — pesquisa de preco em todos os itens com CATMAT */}
+          <button
+            onClick={() => setBatchOpen(true)}
+            disabled={itensComCatmat.length === 0}
+            title={itensComCatmat.length === 0
+              ? 'Nenhum item com CATMAT vinculado'
+              : `Re-pesquisar preco publico em ${itensComCatmat.length} item(ns) — atualiza referencias salvas pra todos os projetos`}
+            className="group flex items-center bg-emerald-50 border border-emerald-300 text-emerald-700 rounded-lg p-2 transition-all duration-300 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            <RefreshCcw className="w-5 h-5 shrink-0 text-emerald-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Atualizar Mercado em Lote ({itensComCatmat.length})
             </span>
           </button>
 
@@ -1302,6 +1346,138 @@ export default function ItensMasterPage() {
         items={items}
         onAtualizado={carregarItens}
       />
+
+      {/* ===== MODAL DE PESQUISA DE PRECO EM LOTE (Banco) ===== */}
+      {batchOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh]">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-500 rounded-lg">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Atualizar Mercado em Lote</h3>
+                  <p className="text-xs text-gray-300">
+                    {batchRunning
+                      ? `Processando ${batchProgress.done + 1} de ${batchProgress.total} — ${batchProgress.current}`
+                      : batchResults.length > 0
+                        ? `Concluido: ${batchResults.length} item(ns) processado(s)`
+                        : `${itensComCatmat.length} item(ns) com CATMAT serao re-pesquisados (IN 65/2021)`
+                    }
+                  </p>
+                </div>
+              </div>
+              {!batchRunning && (
+                <button
+                  onClick={() => { setBatchOpen(false); setBatchResults([]); }}
+                  className="hover:bg-white/10 p-2 rounded-full transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {batchRunning && (
+                <div className="space-y-2">
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-emerald-500 h-full transition-all duration-300"
+                      style={{ width: `${(batchProgress.done / Math.max(batchProgress.total, 1)) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Consultando Compras.gov.br/PNCP e arquivando comprovantes…
+                  </p>
+                </div>
+              )}
+
+              {!batchRunning && batchResults.length === 0 && (
+                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                  <p>
+                    Pra cada item do Banco com CATMAT/CATSER vinculado, o sistema vai consultar
+                    a API governamental (Compras.gov.br + PNCP) e atualizar a cesta de
+                    referencias salvas no master. <strong>A cesta vale pra todos os projetos</strong>
+                    {' '}que usam esse item.
+                  </p>
+                  <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
+                    <strong>Boa hora pra rodar:</strong> apos correcao das unidades (ML/L vs UN/CX),
+                    os registros salvos antes da correcao serao substituidos por dados frescos
+                    da API — com embalagem detalhada (siglaUnidadeFornecimento + capacidade).
+                  </p>
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                    <strong>Tempo estimado:</strong> 10-60 segundos por item dependendo de quantas
+                    cotacoes a API retorna.
+                  </p>
+                </div>
+              )}
+
+              {batchResults.length > 0 && (
+                <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+                  {batchResults.map((r, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex items-start gap-2 p-2.5 rounded-lg border text-xs ${
+                        r.status === 'ok' ? 'bg-green-50 border-green-200' :
+                        r.status === 'sem-catmat-real' ? 'bg-orange-50 border-orange-200' :
+                        r.status === 'sem-match' ? 'bg-gray-50 border-gray-200' :
+                        r.status === 'sem-refs' ? 'bg-amber-50 border-amber-200' :
+                        'bg-red-50 border-red-200'
+                      }`}
+                    >
+                      {r.status === 'ok' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
+                      {(r.status === 'sem-catmat-real' || r.status === 'sem-match' || r.status === 'sem-refs') && <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />}
+                      {r.status === 'erro' && <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
+                      <div className="flex-1">
+                        <div className="font-bold text-gray-800">{r.itemNome}</div>
+                        <div className="text-gray-600 mt-0.5">
+                          {r.status === 'ok' && `${r.refsCount} referencia(s) homologada(s).`}
+                          {r.status !== 'ok' && r.reason}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
+              {!batchRunning && batchResults.length === 0 && (
+                <>
+                  <button
+                    onClick={() => setBatchOpen(false)}
+                    className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={startBatchPesquisa}
+                    className="flex-1 py-2 bg-emerald-500 text-white font-bold rounded-lg hover:bg-emerald-600 transition flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Pesquisar {itensComCatmat.length} item(ns)
+                  </button>
+                </>
+              )}
+              {batchRunning && (
+                <button disabled className="flex-1 py-2 bg-gray-300 text-gray-500 font-bold rounded-lg cursor-not-allowed">
+                  Processando…
+                </button>
+              )}
+              {!batchRunning && batchResults.length > 0 && (
+                <button
+                  onClick={() => { setBatchOpen(false); setBatchResults([]); }}
+                  className="flex-1 py-2 bg-lie-ink text-white font-bold rounded-lg hover:bg-black transition"
+                >
+                  Fechar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== MODAL DE PESQUISA DE PREÇO (Banco) ===== */}
       {pesquisaItem && (

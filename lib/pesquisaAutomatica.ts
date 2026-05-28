@@ -3,7 +3,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import jsPDF from 'jspdf';
 import { storage, db } from './firebase';
 import { buscarMateriaisLocal, consultarPrecosPraticados } from './apiCompras';
-import type { ItemProjeto, PrecoReferencia } from '../types';
+import type { ItemProjeto, ItemMaster, PrecoReferencia } from '../types';
 
 export type AutoPesquisaStatus = 'ok' | 'sem-match' | 'sem-catmat-real' | 'sem-refs' | 'erro';
 
@@ -227,7 +227,7 @@ export function gerarCertidaoCotacaoPDF(
 async function arquivarReferencia(
   r: PrecoReferencia,
   itemNome: string,
-  itemProjectId: string,
+  storagePathPrefix: string,
   projetoTitulo: string,
   token: string,
   idx: number
@@ -272,7 +272,7 @@ async function arquivarReferencia(
 
   if (!downloadUrl) {
     const certBlob = gerarCertidaoCotacaoPDF(copy, itemNome, projetoTitulo, token);
-    const storagePath = `projects/${itemProjectId}/referencias_precos/${fileKey}.pdf`;
+    const storagePath = `${storagePathPrefix}/${fileKey}.pdf`;
     const fileRef = ref(storage, storagePath);
     const uploadTask = uploadBytesResumable(fileRef, certBlob);
     await new Promise<void>((resolve, reject) => {
@@ -359,7 +359,8 @@ export async function pesquisarItemAutomatico(
 
     const referenciasArquivadas: PrecoReferencia[] = [];
     for (let idx = 0; idx < elegiveis.length; idx++) {
-      const arquivada = await arquivarReferencia(elegiveis[idx], item.nome, item.projectId, projetoTitulo, token, idx);
+      const pathPrefix = `projects/${item.projectId}/referencias_precos`;
+      const arquivada = await arquivarReferencia(elegiveis[idx], item.nome, pathPrefix, projetoTitulo, token, idx);
       referenciasArquivadas.push(arquivada);
     }
 
@@ -403,4 +404,122 @@ export async function pesquisarItemAutomatico(
     console.error('Falha na pesquisa automática do item', item.nome, e);
     return { itemId: item.id, itemNome: item.nome, status: 'erro', reason: e?.message || String(e) };
   }
+}
+
+/**
+ * Versao Banco de Itens (etapa 5C+): pesquisa de preco direto no master,
+ * sem vinculo a projeto. Mesma logica do pesquisarItemAutomatico mas salva
+ * em items/{id} e cotacoesValidadoras com escopo='banco'. Usada pelo botao
+ * "Atualizar mercado de todos" do Banco de Itens.
+ */
+export async function pesquisarItemMasterAutomatico(
+  item: ItemMaster
+): Promise<AutoPesquisaResult> {
+  try {
+    console.info(`[pesquisa-banco] iniciando '${item.nome}' (estimado: R$ ${item.valorUnitario})`);
+
+    if (!item.codigoCatmat || item.codigoCatmat <= 0) {
+      // Tenta seed local como ultimo recurso
+      const matches = buscarMateriaisLocal(item.nome);
+      if (matches.length === 0) {
+        return {
+          itemId: item.id,
+          itemNome: item.nome,
+          status: 'sem-catmat-real',
+          reason: 'Item sem CATMAT/CATSER vinculado. Edite o item e busque o codigo oficial.'
+        };
+      }
+      var codigoCatmat = matches[0].codigoItem;
+      var nomeCatmat = matches[0].nome;
+    } else {
+      var codigoCatmat = item.codigoCatmat;
+      var nomeCatmat = item.nomeCatmatOficial || item.nome;
+    }
+
+    const precos = await consultarPrecosPraticados(codigoCatmat, item.valorUnitario, nomeCatmat);
+    console.info(`[pesquisa-banco] '${item.nome}' API retornou ${precos.length} cotacoes brutas`);
+
+    const elegiveis = precos
+      .filter(p => p.valorUnitario >= item.valorUnitario)
+      .sort((a, b) => b.valorUnitario - a.valorUnitario);
+
+    if (elegiveis.length === 0) {
+      // Limpa cesta antiga
+      await setDoc(doc(db, 'items', item.id), {
+        pesquisado: false,
+        referencias: [],
+        mediaReferencia: 0,
+        medianaReferencia: 0,
+        ultimoCodigoVinculado: codigoCatmat
+      }, { merge: true });
+      const motivo = precos.length === 0
+        ? 'A API governamental nao retornou nenhuma cotacao pra esse codigo.'
+        : `API retornou ${precos.length} cotacoes, mas todas abaixo do valor estimado (R$ ${item.valorUnitario}).`;
+      return { itemId: item.id, itemNome: item.nome, status: 'sem-refs', reason: motivo };
+    }
+
+    const token = generateTokenBanco();
+    const pathPrefix = `banco/${item.id}/referencias_precos`;
+
+    const referenciasArquivadas: PrecoReferencia[] = [];
+    for (let idx = 0; idx < elegiveis.length; idx++) {
+      const arquivada = await arquivarReferencia(elegiveis[idx], item.nome, pathPrefix, '(BANCO DE ITENS)', token, idx);
+      referenciasArquivadas.push(arquivada);
+    }
+
+    const valores = referenciasArquivadas.map(r => r.valorUnitario).sort((a, b) => a - b);
+    const media = valores.reduce((acc, v) => acc + v, 0) / valores.length;
+    const meio = Math.floor(valores.length / 2);
+    const mediana = valores.length % 2 === 0
+      ? (valores[meio - 1] + valores[meio]) / 2
+      : valores[meio];
+
+    await setDoc(doc(db, 'items', item.id), {
+      pesquisado: true,
+      referencias: referenciasArquivadas,
+      mediaReferencia: media,
+      medianaReferencia: mediana,
+      tokenPesquisa: token,
+      ultimoCodigoVinculado: codigoCatmat,
+      pesquisaAtualizadaEm: serverTimestamp()
+    }, { merge: true });
+
+    await setDoc(doc(db, 'cotacoesValidadoras', token), {
+      token,
+      itemMasterId: item.id,
+      escopo: 'banco' as const,
+      nome: item.nome,
+      descricao: item.descricao || '',
+      unidade: item.unidade,
+      valorUnitarioEstimado: item.valorUnitario,
+      codigoCatmat: item.codigoCatmat || null,
+      tipoCatmat: item.tipoCatmat || null,
+      nomeCatmatOficial: item.nomeCatmatOficial || null,
+      descricaoCatmatOficial: item.descricaoCatmatOficial || null,
+      fatorConversao: item.fatorConversao || null,
+      unidadeBase: item.unidadeBase || null,
+      embalagemDescricao: item.embalagemDescricao || null,
+      referencias: referenciasArquivadas,
+      mediaReferencia: media,
+      medianaReferencia: mediana,
+      projetoTitulo: '(BANCO DE ITENS)',
+      entidadeNome: 'PROPONENTE',
+      criadoEm: serverTimestamp()
+    });
+
+    console.info(`[pesquisa-banco] '${item.nome}' OK — ${referenciasArquivadas.length} refs salvas`);
+    return { itemId: item.id, itemNome: item.nome, status: 'ok', refsCount: referenciasArquivadas.length };
+  } catch (e: any) {
+    console.error('Falha na pesquisa automatica do item master', item.nome, e);
+    return { itemId: item.id, itemNome: item.nome, status: 'erro', reason: e?.message || String(e) };
+  }
+}
+
+function generateTokenBanco(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
 }

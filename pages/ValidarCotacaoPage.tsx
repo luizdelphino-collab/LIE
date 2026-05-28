@@ -462,17 +462,21 @@ export default function ValidarCotacaoPage() {
                               {(r.quantidade || r.unidadeMedida) && (() => {
                                 // QUANTIDADE — unidade da quantidade (UN/CX/FRD), nao capacidade da embalagem
                                 // Compat retroativa: cotacoes antigas salvaram capacidade (ML/L/KG/G) no campo unidadeMedida.
-                                // Detecta esse caso e prefere siglaUnidadeFornecimento, caindo em 'UN' como ultimo recurso.
                                 const SIGLAS_CAPACIDADE = ['ML', 'L', 'LT', 'KG', 'G', 'GR', 'M', 'M2', 'M3', 'M²', 'M³'];
                                 const unidSalva = String(r.unidadeMedida || '').toUpperCase();
                                 const unidEhCapacidade = SIGLAS_CAPACIDADE.includes(unidSalva);
-                                const temEmb = r.siglaUnidadeFornecimento || r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0);
+                                const temEmb = !!(r.siglaUnidadeFornecimento || r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0));
+                                // 1) Tem embalagem: usa siglaUnidadeFornecimento, perfeito
+                                // 2) Capacidade sem embalagem: dados pre-correcao — nao expande "L" pra "Litros",
+                                //    mostra raw + badge de aviso pro usuario re-pesquisar
+                                // 3) Caso normal
+                                const dadosPreFix = unidEhCapacidade && !temEmb;
                                 const unidQtd = (unidEhCapacidade && temEmb)
                                   ? (r.siglaUnidadeFornecimento || 'UN')
                                   : (r.unidadeMedida || 'UN');
-                                const expandida = expandirUnidadeMedida(unidQtd, r.quantidade || 0);
+                                const expandida = dadosPreFix ? '' : expandirUnidadeMedida(unidQtd, r.quantidade || 0);
                                 const siglaOrig = String(unidQtd).toUpperCase();
-                                const mostrarSigla = siglaOrig && expandida && expandida.toUpperCase() !== siglaOrig;
+                                const mostrarSigla = !dadosPreFix && siglaOrig && expandida && expandida.toUpperCase() !== siglaOrig;
                                 // EMBALAGEM — separada (ex: cada UN tem 200 ML, embalagem GARRAFA)
                                 const temEmbalagem = r.nomeUnidadeFornecimento ||
                                   (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0);
@@ -481,6 +485,14 @@ export default function ValidarCotacaoPage() {
                                     <div>
                                       <span className="text-slate-500">Qtd contratada:</span> <strong className="text-slate-300">{r.quantidade || '—'}</strong> {expandida || siglaOrig}
                                       {mostrarSigla && <span className="text-slate-500 ml-1" title="Sigla original retornada pela API governamental">({siglaOrig})</span>}
+                                      {dadosPreFix && (
+                                        <span
+                                          className="ml-2 inline-block px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/40 rounded"
+                                          title="A unidade salva neste registro e sigla de capacidade (ML/L/KG/G) — provavelmente houve confusao entre quantidade e capacidade da embalagem. Para corrigir, re-pesquise o item no Banco de Itens."
+                                        >
+                                          ⚠ Dados pre-correcao
+                                        </span>
+                                      )}
                                     </div>
                                     {temEmbalagem && (
                                       <div>
