@@ -132,14 +132,8 @@ export function gerarCertidaoCotacaoPDF(
     : (r.unidadeMedida || '');
   const qtdUnid = r.quantidade ? `${r.quantidade}${unidQtdPDF ? ' ' + unidQtdPDF : ''}` : '';
   field('Quantidade contratada:', qtdUnid);
-  if (r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0)) {
-    const partesEmb: string[] = [];
-    if (r.nomeUnidadeFornecimento) partesEmb.push(r.nomeUnidadeFornecimento);
-    if (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0) {
-      partesEmb.push(`${r.capacidadeUnidadeFornecimento} ${r.siglaUnidadeMedida || ''}`.trim() + ' por unidade');
-    }
-    field('Embalagem:', partesEmb.join(' — '));
-  }
+  // Embalagem removida do relatorio (v1.11.1.2): API governamental retorna
+  // os campos de fornecimento de forma inconsistente entre orgaos.
 
   // === Seção 4: Adjudicatário ===
   if (r.fornecedorNome || r.fornecedorCnpj) {

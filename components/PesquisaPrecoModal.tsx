@@ -1588,20 +1588,9 @@ function gerarCertidaoCotaçãoPDF(
       : `${r.quantidade || '—'} ${expandida || siglaOrig}`.trim();
     y = drawCampo("Quantidade contratada:", textoUnidade, y, { truncate: 100 });
   }
-  // EMBALAGEM (separada da quantidade — cada unidade contratada tem essa capacidade)
-  if (r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.siglaUnidadeMedida)) {
-    const partes: string[] = [];
-    if (r.nomeUnidadeFornecimento) partes.push(r.nomeUnidadeFornecimento);
-    if (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0) {
-      const cap = r.capacidadeUnidadeFornecimento;
-      const sigla = String(r.siglaUnidadeMedida || '').toUpperCase();
-      const expCap = expandirUnidade(sigla, cap);
-      partes.push(`${cap} ${expCap.toLowerCase()}${sigla && expCap.toUpperCase() !== sigla ? ` (${sigla})` : ''}`);
-    }
-    if (partes.length > 0) {
-      y = drawCampo("Embalagem:", partes.join(' — '), y, { truncate: 100 });
-    }
-  }
+  // Embalagem removida do relatorio (v1.11.1.2): API governamental retorna
+  // os campos siglaUnidadeFornecimento/capacidadeUnidadeFornecimento de forma
+  // inconsistente entre orgaos, gerando confusao no leitor.
   if (r.fornecedorNome) y = drawCampo("Fornecedor Adjudicatário:", r.fornecedorNome, y, { truncate: 80 });
   if (r.fornecedorCnpj) y = drawCampo("CNPJ Fornecedor:", r.fornecedorCnpj, y);
   if (r.inscricaoEstadualFornecedor) y = drawCampo("Inscrição Estadual:", r.inscricaoEstadualFornecedor, y);
