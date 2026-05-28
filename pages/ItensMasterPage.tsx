@@ -124,17 +124,9 @@ export default function ItensMasterPage() {
     setPadronizarResults([]);
     setPadronizarProgress({ done: 0, total: alvos.length, current: '' });
     const results: PadronizacaoResult[] = [];
-    // Rate limit: Gemini Flash free tier = 15 RPM = 1 chamada a cada 4s.
-    // Pra itens sem CATMAT, gastamos 2 chamadas (traduzirTermo + padronizar) = 8s/item.
-    // Pra com CATMAT, 1 chamada = 4s/item. Vamos com 4.5s entre itens.
-    const THROTTLE_MS = 4500;
-    let ultimoCallEm = 0;
-    const throttle = async () => {
-      const agora = Date.now();
-      const esperar = Math.max(0, THROTTLE_MS - (agora - ultimoCallEm));
-      if (esperar > 0) await sleep(esperar);
-      ultimoCallEm = Date.now();
-    };
+    // Plano Gemini Tier 1 (pago) = 2000 RPM. Sequencial sem throttle nao chega
+    // perto disso. Mantemos no-op pra preservar a estrutura caso precise reativar.
+    const throttle = async () => { /* no-op com plano pago */ };
     // Em quota_exceeded, pausa 60s e retenta. Soh aborta se acontecer 2x seguidas.
     let quotaErrosConsecutivos = 0;
     const handleQuota = async (): Promise<boolean> => {
@@ -1625,7 +1617,7 @@ export default function ItensMasterPage() {
                   ) : (
                     <p className="text-xs text-gray-500 flex items-center gap-2">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Consultando Gemini 2.5 Flash (4.5s entre itens p/ respeitar quota)…
+                      Consultando Gemini 2.5 Flash (plano pago — 2000 RPM)…
                     </p>
                   )}
                 </div>
@@ -1640,10 +1632,10 @@ export default function ItensMasterPage() {
                     <li><strong>Busca ativa:</strong> pra itens SEM CATMAT/CATSER vinculado, IA descobre o codigo oficial a partir do nome + descricao (com validacao anti-alucinacao em 3 camadas).</li>
                     <li><strong>Padronizacao:</strong> reescreve nome, descricao, unidade e embalagem pra alinhar com o catalogo CATMAT/CATSER oficial e as cotacoes reais do mercado.</li>
                   </ol>
-                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
-                    <strong>⏱ Tempo estimado:</strong> ~5s por item com CATMAT, ~10s sem CATMAT (busca ativa).
-                    Cota Gemini eh 15 chamadas/min — batch faz throttle de 4.5s entre itens. Se travar em quota,
-                    sistema pausa 60s e retoma. <strong>Estimativa total: ~{Math.ceil(items.length * 5 / 60)} a {Math.ceil(items.length * 10 / 60)} minutos</strong> pros {items.length} itens.
+                  <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-lg p-2">
+                    <strong>⏱ Tempo estimado:</strong> ~5-15s por chamada Gemini (resposta da IA).
+                    Itens com CATMAT fazem 1 chamada, sem CATMAT fazem 2 (busca ativa + padronizacao).
+                    <strong> Estimativa total: ~{Math.ceil(items.length * 8 / 60)} a {Math.ceil(items.length * 18 / 60)} minutos</strong> pros {items.length} itens.
                   </p>
                   <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg p-2">
                     <strong>Por que faz diferenca:</strong> "AGUA COPOS 200ML" + unidade "unidade"
