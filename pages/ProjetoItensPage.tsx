@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp, orderBy, writeBatch } from 'firebase/firestore';
-import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck, Eye, Sparkles, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck, Eye, Sparkles, X, CheckCircle2, AlertCircle, RefreshCcw } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { ItemMaster, ItemProjeto, Projeto } from '../types';
@@ -47,6 +47,97 @@ export default function ProjetoItensPage() {
 
   const [entidadeNome, setEntidadeNome] = useState<string>('');
 
+  // Sincronização com o Banco de Itens (etapa 5A)
+  const [ultimoSync, setUltimoSync] = useState<{ total: number; campos: number; quando: Date } | null>(null);
+  const [sincronizando, setSincronizando] = useState(false);
+
+  /**
+   * Sincroniza os itens do projeto com seus masters no Banco.
+   * Sobrescreve no Firestore os campos que vivem na fonte (Banco) e mantém
+   * intactos os campos do projeto (quantidade, memorialCalculo, ordem,
+   * fornecedoresIds, referencias, tokenPesquisa, pesquisado, medianaReferencia).
+   * Retorna o array atualizado e quantos itens / campos foram sincronizados.
+   */
+  const sincronizarItensComBanco = async (
+    itensProj: ItemProjeto[],
+    itensMast: ItemMaster[]
+  ): Promise<{ sincronizados: ItemProjeto[]; totalItens: number; totalCampos: number }> => {
+    if (!id) return { sincronizados: itensProj, totalItens: 0, totalCampos: 0 };
+
+    // Campos que vivem no Banco de Itens — sao espelhados no projeto pra
+    // continuidade da pesquisa de preco, mas a fonte é sempre o master.
+    const CAMPOS_DO_BANCO = [
+      'nome', 'descricao', 'unidade', 'valorUnitario',
+      'codigoCatmat', 'tipoCatmat', 'nomeCatmatOficial', 'descricaoCatmatOficial',
+      'fatorConversao', 'unidadeBase', 'embalagemDescricao',
+      'semCorrespondenciaCatalogo',
+    ] as const;
+
+    type Update = {
+      docRef: ReturnType<typeof doc>;
+      itemId: string;
+      data: Record<string, unknown>;
+      camposMudaram: number;
+    };
+    const updates: Update[] = [];
+
+    for (const ip of itensProj) {
+      const master = itensMast.find(m => m.id === ip.itemId);
+      if (!master) continue; // master deletado — preserva o item do projeto como histórico
+
+      const updateData: Record<string, unknown> = {};
+      let camposMudaram = 0;
+
+      for (const campo of CAMPOS_DO_BANCO) {
+        const masterVal = (master as any)[campo];
+        const projVal = (ip as any)[campo];
+        // Pula quando master nao tem o campo (undefined). Firestore nao aceita
+        // undefined, e remover campos automaticamente pode quebrar projetos antigos.
+        if (masterVal === undefined || masterVal === null) continue;
+        if (masterVal !== projVal) {
+          updateData[campo] = masterVal;
+          camposMudaram++;
+        }
+      }
+
+      if (camposMudaram === 0) continue;
+
+      // Recalcular valorTotal se valorUnitario mudou
+      if ('valorUnitario' in updateData) {
+        const novoValor = updateData.valorUnitario as number;
+        updateData.valorTotal = novoValor * (ip.quantidade || 0);
+      }
+
+      updates.push({
+        docRef: doc(db, `projects/${id}/items`, ip.id),
+        itemId: ip.id,
+        data: updateData,
+        camposMudaram,
+      });
+    }
+
+    if (updates.length === 0) {
+      return { sincronizados: itensProj, totalItens: 0, totalCampos: 0 };
+    }
+
+    // Aplicar em batches de 400 (limite firestore = 500)
+    for (let i = 0; i < updates.length; i += 400) {
+      const batch = writeBatch(db);
+      updates.slice(i, i + 400).forEach(u => batch.update(u.docRef, u.data as { [k: string]: any }));
+      await batch.commit();
+    }
+
+    // Atualiza array local
+    const sincronizados = itensProj.map(ip => {
+      const u = updates.find(x => x.itemId === ip.id);
+      if (!u) return ip;
+      return { ...ip, ...u.data } as ItemProjeto;
+    });
+
+    const totalCampos = updates.reduce((acc, u) => acc + u.camposMudaram, 0);
+    return { sincronizados, totalItens: updates.length, totalCampos };
+  };
+
   const carregarDados = async () => {
     if (!id) return;
     try {
@@ -65,11 +156,29 @@ export default function ProjetoItensPage() {
 
       // Itens do Projeto
       const snapProj = await getDocs(query(collection(db, `projects/${id}/items`), orderBy('criadoEm', 'asc')));
-      setItensProjeto(snapProj.docs.map(d => ({ id: d.id, ...d.data() } as ItemProjeto)));
+      const itensProjLidos = snapProj.docs.map(d => ({ id: d.id, ...d.data() } as ItemProjeto));
 
       // Banco de Itens Master (para seleção)
       const snapMaster = await getDocs(query(collection(db, 'items'), orderBy('nome', 'asc')));
-      setItensMaster(snapMaster.docs.map(d => ({ id: d.id, ...d.data() } as ItemMaster)));
+      const itensMastLidos = snapMaster.docs.map(d => ({ id: d.id, ...d.data() } as ItemMaster));
+
+      // Sincronizar com o Banco antes de exibir (etapa 5A)
+      // Banco é a fonte da verdade. Projetos refletem nome/unidade/valor/CATMAT
+      // do master; mantem quantidade/memorial/pesquisa do projeto.
+      setSincronizando(true);
+      const syncResult = await sincronizarItensComBanco(itensProjLidos, itensMastLidos);
+      setSincronizando(false);
+
+      setItensProjeto(syncResult.sincronizados);
+      setItensMaster(itensMastLidos);
+
+      if (syncResult.totalItens > 0) {
+        setUltimoSync({
+          total: syncResult.totalItens,
+          campos: syncResult.totalCampos,
+          quando: new Date(),
+        });
+      }
 
     } catch (e) {
       console.error(e);
@@ -391,6 +500,19 @@ export default function ProjetoItensPage() {
           <div>
             <h1 className="text-2xl font-bold text-lie-ink">Itens do Projeto</h1>
             <p className="text-sm text-lie-gray">{projeto?.titulo}</p>
+            {sincronizando && (
+              <span className="text-[11px] text-blue-600 flex items-center gap-1 mt-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Sincronizando com Banco de Itens…
+              </span>
+            )}
+            {!sincronizando && ultimoSync && (
+              <span className="text-[11px] text-green-700 flex items-center gap-1 mt-1">
+                <RefreshCcw className="w-3 h-3" />
+                {ultimoSync.total} item(ns) atualizado(s) do Banco de Itens
+                ({ultimoSync.campos} campo{ultimoSync.campos > 1 ? 's' : ''} sincronizado{ultimoSync.campos > 1 ? 's' : ''})
+              </span>
+            )}
           </div>
         </div>
         <div className="flex gap-2">
