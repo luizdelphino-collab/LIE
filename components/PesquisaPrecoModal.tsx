@@ -33,6 +33,14 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
   // - Modo PROJETO: salva em projects/{pid}/items/{id} (legado). Mantido pra compat
   //   enquanto migra. Etapa 5C movera tudo pro banco.
   const modoBanco = !item.projectId;
+
+  // FAIXA DE ELEGIBILIDADE: cotacoes fora desta janela nao compoem a base de pesquisa.
+  // - Limite inferior: valorUnitario do item (anti-inexequivel, evita puxar mediana pra baixo)
+  // - Limite superior: 2.5x valorUnitario (anti-outlier, evita inflar mediana com cotacao discrepante)
+  const MULTIPLICADOR_OUTLIER = 2.5;
+  const limiteInferior = item.valorUnitario;
+  const limiteSuperior = item.valorUnitario * MULTIPLICADOR_OUTLIER;
+  const dentroDaFaixa = (v: number) => v >= limiteInferior && v <= limiteSuperior;
   const [activeTab, setActiveTab] = useState<'compras' | 'manual'>('compras');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -142,18 +150,17 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
   };
 
   // Carregar referências já salvas no item, se existirem.
-  // REGRA ANTI-FRAUDE: cotacoes com valor MENOR que o estimado do item nao
-  // compoem a base de pesquisa (IN 65/2021 art. 6º + posicao do user).
-  // Cotacao abaixo do estimado pode indicar valor inexequivel ou erro;
-  // se entrasse na base, derrubaria a mediana artificialmente.
+  // REGRA ANTI-FRAUDE/ANTI-OUTLIER: cotacoes fora da faixa [ref, 2.5×ref] nao
+  // compoem a base. Inferior puxa mediana pra baixo (potencial inexequivel);
+  // superior infla mediana com cotacao discrepante (produto errado, lote enorme).
   useEffect(() => {
     if (isOpen && item) {
       if (item.referencias && Array.isArray(item.referencias)) {
-        const elegiveis = item.referencias.filter(r => r.valorUnitario >= item.valorUnitario);
+        const elegiveis = item.referencias.filter(r => dentroDaFaixa(r.valorUnitario));
         const removidas = item.referencias.length - elegiveis.length;
         setCestaReferencias(elegiveis);
         if (removidas > 0) {
-          console.info(`[pesquisa-preco] ${removidas} cotacao(oes) abaixo do estimado R$ ${item.valorUnitario} removidas da cesta ao carregar.`);
+          console.info(`[pesquisa-preco] ${removidas} cotacao(oes) fora da faixa R$ ${limiteInferior.toFixed(2)}-R$ ${limiteSuperior.toFixed(2)} removidas da cesta ao carregar.`);
         }
       } else {
         setCestaReferencias([]);
@@ -195,8 +202,8 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
             resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
             setPrecosGoverno(resultados);
 
-            // Auto-selecionar refs >= estimado
-            const elegiveis = resultados.filter(p => p.valorUnitario >= item.valorUnitario);
+            // Auto-selecionar refs DENTRO da faixa [referencia, 2.5×referencia]
+            const elegiveis = resultados.filter(p => dentroDaFaixa(p.valorUnitario));
             if (elegiveis.length > 0) {
               setCestaReferencias(prev => {
                 const novas = elegiveis.filter(e =>
@@ -225,7 +232,7 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
               const resultados = filtrarCotacoesPorEmbalagem(resultadosBrutos);
               resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
               setPrecosGoverno(resultados);
-              const elegiveis = resultados.filter(p => p.valorUnitario >= item.valorUnitario);
+              const elegiveis = resultados.filter(p => dentroDaFaixa(p.valorUnitario));
               if (elegiveis.length > 0) {
                 setCestaReferencias(prev => {
                   const novas = elegiveis.filter(e =>
@@ -278,8 +285,8 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       resultados.sort((a, b) => b.valorUnitario - a.valorUnitario);
       setPrecosGoverno(resultados);
 
-      // Auto-selecionar todas as referências que são superiores ou iguais ao estimado do projeto
-      const elegiveis = resultados.filter(p => p.valorUnitario >= item.valorUnitario);
+      // Auto-selecionar refs DENTRO da faixa [referencia, 2.5×referencia]
+      const elegiveis = resultados.filter(p => dentroDaFaixa(p.valorUnitario));
       if (elegiveis.length > 0) {
         setCestaReferencias(prev => {
           // Filtra para evitar duplicados
@@ -309,11 +316,16 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         prev.filter(r => `${r.fonte}-${r.identificadorCompra}-${r.valorUnitario}` !== chave)
       );
     } else {
-      // BLINDAGEM SUPERIOR: rejeita cotacoes abaixo do estimado.
-      // Valores menores que a referencia nao compoem a base de pesquisa.
-      if (ref.valorUnitario < item.valorUnitario) {
+      // BLINDAGEM: cotacao precisa estar na faixa [referencia, 2.5×referencia]
+      if (ref.valorUnitario < limiteInferior) {
         alert(
-          `Cotacao recusada: R$ ${ref.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} esta abaixo do valor estimado do item (R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).\n\nValores menores que o estimado nao compoem a base de pesquisa.`
+          `Cotacao recusada: R$ ${ref.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} esta ABAIXO do valor estimado do item (R$ ${limiteInferior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).\n\nValores fora da faixa [R$ ${limiteInferior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} - R$ ${limiteSuperior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}] nao compoem a base de pesquisa.`
+        );
+        return;
+      }
+      if (ref.valorUnitario > limiteSuperior) {
+        alert(
+          `Cotacao recusada: R$ ${ref.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} esta ACIMA de 2.5x o valor estimado do item (limite R$ ${limiteSuperior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).\n\nValor considerado outlier — pode ser produto/lote/embalagem diferente. Nao compoe a base de pesquisa.`
         );
         return;
       }
@@ -372,14 +384,16 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       return;
     }
 
-    // BLINDAGEM SUPERIOR (anti-fraude): rejeita cotacoes abaixo do estimado.
-    // Cotacao abaixo do valor de referencia nao compoe a base de pesquisa —
-    // poderia indicar valor inexequivel ou puxar a mediana pra baixo
-    // artificialmente. Use uma cotacao igual ou superior, ou ajuste o valor
-    // estimado do item no Banco se estiver realmente alto.
-    if (valorNum < item.valorUnitario) {
+    // BLINDAGEM: cotacao precisa estar na faixa [referencia, 2.5×referencia]
+    if (valorNum < limiteInferior) {
       alert(
-        `Cotacao recusada: R$ ${valorNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} esta abaixo do valor estimado do item (R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).\n\nValores menores que o estimado nao compoem a base de pesquisa.\n\nOpcoes:\n  1. Use outra cotacao com valor >= R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n  2. Se o valor estimado do item esta alto demais, ajuste no Banco antes de pesquisar`
+        `Cotacao recusada: R$ ${valorNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} esta ABAIXO do valor estimado (R$ ${limiteInferior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).\n\nFaixa elegivel: [R$ ${limiteInferior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} - R$ ${limiteSuperior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}].\n\nValores fora dessa janela nao compoem a base de pesquisa.`
+      );
+      return;
+    }
+    if (valorNum > limiteSuperior) {
+      alert(
+        `Cotacao recusada: R$ ${valorNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} esta ACIMA de 2.5x o valor estimado (limite R$ ${limiteSuperior.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).\n\nValor considerado outlier — geralmente indica produto/lote/embalagem diferente. Nao compoe a base de pesquisa.`
       );
       return;
     }
@@ -775,11 +789,16 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                 <div className="flex-1 flex flex-col">
                   <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                     <h4 className="text-xs font-bold text-gray-600 uppercase tracking-wider">Preços Públicos Homologados</h4>
-                    {item.fatorConversao && item.unidadeBase && (
-                      <span className="text-[10px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Cotacoes com embalagem incompativel com ${item.fatorConversao}${item.unidadeBase} foram descartadas (faixa: ${Math.round(item.fatorConversao * 0.7)}-${Math.round(item.fatorConversao * 1.3)}${item.unidadeBase})`}>
-                        🎯 Filtrado por embalagem ~{item.fatorConversao}{item.unidadeBase.toLowerCase()}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] bg-green-50 border border-green-200 text-green-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Faixa elegivel: cotacoes >= R$ ${limiteInferior.toFixed(2)} e <= R$ ${limiteSuperior.toFixed(2)} (2.5x o valor estimado)`}>
+                        ✓ Faixa R$ {limiteInferior.toFixed(2)}–{limiteSuperior.toFixed(2)}
                       </span>
-                    )}
+                      {item.fatorConversao && item.unidadeBase && (
+                        <span className="text-[10px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Cotacoes com embalagem incompativel com ${item.fatorConversao}${item.unidadeBase} foram descartadas`}>
+                          🎯 Embalagem ~{item.fatorConversao}{item.unidadeBase.toLowerCase()}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {loading ? (
@@ -795,23 +814,29 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                         const isSelected = cestaReferencias.some(
                           r => `${r.fonte}-${r.identificadorCompra}-${r.valorUnitario}` === chave
                         );
-                        const isLower = p.valorUnitario < item.valorUnitario;
+                        const isLower = p.valorUnitario < limiteInferior;
+                        const isOutlier = p.valorUnitario > limiteSuperior;
+                        const isInelegivel = isLower || isOutlier;
 
                         return (
                           <div
                             key={idx}
-                            onClick={() => { if (!isLower) toggleSelecaoCesta(p); }}
+                            onClick={() => { if (!isInelegivel) toggleSelecaoCesta(p); }}
                             className={`p-3 bg-white border rounded-xl transition-all flex items-center gap-3 ${
-                              isLower
+                              isInelegivel
                                 ? 'border-gray-200 opacity-60 cursor-not-allowed grayscale'
                                 : `cursor-pointer hover:border-lie-green ${isSelected ? 'border-lie-green ring-2 ring-lie-green/10' : 'border-gray-200'}`
                             }`}
-                            title={isLower ? 'Cotacao abaixo do valor estimado — nao compoe a base de pesquisa' : undefined}
+                            title={
+                              isLower ? `Abaixo do estimado (R$ ${limiteInferior.toFixed(2)}) — nao compoe a base`
+                              : isOutlier ? `Acima de 2.5x o estimado (R$ ${limiteSuperior.toFixed(2)}) — outlier, nao compoe a base`
+                              : undefined
+                            }
                           >
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              disabled={isLower}
+                              disabled={isInelegivel}
                               onChange={() => {}}
                               className="rounded border-gray-300 text-lie-green focus:ring-lie-green w-4.5 h-4.5 pointer-events-none disabled:opacity-40"
                             />
@@ -848,11 +873,14 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                               <div className="flex justify-between items-center mt-2 pt-2 border-t border-dashed border-gray-100">
                                 <span className="text-[10px] text-gray-400">Homologado em: {p.dataHomologacao}</span>
                                 <div className="text-right">
-                                  <span className={`text-sm font-extrabold ${isLower ? 'text-amber-600' : 'text-lie-green'}`}>
+                                  <span className={`text-sm font-extrabold ${isInelegivel ? 'text-gray-500 line-through' : 'text-lie-green'}`}>
                                     {p.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                   </span>
                                   {isLower && (
                                     <span className="block text-[8px] text-red-600 font-bold uppercase tracking-tight -mt-0.5">⊘ Inferior — não elegível</span>
+                                  )}
+                                  {isOutlier && (
+                                    <span className="block text-[8px] text-red-600 font-bold uppercase tracking-tight -mt-0.5">⊘ Outlier (&gt;2.5×) — não elegível</span>
                                   )}
                                 </div>
                               </div>

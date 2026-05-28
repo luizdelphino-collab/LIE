@@ -1,7 +1,7 @@
 {
   "name": "lie-projetos",
   "private": true,
-  "version": "1.9.1.0",
+  "version": "1.9.2.0",
   "type": "module",
   "description": "LIE - Sistema de Gestão de Projetos da Lei de Incentivo ao Esporte",
   "scripts": {
