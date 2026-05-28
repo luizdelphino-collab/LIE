@@ -360,7 +360,16 @@ exports.consultarPrecosMulti = functions
             dataPublicacao: r.dataPublicacaoPncp || r.dataPublicacao || '',
             // === Escala ===
             quantidade: Number(r.quantidade) || 0,
-            unidadeMedida: r.unidadeMedida || r.siglaUnidadeMedida || '',
+            // CORRECAO: unidadeMedida = unidade da QUANTIDADE (UN/CX/FRD).
+            // Antes caia em r.siglaUnidadeMedida que e a unidade da CAPACIDADE
+            // da embalagem (ML/L/KG) — conceito diferente, causava confusao
+            // tipo "1000 ML" quando era "1000 UN de 200ML cada".
+            unidadeMedida: r.siglaUnidadeFornecimento || r.unidadeMedida || 'UN',
+            // Detalhes da embalagem (separados)
+            siglaUnidadeFornecimento: r.siglaUnidadeFornecimento || '',
+            nomeUnidadeFornecimento: r.nomeUnidadeFornecimento || '',
+            capacidadeUnidadeFornecimento: Number(r.capacidadeUnidadeFornecimento) || 0,
+            siglaUnidadeMedida: r.siglaUnidadeMedida || '',
             valorUnitario: Number(r.valorUnitario || r.valorUnitarioEstimado || r.valorUnitarioHomologado || r.precoUnitario) || 0,
             localizacaoUrl: linkPncp || linkFallback || ''
         };

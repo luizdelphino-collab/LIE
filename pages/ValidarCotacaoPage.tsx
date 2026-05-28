@@ -80,6 +80,11 @@ interface PrecoReferencia {
   dataPublicacao?: string;
   linkEditalPdf?: string;
   arquivosPNCP?: Array<{ tipo: string; titulo: string; url: string; dataPublicacao?: string }>;
+  // Embalagem (separada da unidade da quantidade)
+  siglaUnidadeFornecimento?: string;
+  nomeUnidadeFornecimento?: string;
+  capacidadeUnidadeFornecimento?: number;
+  siglaUnidadeMedida?: string;
 }
 
 interface RegistroValidador {
@@ -455,14 +460,34 @@ export default function ValidarCotacaoPage() {
                                 <p className="text-slate-300 text-[11px] leading-relaxed mt-1">{r.descricaoItem}</p>
                               )}
                               {(r.quantidade || r.unidadeMedida) && (() => {
-                                const expandida = expandirUnidadeMedida(r.unidadeMedida, r.quantidade || 0);
-                                const siglaOrig = String(r.unidadeMedida || '').toUpperCase();
+                                // QUANTIDADE — unidade da quantidade (UN/CX/FRD), nao capacidade da embalagem
+                                const unidQtd = r.unidadeMedida || 'UN';
+                                const expandida = expandirUnidadeMedida(unidQtd, r.quantidade || 0);
+                                const siglaOrig = String(unidQtd).toUpperCase();
                                 const mostrarSigla = siglaOrig && expandida && expandida.toUpperCase() !== siglaOrig;
+                                // EMBALAGEM — separada (ex: cada UN tem 200 ML, embalagem GARRAFA)
+                                const temEmbalagem = r.nomeUnidadeFornecimento ||
+                                  (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0);
                                 return (
-                                  <span className="text-[10px] text-slate-400 mt-1 inline-block">
-                                    <span className="text-slate-500">Qtd:</span> <strong>{r.quantidade || '—'}</strong> {expandida || siglaOrig}
-                                    {mostrarSigla && <span className="text-slate-600 ml-1" title="Sigla original retornada pela API governamental">({siglaOrig})</span>}
-                                  </span>
+                                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+                                    <div>
+                                      <span className="text-slate-500">Qtd contratada:</span> <strong className="text-slate-300">{r.quantidade || '—'}</strong> {expandida || siglaOrig}
+                                      {mostrarSigla && <span className="text-slate-500 ml-1" title="Sigla original retornada pela API governamental">({siglaOrig})</span>}
+                                    </div>
+                                    {temEmbalagem && (
+                                      <div>
+                                        <span className="text-slate-500">Embalagem:</span>{' '}
+                                        {r.nomeUnidadeFornecimento && <strong className="text-slate-300">{r.nomeUnidadeFornecimento}</strong>}
+                                        {r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0 && (
+                                          <span className="ml-1">
+                                            {r.nomeUnidadeFornecimento ? '— ' : ''}
+                                            <strong className="text-slate-300">{r.capacidadeUnidadeFornecimento} {expandirUnidadeMedida(r.siglaUnidadeMedida || '', r.capacidadeUnidadeFornecimento).toLowerCase()}</strong>
+                                            <span className="text-slate-600 ml-1">por unidade</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 );
                               })()}
                             </div>

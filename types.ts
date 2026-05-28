@@ -398,6 +398,15 @@ export interface PrecoReferencia {
   linkEditalPdf?: string;
   // Lista de arquivos do PNCP (edital + anexos) — populada lazy quando enriquecemos
   arquivosPNCP?: Array<{ tipo: string; titulo: string; url: string; dataPublicacao?: string }>;
+  // Embalagem do item homologado — separa quantidade (unidades) de capacidade (ML/L/G).
+  // Antes: unidadeMedida estava confundindo os dois conceitos. Agora:
+  // - quantidade + siglaUnidadeFornecimento = "1000 UN" (1000 unidades)
+  // - capacidadeUnidadeFornecimento + siglaUnidadeMedida = "200 ML" (cada unidade = 200ml)
+  // - nomeUnidadeFornecimento = "COPO" (forma humana da embalagem)
+  siglaUnidadeFornecimento?: string;
+  nomeUnidadeFornecimento?: string;
+  capacidadeUnidadeFornecimento?: number;
+  siglaUnidadeMedida?: string;
 }
 
 export interface ItemProjeto {

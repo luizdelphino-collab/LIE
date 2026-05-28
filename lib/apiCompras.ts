@@ -799,7 +799,12 @@ export async function consultarPrecosPraticados(
         dataVigenciaFinalAta: r.dataVigenciaFinalAta || '',
         dataPublicacao: r.dataPublicacao || '',
         quantidade: Number(r.quantidade) || 0,
-        unidadeMedida: r.unidadeMedida || '',
+        unidadeMedida: r.unidadeMedida || 'UN',
+        // Embalagem (propagada do server pra rendering correto)
+        siglaUnidadeFornecimento: r.siglaUnidadeFornecimento || '',
+        nomeUnidadeFornecimento: r.nomeUnidadeFornecimento || '',
+        capacidadeUnidadeFornecimento: Number(r.capacidadeUnidadeFornecimento) || 0,
+        siglaUnidadeMedida: r.siglaUnidadeMedida || '',
         valorUnitario: Number(r.valorUnitario) || 0,
         fonte: r.fonte || 'compras.gov.br',
         localizacaoUrl: r.localizacaoUrl || ''

@@ -60,6 +60,12 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       const tipo = c.fonte === 'pncp-ata' ? 'atas' : 'editais';
       linkPncp = `https://pncp.gov.br/app/${tipo}/${m[1]}/${m[3]}/${m[2]}`;
     }
+    // CORRECAO: unidadeMedida deve ser a UNIDADE DA QUANTIDADE (UN/CX/FRD),
+    // nao a unidade da CAPACIDADE (ML/L/KG). Anteriormente caia no fallback
+    // c.siglaUnidadeMedida (capacidade), causando confusoes como
+    // "1000 ML" quando o correto era "1000 UN" (cada um com 200 ml).
+    const unidadeQuantidade = c.siglaUnidadeFornecimento || c.unidadeMedida || 'UN';
+
     return {
       fonte: (c.fonte || 'compras.gov.br') as PrecoReferencia['fonte'],
       orgaoLicitante: c.orgao || 'ÓRGÃO PÚBLICO',
@@ -87,7 +93,12 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
       dataVigenciaFinalAta: c.dataVigenciaFinalAta || '',
       dataPublicacao: c.dataPublicacao || '',
       quantidade: c.quantidade || 0,
-      unidadeMedida: c.unidadeMedida || c.siglaUnidadeMedida || '',
+      unidadeMedida: unidadeQuantidade,
+      // Detalhes da embalagem (separados da unidade da quantidade)
+      siglaUnidadeFornecimento: c.siglaUnidadeFornecimento || '',
+      nomeUnidadeFornecimento: c.unidadeFornecimento || '',
+      capacidadeUnidadeFornecimento: c.capacidadeUnidadeFornecimento || 0,
+      siglaUnidadeMedida: c.siglaUnidadeMedida || '',
       valorUnitario: c.valorUnitario,
       linkPncpOriginal: linkPncp || undefined,
       localizacaoUrl: linkPncp || '',
@@ -1568,14 +1579,28 @@ function gerarCertidaoCotaçãoPDF(
     y += Math.min(lines.length, 3) * 4 + 1;
   }
   if (r.quantidade || r.unidadeMedida) {
-    const expandida = expandirUnidade(r.unidadeMedida, r.quantidade || 0);
-    const siglaOrig = String(r.unidadeMedida || '').toUpperCase();
-    // Se a expansao mudou a sigla, mostra ambas pra eliminar duvida.
-    // Ex: '700 L' vira '700 Litros' (sigla original: L)
+    // Unidade da QUANTIDADE (UN/CX/FRD), nao a capacidade da embalagem (ML/L).
+    const unidQtd = r.unidadeMedida || 'UN';
+    const expandida = expandirUnidade(unidQtd, r.quantidade || 0);
+    const siglaOrig = String(unidQtd).toUpperCase();
     const textoUnidade = (siglaOrig && expandida && expandida.toUpperCase() !== siglaOrig)
       ? `${r.quantidade || '—'} ${expandida} (sigla oficial: ${siglaOrig})`
       : `${r.quantidade || '—'} ${expandida || siglaOrig}`.trim();
-    y = drawCampo("Quantidade / Unidade:", textoUnidade, y, { truncate: 100 });
+    y = drawCampo("Quantidade contratada:", textoUnidade, y, { truncate: 100 });
+  }
+  // EMBALAGEM (separada da quantidade — cada unidade contratada tem essa capacidade)
+  if (r.nomeUnidadeFornecimento || (r.capacidadeUnidadeFornecimento && r.siglaUnidadeMedida)) {
+    const partes: string[] = [];
+    if (r.nomeUnidadeFornecimento) partes.push(r.nomeUnidadeFornecimento);
+    if (r.capacidadeUnidadeFornecimento && r.capacidadeUnidadeFornecimento > 0) {
+      const cap = r.capacidadeUnidadeFornecimento;
+      const sigla = String(r.siglaUnidadeMedida || '').toUpperCase();
+      const expCap = expandirUnidade(sigla, cap);
+      partes.push(`${cap} ${expCap.toLowerCase()}${sigla && expCap.toUpperCase() !== sigla ? ` (${sigla})` : ''}`);
+    }
+    if (partes.length > 0) {
+      y = drawCampo("Embalagem:", partes.join(' — '), y, { truncate: 100 });
+    }
   }
   if (r.fornecedorNome) y = drawCampo("Fornecedor Adjudicatário:", r.fornecedorNome, y, { truncate: 80 });
   if (r.fornecedorCnpj) y = drawCampo("CNPJ Fornecedor:", r.fornecedorCnpj, y);
