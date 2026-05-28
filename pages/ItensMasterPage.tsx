@@ -110,49 +110,55 @@ export default function ItensMasterPage() {
 
   // Adoção de embalagem direto pelo modal de detalhe de mercado (item ja salvo).
   // razao = quantas embalagens do mercado cabem em 1 unidade atual do item.
-  // Ex: caixa 48 copos -> razao=48, valorUnitario dividido por 48.
+  // Ex: item "caixa" com 48 "copos 200ml" cada -> razao=48.
+  //
+  // MODELO A (preserva o que user compra):
+  //   - unidade INTACTA (continua "caixa")
+  //   - valorUnitario INTACTO (continua R$ 35,80/caixa)
+  //   - fatorConversao = razao * emb.capacidade (= 48 × 200 = 9600 ml/caixa)
+  //   - unidadeBase = emb.siglaMedida (ML)
+  //   - embalagemDescricao auto-formatada com a relacao completa
+  // Sistema calcula sozinho R$/ml e compara contra o mercado.
   const handleAdotarEmbalagemModal = async (item: ItemMaster, emb: EstatisticasPorUnidade, razao?: number) => {
-    const novaUnidade = emb.unidade.toLowerCase();
-    const novaDescricao = emb.capacidade > 0
-      ? `${emb.unidade.toLowerCase()} ${emb.capacidade}${emb.siglaMedida.toLowerCase()}`
-      : emb.unidade.toLowerCase();
-    const fator = razao && razao > 1 ? razao : 1;
-    const novoValor = item.valorUnitario / fator;
+    const razaoNum = razao && razao > 0 ? razao : 1;
+    const capacidade = emb.capacidade > 0 ? emb.capacidade : 1;
+    const fatorTotal = razaoNum * capacidade;
+    const unidadeBaseSig = emb.siglaMedida || 'UN';
+
+    // Descricao reflete a relacao real: "Caixa com 48 copos de 200ml"
+    const novaDescricao = razaoNum > 1
+      ? `${(item.unidade || 'unidade').toLowerCase()} com ${razaoNum} ${emb.unidade.toLowerCase()}${emb.capacidade > 0 ? ` de ${emb.capacidade}${unidadeBaseSig.toLowerCase()}` : ''}`
+      : (emb.capacidade > 0
+          ? `${emb.unidade.toLowerCase()} ${emb.capacidade}${unidadeBaseSig.toLowerCase()}`
+          : emb.unidade.toLowerCase());
 
     const updates: Record<string, unknown> = {
-      unidade: novaUnidade,
       embalagemDescricao: novaDescricao,
-      fatorConversao: emb.capacidade > 0 ? emb.capacidade : null,
-      unidadeBase: emb.siglaMedida || null,
+      fatorConversao: fatorTotal,
+      unidadeBase: unidadeBaseSig,
+      // unidade e valorUnitario INTACTOS — preserva perspectiva de compra do user
     };
-    if (fator > 1) {
-      updates.valorUnitario = Number(novoValor.toFixed(4));
-    }
     await setDoc(doc(db, 'items', item.id), updates, { merge: true });
 
-    // Atualiza estado local pra refletir imediatamente (sem recarregar tudo)
+    // Atualiza estado local
     setItems(prev => prev.map(it => it.id === item.id
       ? {
           ...it,
-          unidade: novaUnidade,
           embalagemDescricao: novaDescricao,
-          fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined,
-          unidadeBase: emb.siglaMedida || undefined,
-          ...(fator > 1 ? { valorUnitario: Number(novoValor.toFixed(4)) } : {})
+          fatorConversao: fatorTotal,
+          unidadeBase: unidadeBaseSig,
         }
       : it));
 
-    // Atualiza o item refletido no modal para que o badge "em uso" apareça
+    // Atualiza item refletido no modal
     setMercadoDetalhe(prev => prev && prev.item.id === item.id
       ? {
           ...prev,
           item: {
             ...prev.item,
-            unidade: novaUnidade,
             embalagemDescricao: novaDescricao,
-            fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined,
-            unidadeBase: emb.siglaMedida || undefined,
-            ...(fator > 1 ? { valorUnitario: Number(novoValor.toFixed(4)) } : {})
+            fatorConversao: fatorTotal,
+            unidadeBase: unidadeBaseSig,
           }
         }
       : prev);
@@ -398,6 +404,11 @@ export default function ItensMasterPage() {
     setEditId(it.id);
     setFormData({ ...it });
     setSugestaoNomeOficial('');
+    // Adaptador só faz sentido ao vincular CATMAT novo. Em edicao de item
+    // ja vinculado, dispensa pra nao mostrar aviso "sem cotacoes" estatico.
+    setAdaptadorDispensado(true);
+    setMercadoAdaptador(null);
+    setBuscandoAdaptador(false);
     setIsFormOpen(true);
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
@@ -406,6 +417,9 @@ export default function ItensMasterPage() {
     setEditId(null);
     setFormData({ nome: '', descricao: '', unidade: 'unidade', valorUnitario: 0, categoria: 'Alimento' });
     setSugestaoNomeOficial('');
+    setAdaptadorDispensado(false);
+    setMercadoAdaptador(null);
+    setBuscandoAdaptador(false);
     setIsFormOpen(true);
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
@@ -771,13 +785,14 @@ export default function ItensMasterPage() {
                       nomeItem={formData.nome || ''}
                       valorUnitarioAtual={formData.valorUnitario || 0}
                       onAdaptar={(a) => {
+                        // Modelo A: preserva unidade e valor, so seta fator/base/descricao
                         setFormData(p => ({
                           ...p,
-                          unidade: a.unidade,
                           embalagemDescricao: a.embalagemDescricao,
                           fatorConversao: a.fatorConversao,
                           unidadeBase: a.unidadeBase,
-                          valorUnitario: a.valorUnitario,
+                          ...(a.unidade !== undefined ? { unidade: a.unidade } : {}),
+                          ...(a.valorUnitario !== undefined ? { valorUnitario: a.valorUnitario } : {}),
                         }));
                         setAdaptadorDispensado(true);
                       }}
@@ -919,15 +934,17 @@ export default function ItensMasterPage() {
                   />
                 </div>
                 <div className="md:col-span-3">
-                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Quantidade total</label>
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Quantidade total na embalagem</label>
                   <input
                     type="number" step="0.001" min={0}
-                    placeholder="Ex: 9600"
+                    placeholder="Ex: 9600 (= 48 × 200ml)"
                     value={formData.fatorConversao ?? ''}
                     onChange={e => setFormData(p => ({ ...p, fatorConversao: e.target.value ? Number(e.target.value) : undefined }))}
                     className="w-full border-gray-300 rounded-lg shadow-sm text-sm font-mono"
                   />
-                  <p className="text-[10px] text-gray-500 mt-0.5">48 × 200 = 9600</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Total da unidade que você compra na base abaixo. Ex: 1 <strong>caixa</strong> = 48 × 200ml = <strong>9600 ml</strong>.
+                  </p>
                 </div>
                 <div className="md:col-span-3">
                   <label className="block text-[11px] font-bold text-gray-600 mb-1">Unidade base</label>

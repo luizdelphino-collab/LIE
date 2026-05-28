@@ -1,13 +1,15 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Loader2, Package, CheckCircle2, X, ArrowRight, AlertCircle } from 'lucide-react';
+import { Loader2, Package, CheckCircle2, X, AlertCircle } from 'lucide-react';
 import type { EstatisticasPorUnidade, MercadoResposta } from '../lib/mercadoApi';
 
 interface AdaptacaoEscolhida {
-  unidade: string;
+  /** Unidade do item — MODELO A preserva a unidade original (caixa, fardo). undefined = nao mexer */
+  unidade?: string;
   embalagemDescricao: string;
   fatorConversao: number;
   unidadeBase: string;
-  valorUnitario: number;
+  /** Quando o adaptador NAO altera o valor (modelo A), nao envia esse campo */
+  valorUnitario?: number;
 }
 
 interface Props {
@@ -131,20 +133,23 @@ export default function AdaptadorUnidadeCatmat({
   // Razão -> validação
   const razaoNum = parseInt(razao, 10);
   const razaoValida = !isNaN(razaoNum) && razaoNum > 0;
-  const novoPrecoUnitario = embalagemEscolhida && razaoValida
-    ? valorUnitarioAtual / razaoNum
-    : null;
 
   const handleConfirmar = () => {
-    if (!embalagemEscolhida || !razaoValida || novoPrecoUnitario === null) return;
+    if (!embalagemEscolhida || !razaoValida) return;
+    const capacidade = embalagemEscolhida.capacidade > 0 ? embalagemEscolhida.capacidade : 1;
+    const fatorTotal = razaoNum * capacidade;
+    const unidadeBaseSig = embalagemEscolhida.siglaMedida || 'UN';
+    // MODELO A: preserva unidade e valor do item. So seta fator + base + descricao.
+    // Comparacao R$/base funciona via valorUnitario / fatorConversao.
+    const novaDescricao = razaoNum > 1
+      ? `${(unidadeAtual || 'unidade').toLowerCase()} com ${razaoNum} ${embalagemEscolhida.unidade.toLowerCase()}${embalagemEscolhida.capacidade > 0 ? ` de ${embalagemEscolhida.capacidade}${unidadeBaseSig.toLowerCase()}` : ''}`
+      : (embalagemEscolhida.capacidade > 0
+          ? `${embalagemEscolhida.unidade.toLowerCase()} ${embalagemEscolhida.capacidade}${unidadeBaseSig.toLowerCase()}`
+          : embalagemEscolhida.unidade.toLowerCase());
     onAdaptar({
-      unidade: 'unidade', // padroniza pra "unidade" (cada unidade = 1 catalog item)
-      embalagemDescricao: embalagemEscolhida.capacidade > 0
-        ? `${embalagemEscolhida.unidade.toLowerCase()} ${embalagemEscolhida.capacidade}${embalagemEscolhida.siglaMedida.toLowerCase()}`
-        : embalagemEscolhida.unidade.toLowerCase(),
-      fatorConversao: embalagemEscolhida.capacidade > 0 ? embalagemEscolhida.capacidade : 1,
-      unidadeBase: embalagemEscolhida.siglaMedida || 'UN',
-      valorUnitario: Number(novoPrecoUnitario.toFixed(4)),
+      embalagemDescricao: novaDescricao,
+      fatorConversao: fatorTotal,
+      unidadeBase: unidadeBaseSig,
     });
   };
 
@@ -241,26 +246,28 @@ export default function AdaptadorUnidadeCatmat({
             </span>
           </div>
 
-          {/* Preview do cálculo */}
-          {razaoValida && novoPrecoUnitario !== null && (
-            <div className="flex items-center gap-2 text-[11px] bg-green-50 border border-green-200 rounded p-2">
-              <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-              <div className="flex-1">
-                <span className="text-gray-700">
-                  De <strong>{FMT_BRL(valorUnitarioAtual)}/{unidadeAtual}</strong>
-                </span>
-                <ArrowRight className="inline w-3 h-3 mx-1 text-gray-400" />
-                <span className="text-green-800 font-bold">
-                  {FMT_BRL_4(novoPrecoUnitario)}/{embalagemEscolhida.unidade.toLowerCase()}
-                  {embalagemEscolhida.capacidade > 0 && ` ${embalagemEscolhida.capacidade}${embalagemEscolhida.siglaMedida.toLowerCase()}`}
-                </span>
-                <div className="text-gray-500 text-[10px] mt-0.5">
-                  {FMT_BRL(valorUnitarioAtual)} ÷ {razaoNum} = {FMT_BRL_4(novoPrecoUnitario)}
-                  {' · '}fator: {embalagemEscolhida.capacidade > 0 ? `${embalagemEscolhida.capacidade} ${embalagemEscolhida.siglaMedida}` : 'unidade'}
+          {/* Preview MODELO A: unidade e valor PRESERVADOS, só calcula fator total */}
+          {razaoValida && embalagemEscolhida.capacidade > 0 && (() => {
+            const fatorTotal = razaoNum * embalagemEscolhida.capacidade;
+            const precoPorBase = valorUnitarioAtual / fatorTotal;
+            return (
+              <div className="flex items-start gap-2 text-[11px] bg-green-50 border border-green-200 rounded p-2">
+                <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <div className="text-gray-700 leading-relaxed">
+                    Sua unidade <strong>{unidadeAtual}</strong> e preço <strong>{FMT_BRL(valorUnitarioAtual)}</strong> ficam <strong>intactos</strong>.
+                    Sistema vai apenas calcular comparação em <strong>R$/{embalagemEscolhida.siglaMedida.toLowerCase()}</strong>:
+                  </div>
+                  <div className="text-green-800 font-mono mt-1">
+                    1 {unidadeAtual} = {razaoNum} × {embalagemEscolhida.capacidade} {embalagemEscolhida.siglaMedida.toLowerCase()} = <strong>{fatorTotal} {embalagemEscolhida.siglaMedida.toLowerCase()}</strong>
+                  </div>
+                  <div className="text-green-800 font-mono">
+                    {FMT_BRL(valorUnitarioAtual)} ÷ {fatorTotal} = <strong>{FMT_BRL_4(precoPorBase)}/{embalagemEscolhida.siglaMedida.toLowerCase()}</strong> (preço-base p/ comparação)
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           <div className="flex justify-end gap-2 pt-1">
             <button
@@ -273,7 +280,7 @@ export default function AdaptadorUnidadeCatmat({
             <button
               type="button"
               onClick={handleConfirmar}
-              disabled={!razaoValida || novoPrecoUnitario === null}
+              disabled={!razaoValida}
               className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
