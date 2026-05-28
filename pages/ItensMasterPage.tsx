@@ -1028,7 +1028,14 @@ export default function ItensMasterPage() {
                         ⚠ Sem CATMAT
                       </span>
                     )}
-                    <span className="truncate">{it.nome}</span>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(it)}
+                      className="truncate text-left hover:text-lie-green hover:underline transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-lie-green/30 rounded"
+                      title="Clique para editar este item"
+                    >
+                      {it.nome}
+                    </button>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-xs text-gray-500 max-w-xs truncate hidden xl:table-cell">{it.descricao || '-'}</td>
@@ -1291,6 +1298,7 @@ export default function ItensMasterPage() {
             setMercadoDetalhe(prev => prev ? { ...prev, dados: novo } : null);
           }}
           onAdotarEmbalagem={(emb, razao) => handleAdotarEmbalagemModal(mercadoDetalhe.item, emb, razao)}
+          onEditarItem={() => { openEdit(mercadoDetalhe.item); setMercadoDetalhe(null); }}
         />
       )}
 

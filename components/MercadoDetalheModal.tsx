@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, TrendingUp, ExternalLink, RefreshCw, Loader2, Package, Wrench, Award, Calendar, Building2, AlertCircle, CheckCircle2, XCircle, FlaskConical } from 'lucide-react';
+import { X, TrendingUp, ExternalLink, RefreshCw, Loader2, Package, Wrench, Award, Calendar, Building2, AlertCircle, CheckCircle2, XCircle, FlaskConical, Edit3 } from 'lucide-react';
 import { coletarMercadoItem, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
 import type { ItemMaster } from '../types';
 
@@ -14,6 +14,11 @@ interface Props {
    * Quando undefined ou 1, o callback NÃO deve dividir valorUnitario.
    */
   onAdotarEmbalagem?: (emb: EstatisticasPorUnidade, razao?: number) => Promise<void>;
+  /**
+   * Chamado quando o user quer editar o item direto pelo modal de detalhe.
+   * Modal fecha e parente abre form de edição com o item carregado.
+   */
+  onEditarItem?: () => void;
 }
 
 function extrairRazaoDoNome(nome: string): number | null {
@@ -33,7 +38,7 @@ function extrairRazaoDoNome(nome: string): number | null {
   return null;
 }
 
-export default function MercadoDetalheModal({ item, dados, onClose, onAtualizar, onAdotarEmbalagem }: Props) {
+export default function MercadoDetalheModal({ item, dados, onClose, onAtualizar, onAdotarEmbalagem, onEditarItem }: Props) {
   const [atualizando, setAtualizando] = useState(false);
   const [adotando, setAdotando] = useState<string | null>(null);
   const [dadosAtuais, setDadosAtuais] = useState(dados);
@@ -130,6 +135,16 @@ export default function MercadoDetalheModal({ item, dados, onClose, onAtualizar,
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {onEditarItem && (
+              <button
+                onClick={() => { onEditarItem(); onClose(); }}
+                title="Editar este item (preço, unidade, embalagem, CATMAT)"
+                className="px-3 py-2 bg-amber-500 hover:bg-amber-600 rounded transition flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                Editar item
+              </button>
+            )}
             <button
               onClick={forcarRefresh}
               disabled={atualizando}
