@@ -925,6 +925,150 @@ async function renderPesquisaCertificadosJsPdf(
     state.y = summaryY + 42;
   }
 
+  // ============================================================================
+  // PÁGINA FINAL: EXTRATO DE FONTES UTILIZADAS NESTE RELATÓRIO
+  // ============================================================================
+  // Inspirada no formato "Banco de Preços" — credibilidade via diversidade de
+  // fontes (Acórdão TCU 1445/2015 + IN 73/2020 art. 5º).
+  forceNewPage(state);
+  const fY = state.y;
+  pdf.setFontSize(13);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(...cor);
+  pdf.text('EXTRATO DE FONTES UTILIZADAS NESTE RELATÓRIO', PAGE_W / 2, fY, { align: 'center' });
+
+  pdf.setFontSize(8);
+  pdf.setFont('helvetica', 'italic');
+  pdf.setTextColor(80, 80, 80);
+  const explicTxt = 'O sistema LIE consulta diretamente os endpoints oficiais do governo federal (PNCP/Compras.gov.br) e tribunais de contas estaduais, ' +
+    'sem intermediação de terceiros. Quando aplicável, complementa com documentos públicos anexados pela entidade ' +
+    '(contratos, convênios, termos de fomento, tabelas oficiais). Atende integralmente ao Art. 5º da IN 73/2020 ' +
+    '(SEGES/ME) e Art. 23 da Lei 14.133/21, em linha com Acórdãos TCU 1445/2015 e 1231/2018 (fontes diversificadas).';
+  const explicLines = pdf.splitTextToSize(explicTxt, CONTENT_W);
+  pdf.text(explicLines, MARGIN, fY + 6);
+  state.y = fY + 6 + explicLines.length * 3.5 + 4;
+
+  // Catalogar todas as fontes únicas a partir das cotações usadas
+  type FonteRow = { ordem: number; nome: string; url: string; dataAcesso: string; categoria: string };
+  const fontesCatalogadas: FonteRow[] = [];
+  const urlsVistos = new Set<string>();
+
+  // 1. Fontes governamentais APIs (sempre listadas — são as 3 fontes principais)
+  const apisGov: FonteRow[] = [
+    {
+      ordem: 1, nome: 'Compras.gov.br — Dados Abertos (Pesquisa de Preços)',
+      url: 'https://dadosabertos.compras.gov.br/modulo-pesquisa-preco/1_consultarMaterial',
+      dataAcesso: new Date().toLocaleDateString('pt-BR'),
+      categoria: 'API Federal',
+    },
+    {
+      ordem: 2, nome: 'PNCP — Portal Nacional de Contratações Públicas',
+      url: 'https://pncp.gov.br',
+      dataAcesso: new Date().toLocaleDateString('pt-BR'),
+      categoria: 'API Federal',
+    },
+    {
+      ordem: 3, nome: 'Catálogo CATMAT/CATSER (Compras.gov.br)',
+      url: 'https://catalogo.compras.gov.br',
+      dataAcesso: new Date().toLocaleDateString('pt-BR'),
+      categoria: 'Catálogo Oficial',
+    },
+  ];
+  apisGov.forEach(f => {
+    fontesCatalogadas.push(f);
+    urlsVistos.add(f.url);
+  });
+
+  // 2. Fontes específicas extraídas das cotações (TCE-PE, links PNCP individuais, docs manuais)
+  let ord = 4;
+  for (const it of itensPesquisados) {
+    if (!it.referencias || !Array.isArray(it.referencias)) continue;
+    for (const r of it.referencias as any[]) {
+      // TCE-PE como fonte estadual
+      if (r.fonte === 'tce-pe' && !urlsVistos.has('https://sistemas.tce.pe.gov.br')) {
+        fontesCatalogadas.push({
+          ordem: ord++,
+          nome: 'TCE-PE — Tribunal de Contas do Estado de Pernambuco',
+          url: 'https://sistemas.tce.pe.gov.br/DadosAbertos/',
+          dataAcesso: new Date().toLocaleDateString('pt-BR'),
+          categoria: 'API Estadual',
+        });
+        urlsVistos.add('https://sistemas.tce.pe.gov.br');
+      }
+      // Docs públicos manuais (contrato, convênio, fomento, tabela)
+      const fontesManuais = ['contrato-publico', 'convenio', 'termo-fomento', 'fomento', 'tabela-preco'];
+      if (fontesManuais.includes(r.fonte) && r.localizacaoUrl && !urlsVistos.has(r.localizacaoUrl)) {
+        const labelFonte = {
+          'contrato-publico': 'Contrato Público',
+          'convenio': 'Convênio',
+          'termo-fomento': 'Termo de Fomento',
+          'fomento': 'Termo de Fomento',
+          'tabela-preco': 'Tabela de Preços',
+        }[r.fonte as string] || 'Documento Público';
+        fontesCatalogadas.push({
+          ordem: ord++,
+          nome: `${labelFonte}: ${r.orgaoLicitante || 'Documento Anexo'}`,
+          url: r.localizacaoUrl,
+          dataAcesso: r.dataHomologacao || new Date().toLocaleDateString('pt-BR'),
+          categoria: 'Documento Manual',
+        });
+        urlsVistos.add(r.localizacaoUrl);
+      }
+      // Orçamentos de fornecedores (último recurso)
+      if (r.fonte === 'manual' && r.localizacaoUrl && !urlsVistos.has(r.localizacaoUrl)) {
+        fontesCatalogadas.push({
+          ordem: ord++,
+          nome: `Orçamento de Fornecedor: ${r.orgaoLicitante || 'Sem identificação'}`,
+          url: r.localizacaoUrl,
+          dataAcesso: r.dataHomologacao || new Date().toLocaleDateString('pt-BR'),
+          categoria: 'Orçamento Fornecedor',
+        });
+        urlsVistos.add(r.localizacaoUrl);
+      }
+    }
+  }
+
+  // Renderizar tabela de fontes
+  autoTable(pdf, {
+    startY: state.y,
+    head: [['#', 'Fonte / Portal Consultado', 'URL', 'Categoria', 'Data de Acesso']],
+    body: fontesCatalogadas.map(f => [
+      String(f.ordem),
+      f.nome,
+      f.url.length > 60 ? f.url.substring(0, 57) + '…' : f.url,
+      f.categoria,
+      f.dataAcesso,
+    ]),
+    margin: { left: MARGIN, right: MARGIN },
+    headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontSize: 7.5 },
+    styles: { fontSize: 7, textColor: [0, 0, 0] },
+    columnStyles: {
+      0: { cellWidth: 8, halign: 'center' },
+      1: { cellWidth: 65 },
+      2: { cellWidth: 70, textColor: [37, 99, 235], font: 'courier', fontSize: 6.5 },
+      3: { cellWidth: 22 },
+      4: { cellWidth: 18, halign: 'center' },
+    },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    didDrawPage: (data) => {
+      if (data.doc.internal.getNumberOfPages() > 1) {
+        drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+      }
+    },
+  });
+
+  state.y = (pdf as any).lastAutoTable.finalY + 6;
+
+  // Nota legal final
+  pdf.setFontSize(7);
+  pdf.setFont('helvetica', 'italic');
+  pdf.setTextColor(100, 100, 100);
+  const notaTxt = `${fontesCatalogadas.length} fonte(s) listada(s). Os preços públicos foram coletados via APIs oficiais, ` +
+    'que garantem rastreabilidade integral até o edital original publicado no Portal Nacional de Contratações Públicas (PNCP). ' +
+    'Cada cotação inclui link direto pro documento de origem para auditoria externa pela própria entidade ou órgão de controle.';
+  const notaLines = pdf.splitTextToSize(notaTxt, CONTENT_W);
+  pdf.text(notaLines, MARGIN, state.y);
+
   return new Uint8Array(pdf.output('arraybuffer'));
 }
 

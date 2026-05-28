@@ -1605,6 +1605,59 @@ function gerarCertidaoCotaçãoPDF(
     y += 4;
   }
 
+  // ============ FONTES CONSULTADAS (rodape compacto) ============
+  y += 3;
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.3);
+  doc.line(15, y, RIGHT_MARGIN, y);
+  y += 4;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105);
+  doc.text("FONTES CONSULTADAS", 15, y);
+  y += 4;
+
+  // Mapeia r.fonte pra portal/URL exibida
+  const fontesUsadas: Array<{ label: string; url: string }> = [];
+  if (r.fonte === 'pncp' || r.fonte === 'pncp-contratacao' || r.fonte === 'pncp-ata') {
+    fontesUsadas.push({ label: 'Portal Nacional de Contratações Públicas (PNCP)', url: 'https://pncp.gov.br' });
+  }
+  if (r.fonte === 'compras.gov.br') {
+    fontesUsadas.push({ label: 'Compras.gov.br — Dados Abertos', url: 'https://dadosabertos.compras.gov.br' });
+  }
+  if (r.fonte === 'tce-pe') {
+    fontesUsadas.push({ label: 'TCE-PE — Tribunal de Contas de Pernambuco', url: 'https://sistemas.tce.pe.gov.br/DadosAbertos/' });
+  }
+  const fontesManuaisMap: Record<string, string> = {
+    'contrato-publico': 'Contrato público similar (anexado)',
+    'convenio': 'Convênio (anexado)',
+    'termo-fomento': 'Termo de Fomento (anexado)',
+    'fomento': 'Termo de Fomento (anexado)',
+    'tabela-preco': 'Tabela de Preços (anexada)',
+    'manual': 'Orçamento de Fornecedor (anexado)',
+  };
+  if (fontesManuaisMap[r.fonte]) {
+    fontesUsadas.push({ label: fontesManuaisMap[r.fonte], url: r.localizacaoUrl || '' });
+  }
+  // CATMAT/CATSER sempre consultado quando ha codigoCatalogoItem
+  if (r.codigoCatalogoItem) {
+    fontesUsadas.push({ label: 'Catálogo CATMAT/CATSER (Compras.gov.br)', url: 'https://catalogo.compras.gov.br' });
+  }
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(60, 60, 60);
+  fontesUsadas.forEach((f, idx) => {
+    doc.text(`${idx + 1}. ${f.label}`, 15, y);
+    if (f.url) {
+      doc.setTextColor(2, 132, 199);
+      doc.textWithLink(f.url.length > 75 ? f.url.substring(0, 72) + '…' : f.url, 105, y, { url: f.url });
+      doc.setTextColor(60, 60, 60);
+    }
+    y += 3.5;
+  });
+
   // Selo carimbo
   doc.setDrawColor(16, 185, 129);
   doc.setLineWidth(0.5);
