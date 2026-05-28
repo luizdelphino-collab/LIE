@@ -10,6 +10,7 @@ import CatmatDiagnostico from '../components/CatmatDiagnostico';
 import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
 import { isRecursoHumano } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
+import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -71,6 +72,11 @@ export default function ItensMasterPage() {
   // Picker de embalagem oficial: descobre embalagens do CATMAT no mercado e oferece adotar
   const [embalagensDisponiveis, setEmbalagensDisponiveis] = useState<MercadoResposta['porUnidade'] | null>(null);
   const [buscandoEmbalagens, setBuscandoEmbalagens] = useState(false);
+
+  // Adaptador automático de unidade: dispara após vincular CATMAT
+  const [mercadoAdaptador, setMercadoAdaptador] = useState<MercadoResposta | null>(null);
+  const [buscandoAdaptador, setBuscandoAdaptador] = useState(false);
+  const [adaptadorDispensado, setAdaptadorDispensado] = useState(false);
 
   const buscarEmbalagensOficiais = async () => {
     if (!formData.codigoCatmat) return;
@@ -391,6 +397,14 @@ export default function ItensMasterPage() {
     } else {
       setSugestaoNomeOficial('');
     }
+
+    // Dispara busca de mercado em background pra o adaptador de unidade
+    setAdaptadorDispensado(false);
+    setMercadoAdaptador(null);
+    setBuscandoAdaptador(true);
+    coletarMercadoItem(sel.codigoCatmat, sel.tipoCatmat)
+      .then(resp => setMercadoAdaptador(resp))
+      .finally(() => setBuscandoAdaptador(false));
   };
 
   const removerCatmat = () => {
@@ -402,6 +416,8 @@ export default function ItensMasterPage() {
       descricaoCatmatOficial: undefined
     }));
     setSugestaoNomeOficial('');
+    setMercadoAdaptador(null);
+    setAdaptadorDispensado(false);
   };
 
   const aceitarSugestaoNome = () => {
@@ -699,21 +715,46 @@ export default function ItensMasterPage() {
               </div>
 
               {!formData.semCorrespondenciaCatalogo && (
-                <CatalogoSearchPicker
-                  initialTermo={formData.nome}
-                  selecionado={
-                    formData.codigoCatmat
-                      ? {
-                          codigoCatmat: formData.codigoCatmat,
-                          tipoCatmat: formData.tipoCatmat || 'material',
-                          nomeCatmatOficial: formData.nomeCatmatOficial || '',
-                          descricaoCatmatOficial: formData.descricaoCatmatOficial || ''
-                        }
-                      : null
-                  }
-                  onSelect={handleCatalogoSelect}
-                  onClear={removerCatmat}
-                />
+                <>
+                  <CatalogoSearchPicker
+                    initialTermo={formData.nome}
+                    selecionado={
+                      formData.codigoCatmat
+                        ? {
+                            codigoCatmat: formData.codigoCatmat,
+                            tipoCatmat: formData.tipoCatmat || 'material',
+                            nomeCatmatOficial: formData.nomeCatmatOficial || '',
+                            descricaoCatmatOficial: formData.descricaoCatmatOficial || ''
+                          }
+                        : null
+                    }
+                    onSelect={handleCatalogoSelect}
+                    onClear={removerCatmat}
+                  />
+
+                  {/* Adaptador automático: aparece após vincular CATMAT, oferece adequar unidade ao mercado */}
+                  {formData.codigoCatmat && !adaptadorDispensado && (
+                    <AdaptadorUnidadeCatmat
+                      mercado={mercadoAdaptador}
+                      carregando={buscandoAdaptador}
+                      unidadeAtual={formData.unidade || 'unidade'}
+                      nomeItem={formData.nome || ''}
+                      valorUnitarioAtual={formData.valorUnitario || 0}
+                      onAdaptar={(a) => {
+                        setFormData(p => ({
+                          ...p,
+                          unidade: a.unidade,
+                          embalagemDescricao: a.embalagemDescricao,
+                          fatorConversao: a.fatorConversao,
+                          unidadeBase: a.unidadeBase,
+                          valorUnitario: a.valorUnitario,
+                        }));
+                        setAdaptadorDispensado(true);
+                      }}
+                      onDispensar={() => setAdaptadorDispensado(true)}
+                    />
+                  )}
+                </>
               )}
 
               {/* Toggle de rota legal alternativa */}
