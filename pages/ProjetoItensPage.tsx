@@ -71,6 +71,10 @@ export default function ProjetoItensPage() {
       'codigoCatmat', 'tipoCatmat', 'nomeCatmatOficial', 'descricaoCatmatOficial',
       'fatorConversao', 'unidadeBase', 'embalagemDescricao',
       'semCorrespondenciaCatalogo',
+      // Etapa 5C: pesquisa de preco agora vive no Banco. Quando o master e
+      // pesquisado, todos os projetos que usam esse item refletem automaticamente.
+      'pesquisado', 'referencias', 'mediaReferencia', 'medianaReferencia',
+      'tokenPesquisa', 'ultimoCodigoVinculado',
     ] as const;
 
     type Update = {
@@ -516,17 +520,9 @@ export default function ProjetoItensPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setBatchPesquisaOpen(true)}
-            disabled={itensProjeto.length === 0}
-            title="Pesquisa Automática de Preços (IN 65/2021)"
-            className="group flex items-center bg-white border border-amber-300 text-amber-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-amber-50 shadow-sm disabled:opacity-50"
-          >
-            <Sparkles className="w-5 h-5 shrink-0" />
-            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
-              Pesquisar Tudo
-            </span>
-          </button>
+          {/* Pesquisa de preço agora vive no Banco de Itens (etapa 5C).
+              O botão de pesquisa em lote foi removido daqui — pesquisa-se uma vez
+              no Banco e vale pra todos os projetos que vinculam o item. */}
           <button
             onClick={exportToExcel}
             disabled={itensProjeto.length === 0}
@@ -810,31 +806,31 @@ export default function ProjetoItensPage() {
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
-                    <button 
-                      onClick={() => {
-                        setSelectedItemForPesquisa(it);
-                        setIsPesquisaOpen(true);
-                      }} 
-                      className={`p-1.5 rounded transition ${it.pesquisado ? 'text-lie-green hover:bg-lie-green/10' : 'text-amber-500 hover:bg-amber-50'}`} 
-                      title="Pesquisa de Preços Públicos (IN 65/2021)"
-                    >
-                      <Scale className="w-4 h-4" />
-                    </button>
-                    {it.pesquisado && (
-                      <a 
+                    {/* Pesquisa de preço agora vive no Banco de Itens (etapa 5C).
+                        Botão removido daqui — vá em Banco de Itens → ⚖ pra pesquisar.
+                        Se item ja foi pesquisado no Banco, o olho azul abaixo aparece automaticamente. */}
+                    {it.pesquisado && it.tokenPesquisa ? (
+                      <a
                         href={`/#/validar?token=${it.tokenPesquisa}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition flex items-center justify-center" 
-                        title="Visualizar Detalhes e Certificado da Pesquisa"
+                        className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition flex items-center justify-center"
+                        title="Visualizar Certificado da Pesquisa (gerado no Banco de Itens)"
                       >
                         <Eye className="w-4 h-4" />
                       </a>
+                    ) : (
+                      <span
+                        className="p-1.5 text-gray-300 cursor-help"
+                        title="Item ainda não pesquisado. Faça a pesquisa no Banco de Itens — vale pra todos os projetos."
+                      >
+                        <Scale className="w-4 h-4" />
+                      </span>
                     )}
-                    <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar">
+                    <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar quantidade / memorial">
                       <Edit3 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(it.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition" title="Excluir">
+                    <button onClick={() => handleDelete(it.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition" title="Remover vínculo do projeto">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>

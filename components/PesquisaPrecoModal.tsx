@@ -4,20 +4,35 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { storage, db } from '../lib/firebase';
 import { buscarMateriaisLocal, consultarPrecosPraticados } from '../lib/apiCompras';
-import type { ItemProjeto, PrecoReferencia } from '../types';
+import type { ItemMaster, ItemProjeto, PrecoReferencia } from '../types';
 import type { GovernmentMaterial } from '../lib/apiCompras';
 import { jsPDF } from 'jspdf';
+
+/**
+ * Item-like aceito pelo modal. Quando vem do Banco de Itens (master), nao
+ * tem projectId/quantidade/memorialCalculo — esses sao do projeto. O modal
+ * detecta o modo (banco vs projeto) pela presenca de projectId e salva no
+ * documento certo.
+ */
+export type ItemPesquisavel =
+  | (ItemProjeto & { __origem?: 'projeto' })
+  | (ItemMaster & { __origem: 'banco'; projectId?: undefined; quantidade?: number; memorialCalculo?: string });
 
 interface PesquisaPrecoModalProps {
   isOpen: boolean;
   onClose: () => void;
-  item: ItemProjeto;
+  item: ItemPesquisavel;
   projetoTitulo?: string;
   entidadeNome?: string;
   onSave: () => void;
 }
 
 export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitulo, entidadeNome, onSave }: PesquisaPrecoModalProps) {
+  // Modo determinado pela presenca de projectId.
+  // - Modo BANCO: salva em items/{id} (master). Pesquisa unica vale pra todos os projetos.
+  // - Modo PROJETO: salva em projects/{pid}/items/{id} (legado). Mantido pra compat
+  //   enquanto migra. Etapa 5C movera tudo pro banco.
+  const modoBanco = !item.projectId;
   const [activeTab, setActiveTab] = useState<'compras' | 'manual'>('compras');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -387,32 +402,39 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
         }
       }
 
-      // 2. Atualiza o documento do Item do Projeto no Firestore com a cesta 100% arquivada
-      const itemRef = doc(db, `projects/${item.projectId}/items`, item.id);
+      // 2. Atualiza o documento certo conforme o modo
+      // - Modo banco: items/{id}              (etapa 5C - fonte unica)
+      // - Modo projeto: projects/{pid}/items/{id} (legado, mantido pra compat)
+      const itemRef = modoBanco
+        ? doc(db, 'items', item.id)
+        : doc(db, `projects/${item.projectId}/items`, item.id);
+
       await setDoc(itemRef, {
         pesquisado: true,
         referencias: referenciasArquivadas,
         mediaReferencia: media,
         medianaReferencia: mediana,
         tokenPesquisa: token,
-        ultimoCodigoVinculado: materialSelecionado?.codigoItem || item.ultimoCodigoVinculado || null
+        ultimoCodigoVinculado: materialSelecionado?.codigoItem || item.ultimoCodigoVinculado || null,
+        ...(modoBanco ? { pesquisaAtualizadaEm: serverTimestamp() } : {})
       }, { merge: true });
 
-      // 3. Grava no Registro de Autenticidade Neutro e Desacoplado com a cesta 100% arquivada
+      // 3. Grava no Registro de Autenticidade (mesma collection, payload adaptado pelo modo)
       const validadorRef = doc(db, 'cotacoesValidadoras', token);
       await setDoc(validadorRef, {
         token,
-        projectId: item.projectId,
-        itemProjetoId: item.id,
+        ...(modoBanco
+          ? { itemMasterId: item.id, escopo: 'banco' as const }
+          : { projectId: item.projectId, itemProjetoId: item.id, escopo: 'projeto' as const }),
         nome: item.nome,
         descricao: item.descricao || '',
-        quantidade: item.quantidade,
+        quantidade: item.quantidade || null,
         unidade: item.unidade,
         valorUnitarioEstimado: item.valorUnitario,
         referencias: referenciasArquivadas,
         mediaReferencia: media,
         medianaReferencia: mediana,
-        projetoTitulo: projetoTitulo || "PROJETO ESPORTIVO",
+        projetoTitulo: modoBanco ? '(BANCO DE ITENS)' : (projetoTitulo || "PROJETO ESPORTIVO"),
         entidadeNome: entidadeNome || "PROPONENTE",
         criadoEm: serverTimestamp()
       });

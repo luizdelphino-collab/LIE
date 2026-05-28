@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, writeBatch } from 'firebase/firestore';
-import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ShieldCheck, Lightbulb, Package } from 'lucide-react';
+import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ShieldCheck, Lightbulb, Package, Scale, Eye } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
@@ -11,6 +11,7 @@ import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type Esta
 import { isRecursoHumano } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
+import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -77,6 +78,9 @@ export default function ItensMasterPage() {
   const [mercadoAdaptador, setMercadoAdaptador] = useState<MercadoResposta | null>(null);
   const [buscandoAdaptador, setBuscandoAdaptador] = useState(false);
   const [adaptadorDispensado, setAdaptadorDispensado] = useState(false);
+
+  // Pesquisa de preço no Banco (etapa 5C): cesta vive no master, vale pra todos projetos
+  const [pesquisaItem, setPesquisaItem] = useState<ItemMaster | null>(null);
 
   const buscarEmbalagensOficiais = async () => {
     if (!formData.codigoCatmat) return;
@@ -1156,6 +1160,24 @@ export default function ItensMasterPage() {
                       </>
                     ) : (
                       <>
+                        <button
+                          onClick={() => setPesquisaItem(it)}
+                          className={`p-1.5 rounded transition ${it.pesquisado ? 'text-lie-green hover:bg-lie-green/10' : 'text-amber-500 hover:bg-amber-50'}`}
+                          title={it.pesquisado ? 'Pesquisa de Preços realizada — clique para refazer/adicionar cotações' : 'Pesquisa de Preços Públicos (IN 65/2021)'}
+                        >
+                          <Scale className="w-4 h-4" />
+                        </button>
+                        {it.pesquisado && it.tokenPesquisa && (
+                          <a
+                            href={`/#/validar?token=${it.tokenPesquisa}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition flex items-center justify-center"
+                            title="Visualizar Certificado da Pesquisa (vale pra todos os projetos)"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </a>
+                        )}
                         <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar">
                           <Edit3 className="w-4 h-4" />
                         </button>
@@ -1245,6 +1267,18 @@ export default function ItensMasterPage() {
         items={items}
         onAtualizado={carregarItens}
       />
+
+      {/* ===== MODAL DE PESQUISA DE PREÇO (Banco) ===== */}
+      {pesquisaItem && (
+        <PesquisaPrecoModal
+          isOpen={true}
+          onClose={() => setPesquisaItem(null)}
+          item={{ ...pesquisaItem, __origem: 'banco' as const }}
+          projetoTitulo={undefined}
+          entidadeNome={undefined}
+          onSave={() => { carregarItens(); }}
+        />
+      )}
 
       {/* ===== MODAL DE DETALHE DE MERCADO ===== */}
       {mercadoDetalhe && (

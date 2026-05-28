@@ -331,6 +331,18 @@ export interface ItemMaster {
   // art. 5o IV ou IN 65/2021 art. 5o V — em linha com Lei 14.133/21 art. 28 e
   // Acordao TCU 1445/2015 sobre fontes diversificadas).
   semCorrespondenciaCatalogo?: boolean;
+
+  // Pesquisa de preco publica (IN 65/2021) — agora vive no Banco (etapa 5C).
+  // Quando o item e vinculado a um projeto, esses campos sao herdados via
+  // sincronizacao automatica. Pesquisa e feita UMA VEZ no Banco, vale pra
+  // todos os projetos que usam esse master.
+  pesquisado?: boolean;
+  referencias?: PrecoReferencia[];
+  mediaReferencia?: number;
+  medianaReferencia?: number;
+  tokenPesquisa?: string;
+  ultimoCodigoVinculado?: number;
+  pesquisaAtualizadaEm?: Timestamp;
 }
 
 export interface PrecoReferencia {
