@@ -15,6 +15,7 @@ import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
 import { sincronizarCatalogoCNBS, getCatalogoStats, type SincronizarRespostaCatalogo } from '../lib/catalogoPdmsApi';
 import { Database } from 'lucide-react';
+import WizardAtributosPDM from '../components/WizardAtributosPDM';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -97,6 +98,9 @@ export default function ItensMasterPage() {
   const [restaurarOpen, setRestaurarOpen] = useState(false);
   const [restaurarRunning, setRestaurarRunning] = useState(false);
   const [restaurarResults, setRestaurarResults] = useState<RestauracaoResult[]>([]);
+
+  // Wizard de atributos PDM (Fase 3 redesign 2026-05-29)
+  const [wizardItem, setWizardItem] = useState<ItemMaster | null>(null);
 
   // Sincronizacao do cache CNBS (Fase 2 redesign 2026-05-29)
   const [sincronizarOpen, setSincronizarOpen] = useState(false);
@@ -1239,13 +1243,25 @@ export default function ItensMasterPage() {
                         ⚠ Sem CATMAT
                       </span>
                     )}
-                    {(it as any).precisaCompletarWizard && (
-                      <span
-                        title="Item restaurado do batch IA. Precisa completar atributos no novo wizard (em construção — Fase 2 do redesign 2026-05-29)."
-                        className="text-[9px] font-bold px-1.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded shrink-0 uppercase tracking-wider"
+                    {(it as any).precisaCompletarWizard && it.codigoCatmat && (
+                      <button
+                        type="button"
+                        onClick={() => setWizardItem(it)}
+                        title="Clique pra abrir o wizard de atributos e estruturar o item com as características oficiais do CATMAT/CATSER"
+                        className="text-[9px] font-bold px-1.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded shrink-0 uppercase tracking-wider hover:bg-purple-200 hover:border-purple-400 transition cursor-pointer"
                       >
                         🔧 Completar
-                      </span>
+                      </button>
+                    )}
+                    {it.atributosWizard && it.atributosWizard.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setWizardItem(it)}
+                        title={`Atributos estruturados (${it.atributosWizard.length}): ${it.atributosWizard.map(a => `${a.nomeCaracteristica}=${a.nomeValorCaracteristica}`).join(' · ')}. Clique pra editar.`}
+                        className="text-[9px] font-bold px-1.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded shrink-0 uppercase tracking-wider hover:bg-emerald-200 transition cursor-pointer"
+                      >
+                        ✓ Estruturado ({it.atributosWizard.length})
+                      </button>
                     )}
                     <button
                       type="button"
@@ -1494,6 +1510,15 @@ export default function ItensMasterPage() {
         onAtualizado={carregarItens}
       />
 
+
+      {/* ===== WIZARD DE ATRIBUTOS PDM (Fase 3 redesign 2026-05-29) ===== */}
+      {wizardItem && (
+        <WizardAtributosPDM
+          item={wizardItem}
+          onClose={() => setWizardItem(null)}
+          onComplete={() => { setWizardItem(null); carregarItens(); }}
+        />
+      )}
 
       {/* ===== MODAL DE SINCRONIZAÇÃO DO CATÁLOGO CNBS (Fase 2 redesign 2026-05-29) ===== */}
       {sincronizarOpen && (

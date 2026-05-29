@@ -358,6 +358,17 @@ export interface ItemMaster {
   // Sinal de que o item precisa passar pelo wizard de atributos (redesign 2026-05-29)
   precisaCompletarWizard?: boolean;
   restauradoEm?: Timestamp;
+  // Atributos do PDM resolvidos pelo wizard (Fase 3 redesign).
+  // Cada entrada eh (codigoCaracteristica, codigoValor) das caracteristicas obrigatorias.
+  // Salva tambem nomes pra exibicao rapida sem ter que cruzar com catalogo_pdms.
+  atributosWizard?: Array<{
+    codigoCaracteristica: string;
+    codigoValorCaracteristica: string;
+    nomeCaracteristica: string;
+    nomeValorCaracteristica: string;
+    siglaUnidadeMedida?: string | null;
+  }>;
+  atributosWizardCompletoEm?: Timestamp;
 }
 
 export interface PrecoReferencia {
