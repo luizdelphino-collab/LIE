@@ -194,6 +194,29 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
     return Math.round((matches / total) * 100);
   };
 
+  // Quando o user diz "este CATMAT/CATSER nao descreve meu item":
+  // desvincula o codigo + marca como sem correspondencia legal (IN 73/2020 art. 5o IV)
+  // Pesquisa de preco entao segue rota alternativa (3 fornecedores ou midia especializada).
+  const marcarSemCorrespondencia = async () => {
+    setSalvando(true);
+    try {
+      await setDoc(doc(db, 'items', item.id), {
+        codigoCatmat: null,
+        tipoCatmat: null,
+        nomeCatmatOficial: null,
+        descricaoCatmatOficial: null,
+        semCorrespondenciaCatalogo: true,
+        precisaCompletarWizard: false,
+        vinculadoPorIA: false,  // sinaliza que foi explicitamente rejeitado
+        desvinculadoEm: serverTimestamp(),
+      }, { merge: true });
+      onComplete();
+    } catch (e: any) {
+      setErro(`Erro ao desvincular: ${e?.message || e}`);
+      setSalvando(false);
+    }
+  };
+
   const salvarItem = async () => {
     setSalvando(true);
     try {
@@ -289,19 +312,48 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
                 <strong>Nota sobre serviços:</strong> CATSER não tem atributos estruturados como CATMAT.
                 A pesquisa de preço de serviços usa descrição livre + filtros temporais + segmentação geográfica.
               </div>
+
+              {/* Comparacao com o nome real do item */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <div className="text-xs text-gray-500 mb-1">Seu item:</div>
+                <div className="text-sm font-bold text-gray-800">{item.nome}</div>
+                {item.descricao && (
+                  <div className="text-xs text-gray-600 mt-1 italic">"{item.descricao}"</div>
+                )}
+              </div>
+
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div className="text-xs font-bold text-red-800 mb-1">⚠ Este CATSER realmente descreve seu item?</div>
+                <div className="text-[11px] text-red-700">
+                  Se NÃO descreve (ex: "Carrinho de pipoca em evento" virou "Fornecimento de refeições" genérico),
+                  use o botão vermelho "Código não cobre" abaixo. O item será marcado como "sem correspondência no catálogo"
+                  conforme <strong>IN 73/2020 art. 5º IV</strong>, e a pesquisa de preço seguirá rota alternativa
+                  (3 orçamentos de fornecedores ou mídia especializada).
+                </div>
+              </div>
             </div>
           )}
 
           {/* CATMAT — STEP DE CARACTERISTICAS */}
           {!carregando && !erro && pdm && !isStepEmbalagem && etapaAtual && (
             <div className="space-y-4">
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                <div className="text-xs font-bold text-purple-700 uppercase tracking-wider">
-                  PDM {pdm.codigoPdm} — {pdm.nomePdm}
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-purple-700 uppercase tracking-wider">
+                    PDM {pdm.codigoPdm} — {pdm.nomePdm}
+                  </div>
+                  <div className="text-[11px] text-purple-600 mt-0.5">
+                    Etapa {etapa + 1} de {totalSteps} · {pdm.itensVinculados.length} variações catalogadas
+                  </div>
                 </div>
-                <div className="text-[11px] text-purple-600 mt-0.5">
-                  Etapa {etapa + 1} de {totalSteps} · {pdm.itensVinculados.length} variações catalogadas
-                </div>
+                <button
+                  onClick={marcarSemCorrespondencia}
+                  disabled={salvando}
+                  title="Este PDM não cobre meu item — marcar como sem correspondência no catálogo e usar rota alternativa (IN 73/2020 art. 5º IV)"
+                  className="text-[10px] px-2 py-1 bg-red-50 border border-red-300 text-red-700 font-bold rounded hover:bg-red-100 transition shrink-0"
+                >
+                  ✗ PDM errado
+                </button>
               </div>
 
               <div>
@@ -575,13 +627,22 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
               </>
             )}
             {tipoCatalogo === 'servico' && (
-              <button
-                onClick={salvarItem}
-                disabled={salvando}
-                className="flex-1 px-4 py-2 bg-green-500 text-white font-bold rounded-lg hover:bg-green-600 transition flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {salvando ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando…</> : <><CheckCircle2 className="w-4 h-4" /> Confirmar e marcar como completo</>}
-              </button>
+              <>
+                <button
+                  onClick={marcarSemCorrespondencia}
+                  disabled={salvando}
+                  className="flex-1 px-3 py-2 bg-red-50 border border-red-300 text-red-700 text-sm font-bold rounded-lg hover:bg-red-100 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  ✗ Código não cobre — rota alternativa
+                </button>
+                <button
+                  onClick={salvarItem}
+                  disabled={salvando}
+                  className="flex-1 px-3 py-2 bg-green-500 text-white text-sm font-bold rounded-lg hover:bg-green-600 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {salvando ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando…</> : <><CheckCircle2 className="w-4 h-4" /> ✓ Confirmar CATSER</>}
+                </button>
+              </>
             )}
           </div>
         )}

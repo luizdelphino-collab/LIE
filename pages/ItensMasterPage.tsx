@@ -164,6 +164,30 @@ export default function ItensMasterPage() {
     (it as any).nomeOriginalLIE || (it as any).descricaoOriginalLIE || (it as any).unidadeOriginalLIE
   );
 
+  // Itens cujo CATMAT/CATSER foi escolhido pela IA na padronizacao (v1.12.x)
+  // Esses provavelmente tem vinculacao errada (carrinho de pipoca → fornecimento refeicoes etc)
+  const itensVinculadosPorIA = items.filter(it => (it as any).vinculadoPorIA === true);
+
+  // Desvincula em lote todos os CATMAT/CATSER que foram escolhidos pela IA
+  // Marca como semCorrespondenciaCatalogo pra rota legal alternativa
+  const desvincularEmLote = async () => {
+    if (itensVinculadosPorIA.length === 0) return;
+    if (!confirm(`Desvincular o CATMAT/CATSER de ${itensVinculadosPorIA.length} item(ns) que foram vinculados pela IA?\n\nEles serão marcados como "sem correspondência no catálogo" (IN 73/2020 art. 5º IV) e a pesquisa de preço usará rota alternativa.`)) return;
+    for (const it of itensVinculadosPorIA) {
+      await setDoc(doc(db, 'items', it.id), {
+        codigoCatmat: null,
+        tipoCatmat: null,
+        nomeCatmatOficial: null,
+        descricaoCatmatOficial: null,
+        semCorrespondenciaCatalogo: true,
+        vinculadoPorIA: false,
+        desvinculadoEmLoteEm: serverTimestamp(),
+      }, { merge: true });
+    }
+    await carregarItens();
+    alert(`${itensVinculadosPorIA.length} item(ns) desvinculados.`);
+  };
+
   const startRestauracao = async () => {
     if (itensComPadronizacaoIA.length === 0) return;
     setRestaurarRunning(true);
@@ -840,6 +864,20 @@ export default function ItensMasterPage() {
               Sincronizar Catálogo
             </span>
           </button>
+
+          {/* Desvincular CATMAT/CATSER escolhidos pela IA (v1.12.x) */}
+          {itensVinculadosPorIA.length > 0 && (
+            <button
+              onClick={desvincularEmLote}
+              title={`${itensVinculadosPorIA.length} item(ns) tem CATMAT/CATSER que foram escolhidos pela IA na v1.12 (provavelmente errado, ex: carrinho de pipoca → fornecimento de refeições). Desvincular em lote pra usar rota alternativa.`}
+              className="group flex items-center bg-red-50 border border-red-300 text-red-700 rounded-lg p-2 transition-all duration-300 hover:bg-red-100 shadow-sm"
+            >
+              <AlertTriangle className="w-5 h-5 shrink-0 text-red-600" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+                Desvincular CATMAT IA ({itensVinculadosPorIA.length})
+              </span>
+            </button>
+          )}
 
           {/* Restaurar dados originais — reverte itens que foram modificados pelo batch Padronizar Nomenclatura (v1.12.x) */}
           {itensComPadronizacaoIA.length > 0 && (
