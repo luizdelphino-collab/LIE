@@ -326,6 +326,10 @@ export interface ItemMaster {
   fatorConversao?: number;
   unidadeBase?: string; // ML, G, L, UN, M, M², KG
   embalagemDescricao?: string; // texto livre p/ humano (ex: "Caixa com 48 copos de 200ml")
+  // Sigla canonica de fornecimento alinhada com API federal (compras.gov.br + PNCP)
+  // Permite filtrar cotacoes EQUIVALENTES por embalagem (ex: COPO 200ML != GRF 1.5L)
+  // Ex: COPO, GRF (garrafa), GAL (galao), CX (caixa), UN (unidade), FRD (fardo)
+  siglaUnidadeFornecimento?: string;
   // Item declaradamente sem correspondencia no CATMAT/CATSER. Pesquisa de preco
   // segue rota legal alternativa: cotacoes com fornecedores (IN SEGES/ME 73/2020
   // art. 5o IV ou IN 65/2021 art. 5o V — em linha com Lei 14.133/21 art. 28 e
