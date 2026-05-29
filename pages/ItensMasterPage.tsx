@@ -13,6 +13,8 @@ import { isRecursoHumano } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
+import { sincronizarCatalogoCNBS, getCatalogoStats, type SincronizarRespostaCatalogo } from '../lib/catalogoPdmsApi';
+import { Database } from 'lucide-react';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -95,6 +97,64 @@ export default function ItensMasterPage() {
   const [restaurarOpen, setRestaurarOpen] = useState(false);
   const [restaurarRunning, setRestaurarRunning] = useState(false);
   const [restaurarResults, setRestaurarResults] = useState<RestauracaoResult[]>([]);
+
+  // Sincronizacao do cache CNBS (Fase 2 redesign 2026-05-29)
+  const [sincronizarOpen, setSincronizarOpen] = useState(false);
+  const [sincronizarRunning, setSincronizarRunning] = useState(false);
+  const [sincronizarResultado, setSincronizarResultado] = useState<SincronizarRespostaCatalogo | null>(null);
+  const [catalogoStats, setCatalogoStats] = useState<{ pdmsCached: number; servicosCached: number; ultimaSync: Date | null } | null>(null);
+
+  // Carrega stats do catalogo quando abrir o modal
+  useEffect(() => {
+    if (sincronizarOpen && !catalogoStats) {
+      getCatalogoStats().then(setCatalogoStats);
+    }
+  }, [sincronizarOpen, catalogoStats]);
+
+  const startSincronizacao = async () => {
+    // Pega codigos unicos dos itens cadastrados (materials + services)
+    const codigosCatmat = Array.from(new Set(
+      items
+        .filter(it => it.codigoCatmat && it.codigoCatmat > 0 && (it.tipoCatmat === 'material' || !it.tipoCatmat))
+        .map(it => it.codigoCatmat!)
+    ));
+    const codigosCatser = Array.from(new Set(
+      items
+        .filter(it => it.codigoCatmat && it.codigoCatmat > 0 && it.tipoCatmat === 'servico')
+        .map(it => it.codigoCatmat!)
+    ));
+    if (codigosCatmat.length === 0 && codigosCatser.length === 0) return;
+
+    setSincronizarRunning(true);
+    setSincronizarResultado(null);
+    // Divide em chunks de 80 pra evitar timeout
+    const CHUNK = 80;
+    let aggMat = { pdmsAtualizados: 0, servicosAtualizados: 0, itensVinculadosTotal: 0, erros: [] as any[], timestamp: new Date().toISOString() };
+    for (let i = 0; i < codigosCatmat.length; i += CHUNK) {
+      const chunkMat = codigosCatmat.slice(i, i + CHUNK);
+      const chunkSer = i === 0 ? codigosCatser : [];  // CATSER vai no 1o batch
+      const resp = await sincronizarCatalogoCNBS({ codigosCatmat: chunkMat, codigosCatser: chunkSer });
+      if (resp) {
+        aggMat.pdmsAtualizados += resp.pdmsAtualizados;
+        aggMat.servicosAtualizados += resp.servicosAtualizados;
+        aggMat.itensVinculadosTotal += resp.itensVinculadosTotal;
+        aggMat.erros.push(...resp.erros);
+      }
+    }
+    // Se nao houver materials, sincroniza CATSERs sozinhos
+    if (codigosCatmat.length === 0 && codigosCatser.length > 0) {
+      const resp = await sincronizarCatalogoCNBS({ codigosCatser });
+      if (resp) {
+        aggMat.servicosAtualizados += resp.servicosAtualizados;
+        aggMat.erros.push(...resp.erros);
+      }
+    }
+    setSincronizarResultado(aggMat);
+    setSincronizarRunning(false);
+    // Atualiza stats
+    setCatalogoStats(null);  // forca recarga
+    getCatalogoStats().then(setCatalogoStats);
+  };
 
   const itensComPadronizacaoIA = items.filter(it =>
     (it as any).nomeOriginalLIE || (it as any).descricaoOriginalLIE || (it as any).unidadeOriginalLIE
@@ -468,6 +528,16 @@ export default function ItensMasterPage() {
         criadoEm: formData.criadoEm || serverTimestamp()
       }, { merge: true });
 
+      // Auto-sync CNBS pro item recém vinculado a CATMAT/CATSER
+      // (Fase 2 redesign 2026-05-29: garante cache local pra wizard de atributos)
+      if (formData.codigoCatmat && formData.codigoCatmat > 0) {
+        const tipo = (formData.tipoCatmat || 'material') as 'material' | 'servico';
+        sincronizarCatalogoCNBS({
+          codigosCatmat: tipo === 'material' ? [formData.codigoCatmat] : [],
+          codigosCatser: tipo === 'servico' ? [formData.codigoCatmat] : [],
+        }).catch(err => console.warn('[sync-cnbs] silent fail no save de item:', err));
+      }
+
       setIsFormOpen(false);
       carregarItens();
     } catch (e) {
@@ -749,6 +819,21 @@ export default function ItensMasterPage() {
             )}
             <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
               Carregar Mercado Gov ({itensComCatmat.length})
+            </span>
+          </button>
+
+          {/* Sincronizar Catalogo CNBS — Fase 2 redesign 2026-05-29 */}
+          <button
+            onClick={() => setSincronizarOpen(true)}
+            disabled={itensComCatmat.length === 0}
+            title={itensComCatmat.length === 0
+              ? 'Sem itens com CATMAT/CATSER vinculados'
+              : `Sincronizar ${itensComCatmat.length} PDMs do catalogo SERPRO CNBS no cache local. Habilita o novo wizard de cadastro com caracteristicas validadas.`}
+            className="group flex items-center bg-purple-50 border border-purple-300 text-purple-700 rounded-lg p-2 transition-all duration-300 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            <Database className="w-5 h-5 shrink-0 text-purple-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Sincronizar Catálogo
             </span>
           </button>
 
@@ -1409,6 +1494,154 @@ export default function ItensMasterPage() {
         onAtualizado={carregarItens}
       />
 
+
+      {/* ===== MODAL DE SINCRONIZAÇÃO DO CATÁLOGO CNBS (Fase 2 redesign 2026-05-29) ===== */}
+      {sincronizarOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh]">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-500 rounded-lg">
+                  <Database className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Sincronizar Catálogo CNBS</h3>
+                  <p className="text-xs text-gray-300">
+                    {sincronizarRunning
+                      ? 'Baixando PDMs e características da API SERPRO…'
+                      : sincronizarResultado
+                        ? `Concluído: ${sincronizarResultado.pdmsAtualizados} PDMs, ${sincronizarResultado.servicosAtualizados} serviços`
+                        : 'Baixa estrutura oficial pro wizard de cadastro'
+                    }
+                  </p>
+                </div>
+              </div>
+              {!sincronizarRunning && (
+                <button
+                  onClick={() => { setSincronizarOpen(false); setSincronizarResultado(null); }}
+                  className="hover:bg-white/10 p-2 rounded-full transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {!sincronizarRunning && !sincronizarResultado && (
+                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                  <p>
+                    Vou baixar do SERPRO CNBS os <strong>PDMs (Padrão Descritivo de Material)</strong>
+                    {' '}dos {itensComCatmat.length} itens que você tem cadastrados,
+                    incluindo todas as <strong>características obrigatórias</strong> de cada um
+                    (tipo, material, embalagem, capacidade…) e os valores possíveis.
+                  </p>
+                  <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg p-2">
+                    <strong>Por que isso importa:</strong> com esses dados em cache local,
+                    o wizard de cadastro (próxima fase) poderá perguntar as características
+                    de cada item de forma estruturada — eliminando o problema de itens
+                    diferentes virarem o mesmo CATSER genérico.
+                  </p>
+                  {catalogoStats && (
+                    <div className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                      <div className="font-bold mb-1">Estado atual do cache</div>
+                      <div>PDMs cacheados: <strong>{catalogoStats.pdmsCached}</strong></div>
+                      <div>Serviços cacheados: <strong>{catalogoStats.servicosCached}</strong></div>
+                      {catalogoStats.ultimaSync && (
+                        <div className="text-gray-500 mt-1">
+                          Última sincronização: {catalogoStats.ultimaSync.toLocaleString('pt-BR')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                    <strong>Tempo estimado:</strong> 30s a 2min, dependendo de quantos PDMs únicos
+                    estão envolvidos. SERPRO não cobra pelo uso desta API.
+                  </p>
+                </div>
+              )}
+
+              {sincronizarRunning && (
+                <div className="space-y-2">
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div className="bg-purple-500 h-full animate-pulse" style={{ width: '60%' }} />
+                  </div>
+                  <p className="text-xs text-gray-500 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Consultando SERPRO CNBS — pode levar até 2 minutos…
+                  </p>
+                </div>
+              )}
+
+              {sincronizarResultado && !sincronizarRunning && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-green-700">{sincronizarResultado.pdmsAtualizados}</div>
+                      <div className="text-xs text-green-600 font-semibold uppercase tracking-wider">PDMs cacheados</div>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-blue-700">{sincronizarResultado.servicosAtualizados}</div>
+                      <div className="text-xs text-blue-600 font-semibold uppercase tracking-wider">Serviços cacheados</div>
+                    </div>
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-purple-700">{sincronizarResultado.itensVinculadosTotal}</div>
+                      <div className="text-xs text-purple-600 font-semibold uppercase tracking-wider">Itens vinculados</div>
+                    </div>
+                  </div>
+                  {sincronizarResultado.erros.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-bold text-amber-800">⚠ {sincronizarResultado.erros.length} erro(s):</div>
+                      <div className="max-h-40 overflow-y-auto space-y-1">
+                        {sincronizarResultado.erros.slice(0, 15).map((e, idx) => (
+                          <div key={idx} className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-1.5">
+                            <strong>{e.tipo} {e.codigo}:</strong> {e.motivo}
+                          </div>
+                        ))}
+                        {sincronizarResultado.erros.length > 15 && (
+                          <div className="text-[11px] text-gray-500 italic">…e mais {sincronizarResultado.erros.length - 15}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
+              {!sincronizarRunning && !sincronizarResultado && (
+                <>
+                  <button
+                    onClick={() => setSincronizarOpen(false)}
+                    className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={startSincronizacao}
+                    className="flex-1 py-2 bg-purple-500 text-white font-bold rounded-lg hover:bg-purple-600 transition flex items-center justify-center gap-2"
+                  >
+                    <Database className="w-4 h-4" />
+                    Sincronizar agora
+                  </button>
+                </>
+              )}
+              {sincronizarRunning && (
+                <button disabled className="flex-1 py-2 bg-gray-300 text-gray-500 font-bold rounded-lg cursor-not-allowed">
+                  Sincronizando…
+                </button>
+              )}
+              {!sincronizarRunning && sincronizarResultado && (
+                <button
+                  onClick={() => { setSincronizarOpen(false); setSincronizarResultado(null); }}
+                  className="flex-1 py-2 bg-lie-ink text-white font-bold rounded-lg hover:bg-black transition"
+                >
+                  Fechar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== MODAL DE RESTAURAÇÃO DOS ITENS (Fase 1 redesign 2026-05-29) ===== */}
       {restaurarOpen && (

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
+exports.sincronizarCatalogoCNBS = exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const puppeteer = require("puppeteer");
@@ -1628,6 +1628,195 @@ exports.coletarMercadoItem = functions
         ...payload,
         atualizadoEm: new Date().toISOString(),
         fonteCache: 'api-fresh'
+    });
+});
+/**
+ * Sincroniza dados de PDMs (Padrao Descritivo de Material) e CATSERs
+ * da API SERPRO CNBS no Firestore, criando indice local pra o wizard
+ * de cadastro consultar rapidamente sem latencia de API externa.
+ *
+ * POST /sincronizarCatalogoCNBS
+ * Body: { codigosCatmat: [445484, ...], codigosCatser: [3603, ...] }
+ *
+ * Salva em duas colecoes:
+ * - catalogo_pdms/{codigoPdm}: dados do PDM + caracteristicas + valores possiveis
+ * - catalogo_servicos/{codigoServico}: dados do CATSER
+ *
+ * Hidrata os items vinculados ao PDM tambem (`itensVinculados` array).
+ */
+exports.sincronizarCatalogoCNBS = functions
+    .runWith({ timeoutSeconds: 540, memory: '512MB' })
+    .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Vary', 'Origin');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Apenas POST eh suportado.' });
+        return;
+    }
+    const body = req.body || {};
+    const codigosCatmat = Array.isArray(body.codigosCatmat)
+        ? body.codigosCatmat.map((n) => Number(n)).filter((n) => n > 0)
+        : [];
+    const codigosCatser = Array.isArray(body.codigosCatser)
+        ? body.codigosCatser.map((n) => Number(n)).filter((n) => n > 0)
+        : [];
+    if (codigosCatmat.length === 0 && codigosCatser.length === 0) {
+        res.status(400).json({ error: 'Informe codigosCatmat ou codigosCatser (ao menos 1).' });
+        return;
+    }
+    const headersGov = {
+        'Accept': 'application/json',
+        'User-Agent': 'LIE-Projetos/1.0 (+https://projetos.lie.com.br)'
+    };
+    const db = admin.firestore();
+    const pdmsProcessados = new Map();
+    const servicosProcessados = [];
+    const erros = [];
+    // ETAPA 1: Pra cada CATMAT, busca o PDM correspondente
+    for (const codigoCatmat of codigosCatmat) {
+        try {
+            const urlItem = `https://cnbs.estaleiro.serpro.gov.br/cnbs-api/material/v1/recuperaDadosItemMaterialPorCodigo?codigo_item_material=${codigoCatmat}`;
+            const resp = await fetch(urlItem, { headers: headersGov });
+            if (!resp.ok) {
+                erros.push({ codigo: codigoCatmat, tipo: 'material', motivo: `HTTP ${resp.status}` });
+                continue;
+            }
+            const txt = await resp.text();
+            if (!txt || txt.trim().length === 0) {
+                erros.push({ codigo: codigoCatmat, tipo: 'material', motivo: 'Resposta vazia' });
+                continue;
+            }
+            let data;
+            try {
+                data = JSON.parse(txt);
+            }
+            catch {
+                erros.push({ codigo: codigoCatmat, tipo: 'material', motivo: 'JSON invalido' });
+                continue;
+            }
+            const codigoPdm = Number(data.codigoPdm);
+            if (!(codigoPdm > 0)) {
+                erros.push({ codigo: codigoCatmat, tipo: 'material', motivo: 'Sem codigoPdm' });
+                continue;
+            }
+            // Se este PDM ja foi processado, soh adiciona o item na lista vinculada
+            if (!pdmsProcessados.has(codigoPdm)) {
+                // Busca caracteristicas completas do PDM (todos os valores possiveis)
+                const urlCarac = `https://cnbs.estaleiro.serpro.gov.br/cnbs-api/material/v1/caracteristicaPorCodigoPdm?codigo_pdm=${codigoPdm}&todos=true`;
+                const respCarac = await fetch(urlCarac, { headers: headersGov });
+                let caracteristicas = [];
+                if (respCarac.ok) {
+                    const caracTxt = await respCarac.text();
+                    try {
+                        const caracData = JSON.parse(caracTxt);
+                        if (Array.isArray(caracData)) {
+                            caracteristicas = caracData.map((c) => ({
+                                codigo: String(c.codigoCaracteristica || ''),
+                                nome: String(c.nomeCaracteristica || ''),
+                                obrigatoria: !!c.caracteristicaObrigatoria,
+                                numero: Number(c.numeroCaracteristica) || 0,
+                                valores: (Array.isArray(c.valorCaracteristica) ? c.valorCaracteristica : [])
+                                    .filter((v) => v && v.statusValorCaracteristica !== false)
+                                    .map((v) => ({
+                                    codigo: String(v.codigoValorCaracteristica || ''),
+                                    nome: String(v.nomeValorCaracteristica || ''),
+                                    siglaUnidadeMedida: v.siglaUnidadeMedida || null,
+                                    ativo: v.statusValorCaracteristica !== false,
+                                })),
+                            }));
+                        }
+                    }
+                    catch { /* ignora caracteristicas malformadas */ }
+                }
+                pdmsProcessados.set(codigoPdm, {
+                    codigoPdm,
+                    nomePdm: String(data.nomePdm || ''),
+                    codigoClasse: Number(data.codigoClasse) || 0,
+                    caracteristicas,
+                    itensVinculados: [],
+                    sincronizadoEm: admin.firestore.FieldValue.serverTimestamp(),
+                    fonteSync: 'manual',
+                });
+            }
+            // Adiciona este item especifico aos vinculados do PDM
+            const pdm = pdmsProcessados.get(codigoPdm);
+            const atributosItem = (Array.isArray(data.buscaItemCaracteristica) ? data.buscaItemCaracteristica : [])
+                .map((c) => ({
+                codigo: String(c.codigoCaracteristica || ''),
+                codigoValor: String(c.codigoValorCaracteristica || ''),
+                nome: String(c.nomeCaracteristica || ''),
+                nomeValor: String(c.nomeValorCaracteristica || ''),
+            }));
+            pdm.itensVinculados.push({ codigoItem: codigoCatmat, atributos: atributosItem });
+        }
+        catch (e) {
+            erros.push({ codigo: codigoCatmat, tipo: 'material', motivo: e?.message || 'erro' });
+        }
+    }
+    // ETAPA 2: Pra cada CATSER, busca dados basicos do servico
+    for (const codigoCatser of codigosCatser) {
+        try {
+            const urlServ = `https://cnbs.estaleiro.serpro.gov.br/cnbs-api/servico/v1/dadosServicoPorCodigo?codigo_servico=${codigoCatser}`;
+            const resp = await fetch(urlServ, { headers: headersGov });
+            if (!resp.ok) {
+                erros.push({ codigo: codigoCatser, tipo: 'servico', motivo: `HTTP ${resp.status}` });
+                continue;
+            }
+            const txt = await resp.text();
+            if (!txt || txt.trim().length === 0) {
+                erros.push({ codigo: codigoCatser, tipo: 'servico', motivo: 'Resposta vazia' });
+                continue;
+            }
+            const data = JSON.parse(txt);
+            servicosProcessados.push({
+                codigoServico: Number(data.codigoServico),
+                codigoGrupo: Number(data.codigoGrupo) || 0,
+                nomeGrupo: String(data.nomeGrupo || ''),
+                descricao: String(data.descricaoServicoAcentuado || data.descricaoServico || ''),
+                codigoNbs: data.codigoNbs || null,
+                descricaoNbs: data.descricaoNbs || null,
+                ativo: data.statusServico !== false,
+                sincronizadoEm: admin.firestore.FieldValue.serverTimestamp(),
+                fonteSync: 'manual',
+            });
+        }
+        catch (e) {
+            erros.push({ codigo: codigoCatser, tipo: 'servico', motivo: e?.message || 'erro' });
+        }
+    }
+    // ETAPA 3: Persiste tudo em Firestore em batch
+    const batch = db.batch();
+    let writes = 0;
+    for (const pdm of pdmsProcessados.values()) {
+        batch.set(db.collection('catalogo_pdms').doc(String(pdm.codigoPdm)), pdm, { merge: true });
+        writes++;
+    }
+    for (const serv of servicosProcessados) {
+        batch.set(db.collection('catalogo_servicos').doc(String(serv.codigoServico)), serv, { merge: true });
+        writes++;
+    }
+    if (writes > 0) {
+        try {
+            await batch.commit();
+        }
+        catch (e) {
+            res.status(500).json({ error: 'Erro ao gravar batch: ' + (e?.message || 'desconhecido') });
+            return;
+        }
+    }
+    res.json({
+        pdmsAtualizados: pdmsProcessados.size,
+        servicosAtualizados: servicosProcessados.length,
+        itensVinculadosTotal: Array.from(pdmsProcessados.values()).reduce((s, p) => s + p.itensVinculados.length, 0),
+        erros,
+        timestamp: new Date().toISOString(),
     });
 });
 //# sourceMappingURL=index.js.map
