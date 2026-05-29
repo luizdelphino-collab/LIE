@@ -38,14 +38,25 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
   const [respostas, setRespostas] = useState<RespostasMap>({});
   const [salvando, setSalvando] = useState(false);
 
-  // Embalagem (step extra apos as caracteristicas)
+  // Embalagem (step extra apos as caracteristicas) — agora multi-selecao
   const [mercadoData, setMercadoData] = useState<MercadoResposta | null>(null);
   const [carregandoMercado, setCarregandoMercado] = useState(true);
-  const [embalagem, setEmbalagem] = useState<EmbalagemEscolhida | null>(null);
+  const [embalagensSelecionadas, setEmbalagensSelecionadas] = useState<EmbalagemEscolhida[]>([]);
   const [embalagemCustomizada, setEmbalagemCustomizada] = useState({
     unidade: '', siglaFornecimento: '', capacidade: 0, siglaCapacidade: 'ML',
   });
   const [usarCustomizada, setUsarCustomizada] = useState(false);
+
+  // Helper: comparacao por valor das 4 chaves
+  const sameEmb = (a: EmbalagemEscolhida, b: EmbalagemEscolhida) =>
+    a.unidadeFornecimento === b.unidadeFornecimento
+    && a.capacidade === b.capacidade
+    && a.siglaCapacidade === b.siglaCapacidade;
+  const toggleEmbalagem = (e: EmbalagemEscolhida) => {
+    setEmbalagensSelecionadas(prev =>
+      prev.some(p => sameEmb(p, e)) ? prev.filter(p => !sameEmb(p, e)) : [...prev, e]
+    );
+  };
 
   const tipoCatalogo: 'material' | 'servico' = (item.tipoCatmat || 'material') as 'material' | 'servico';
 
@@ -116,14 +127,16 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
         }
       }
 
-      // Pre-popula embalagem se item ja tem
-      if (item.fatorConversao && item.fatorConversao > 0 && item.unidadeBase) {
-        setEmbalagem({
+      // Pre-popula embalagens: prioriza embalagensAceitas[] (multi), fallback pra campos legacy (singular)
+      if (item.embalagensAceitas && item.embalagensAceitas.length > 0) {
+        setEmbalagensSelecionadas(item.embalagensAceitas);
+      } else if (item.fatorConversao && item.fatorConversao > 0 && item.unidadeBase) {
+        setEmbalagensSelecionadas([{
           unidadeFornecimento: String(item.unidade || '').toUpperCase(),
           siglaFornecimento: item.siglaUnidadeFornecimento || String(item.unidade || '').toUpperCase().slice(0, 5),
           capacidade: item.fatorConversao,
           siglaCapacidade: item.unidadeBase,
-        });
+        }]);
       }
 
       setCarregando(false);
@@ -160,11 +173,11 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
   const isStepEmbalagem = tipoCatalogo === 'material' && etapa === caracteristicasObrigatorias.length;
   const etapaAtual = caracteristicasObrigatorias[etapa];
   const respondida = isStepEmbalagem
-    ? !!embalagem
+    ? embalagensSelecionadas.length > 0
     : (etapaAtual ? !!respostas[etapaAtual.codigo] : false);
 
   const todasCaracteristicasRespondidas = caracteristicasObrigatorias.every(c => respostas[c.codigo]);
-  const podeFinalizarMaterial = todasCaracteristicasRespondidas && !!embalagem;
+  const podeFinalizarMaterial = todasCaracteristicasRespondidas && embalagensSelecionadas.length > 0;
 
   // Embalagens reais agregadas do mercado
   const embalagensMercado: EstatisticasPorUnidade[] = (mercadoData?.porUnidade || [])
@@ -201,21 +214,26 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
             siglaUnidadeMedida: r.siglaUM || null,
           };
         });
-        // Monta embalagem descricao humana legivel
-        const embDesc = embalagem
-          ? `${embalagem.unidadeFornecimento.toLowerCase()} ${embalagem.capacidade}${embalagem.siglaCapacidade.toLowerCase()}`
-          : (item.embalagemDescricao || '');
+        // Primeira embalagem vira a "primaria" pra campos legacy (compat)
+        const embPrim = embalagensSelecionadas[0];
+        const embDesc = embalagensSelecionadas.length === 1
+          ? `${embPrim.unidadeFornecimento.toLowerCase()} ${embPrim.capacidade}${embPrim.siglaCapacidade.toLowerCase()}`
+          : embalagensSelecionadas.map(e =>
+              `${e.unidadeFornecimento.toLowerCase()} ${e.capacidade}${e.siglaCapacidade.toLowerCase()}`
+            ).join(' OU ');
         await setDoc(doc(db, 'items', item.id), {
           atributosWizard: atributos,
           atributosWizardCompletoEm: serverTimestamp(),
           precisaCompletarWizard: false,
-          // Embalagem alinhada com API federal — chave da pesquisa deterministica
-          siglaUnidadeFornecimento: embalagem?.siglaFornecimento || null,
-          fatorConversao: embalagem?.capacidade || null,
-          unidadeBase: embalagem?.siglaCapacidade || null,
+          // Embalagens aceitas (array) — chave da pesquisa deterministica multi-equivalente
+          embalagensAceitas: embalagensSelecionadas,
+          // Primeira embalagem como primaria (legacy compat com pesquisa atual)
+          siglaUnidadeFornecimento: embPrim?.siglaFornecimento || null,
+          fatorConversao: embPrim?.capacidade || null,
+          unidadeBase: embPrim?.siglaCapacidade || null,
           embalagemDescricao: embDesc,
           // Atualiza unidade humana se mudou
-          unidade: embalagem ? embalagem.unidadeFornecimento.toLowerCase() : item.unidade,
+          unidade: embPrim ? embPrim.unidadeFornecimento.toLowerCase() : item.unidade,
         }, { merge: true });
       }
       onComplete();
@@ -341,8 +359,13 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
               </div>
 
               <h4 className="text-base font-bold text-gray-800">
-                Qual a unidade de fornecimento e capacidade?<span className="text-red-500 ml-1">*</span>
+                Quais embalagens são aceitas como equivalentes?<span className="text-red-500 ml-1">*</span>
               </h4>
+              <div className="text-[11px] text-gray-500 italic -mt-2">
+                Selecione uma ou várias. Marcas/embalagens diferentes mas tecnicamente equivalentes
+                (ex: COPO 200ml + GARRAFA 200ml) podem entrar juntas — a pesquisa de preço
+                considera cotações que casem com qualquer uma delas.
+              </div>
 
               {carregandoMercado && (
                 <div className="text-xs text-gray-500 flex items-center gap-2">
@@ -364,27 +387,29 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
                   <div className="space-y-2 max-h-72 overflow-y-auto">
                     {embalagensMercado.map((emb, idx) => {
                       const total = mercadoData?.totalCotacoes || 1;
-                      const pct = Math.round((emb.totalCotacoes / total) * 100);
-                      const isSel = embalagem
-                        && embalagem.unidadeFornecimento === emb.unidade
-                        && embalagem.capacidade === emb.capacidade
-                        && embalagem.siglaCapacidade === emb.siglaMedida;
+                      const pct = Math.round(((emb.totalCotacoes || 0) / total) * 100);
+                      const embObj: EmbalagemEscolhida = {
+                        unidadeFornecimento: emb.unidade,
+                        siglaFornecimento: emb.unidade.substring(0, 5).toUpperCase(),
+                        capacidade: emb.capacidade,
+                        siglaCapacidade: emb.siglaMedida,
+                      };
+                      const isSel = embalagensSelecionadas.some(s => sameEmb(s, embObj));
                       return (
                         <button
                           key={idx}
-                          onClick={() => setEmbalagem({
-                            unidadeFornecimento: emb.unidade,
-                            siglaFornecimento: emb.unidade.substring(0, 5).toUpperCase(),
-                            capacidade: emb.capacidade,
-                            siglaCapacidade: emb.siglaMedida,
-                          })}
+                          onClick={() => toggleEmbalagem(embObj)}
                           className={`w-full text-left p-3 rounded-lg border-2 transition flex items-center justify-between gap-3 ${
                             isSel ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-200' : 'bg-white border-gray-200 hover:border-emerald-300 hover:bg-emerald-50/50'
                           }`}
                         >
                           <div className="flex items-center gap-3">
-                            <div className={`w-4 h-4 rounded-full border-2 shrink-0 ${isSel ? 'border-emerald-500 bg-emerald-500' : 'border-gray-300'}`}>
-                              {isSel && <div className="w-1.5 h-1.5 bg-white rounded-full m-auto mt-0.5" />}
+                            <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${isSel ? 'border-emerald-500 bg-emerald-500' : 'border-gray-300'}`}>
+                              {isSel && (
+                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
                             </div>
                             <div>
                               <div className="font-semibold text-gray-800">
@@ -449,16 +474,24 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
                     </div>
                   </div>
                   <button
-                    onClick={() => setEmbalagem({
-                      unidadeFornecimento: embalagemCustomizada.unidade,
-                      siglaFornecimento: embalagemCustomizada.siglaFornecimento,
-                      capacidade: embalagemCustomizada.capacidade,
-                      siglaCapacidade: embalagemCustomizada.siglaCapacidade,
-                    })}
+                    onClick={() => {
+                      const nova: EmbalagemEscolhida = {
+                        unidadeFornecimento: embalagemCustomizada.unidade,
+                        siglaFornecimento: embalagemCustomizada.siglaFornecimento,
+                        capacidade: embalagemCustomizada.capacidade,
+                        siglaCapacidade: embalagemCustomizada.siglaCapacidade,
+                      };
+                      // Adiciona ao array (multi-selecao) se ainda nao presente
+                      setEmbalagensSelecionadas(prev =>
+                        prev.some(p => sameEmb(p, nova)) ? prev : [...prev, nova]
+                      );
+                      // Limpa form pra permitir adicionar outra
+                      setEmbalagemCustomizada({ unidade: '', siglaFornecimento: '', capacidade: 0, siglaCapacidade: 'ML' });
+                    }}
                     disabled={!embalagemCustomizada.unidade || embalagemCustomizada.capacidade <= 0}
                     className="w-full py-2 bg-purple-500 text-white text-sm font-bold rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Adotar esta embalagem
+                    Adicionar esta embalagem à lista
                   </button>
                   <button onClick={() => setUsarCustomizada(false)} className="text-xs text-gray-500 hover:underline">
                     Voltar pra lista do mercado
@@ -466,17 +499,42 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
                 </div>
               )}
 
-              {embalagem && (
+              {embalagensSelecionadas.length > 0 && (
                 <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 mt-2">
-                  <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Embalagem escolhida</div>
-                  <div className="text-base font-bold text-gray-800">
-                    {embalagem.unidadeFornecimento} {embalagem.capacidade > 0 ? `· ${embalagem.capacidade} ${embalagem.siglaCapacidade.toLowerCase()}` : ''}
+                  <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-2">
+                    {embalagensSelecionadas.length} embalagem(ns) escolhida(s) — equivalentes
                   </div>
-                  <div className="text-[11px] text-gray-600 mt-1">
-                    Sigla federal: <code className="bg-emerald-100 px-1 rounded">{embalagem.siglaFornecimento}</code>
-                    {' · '}
-                    Fator conversão: <strong>{embalagem.capacidade} {embalagem.siglaCapacidade}</strong>
+                  <div className="space-y-1.5">
+                    {embalagensSelecionadas.map((e, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 bg-white border border-emerald-200 rounded p-2">
+                        <div>
+                          <div className="text-sm font-bold text-gray-800">
+                            {e.unidadeFornecimento}
+                            {e.capacidade > 0 && (
+                              <span className="text-gray-600 font-normal"> · {e.capacidade} {e.siglaCapacidade.toLowerCase()}</span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-gray-500">
+                            <code className="bg-emerald-100 px-1 rounded">{e.siglaFornecimento}</code>
+                            {' · '}fator: {e.capacidade} {e.siglaCapacidade}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => toggleEmbalagem(e)}
+                          title="Remover esta embalagem"
+                          className="text-red-500 hover:bg-red-50 p-1 rounded transition"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
+                  {embalagensSelecionadas.length === 1 && (
+                    <div className="text-[10px] text-gray-500 italic mt-2">
+                      ⓘ Apenas 1 embalagem selecionada. A pesquisa de preço só vai casar cotações
+                      com exatamente esta embalagem. Adicione equivalentes se quiser ampliar a cesta.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -495,7 +553,7 @@ export default function WizardAtributosPDM({ item, onClose, onComplete }: Wizard
                   <ChevronLeft className="w-4 h-4" /> Anterior
                 </button>
                 <div className="flex-1 text-center text-xs text-gray-500">
-                  {Object.keys(respostas).length}/{caracteristicasObrigatorias.length} caract. · {embalagem ? '✓' : '○'} embalagem
+                  {Object.keys(respostas).length}/{caracteristicasObrigatorias.length} caract. · {embalagensSelecionadas.length} embalagem(ns)
                 </div>
                 {!isUltimoStep ? (
                   <button
