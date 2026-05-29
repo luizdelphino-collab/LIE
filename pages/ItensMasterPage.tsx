@@ -9,12 +9,10 @@ import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/Catalo
 import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
 import CatmatDiagnostico from '../components/CatmatDiagnostico';
 import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
-import { isRecursoHumano, padronizarItemNomenclatura, traduzirTermoComIA, GeminiQuotaError, type PadronizarItemResposta } from '../lib/apiCompras';
+import { isRecursoHumano } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
-import { pesquisarItemMasterAutomatico, type AutoPesquisaResult } from '../lib/pesquisaAutomatica';
-import { Sparkles, RefreshCcw } from 'lucide-react';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -85,218 +83,72 @@ export default function ItensMasterPage() {
   // Pesquisa de preço no Banco (etapa 5C): cesta vive no master, vale pra todos projetos
   const [pesquisaItem, setPesquisaItem] = useState<ItemMaster | null>(null);
 
-  // Pesquisa em lote (batch update) — atualiza mercado de todos os itens elegiveis
-  const [batchOpen, setBatchOpen] = useState(false);
-  const [batchRunning, setBatchRunning] = useState(false);
-  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, current: '' });
-  const [batchResults, setBatchResults] = useState<AutoPesquisaResult[]>([]);
-
-  // Padronizacao em lote — IA reescreve nome/desc/unidade pra alinhar com catalogo oficial
-  type PadronizacaoResult = {
+  // Restauracao dos itens que foram modificados pelo batch Padronizar Nomenclatura (v1.12.x)
+  // Reverte nome/descricao/unidade pros valores originais preservados em nomeOriginalLIE/etc.
+  // Marca o item com precisaCompletarWizard=true pro novo fluxo (wizard de atributos).
+  type RestauracaoResult = {
     itemId: string;
     itemNome: string;
-    status: 'ok' | 'pulado' | 'erro';
+    status: 'restaurado' | 'sem-original' | 'erro';
     reason?: string;
-    antes?: { nome: string; descricao: string; unidade: string };
-    depois?: PadronizarItemResposta;
   };
-  const [padronizarOpen, setPadronizarOpen] = useState(false);
-  const [padronizarRunning, setPadronizarRunning] = useState(false);
-  const [padronizarProgress, setPadronizarProgress] = useState({ done: 0, total: 0, current: '' });
-  const [padronizarResults, setPadronizarResults] = useState<PadronizacaoResult[]>([]);
-  const [padronizarWaitingQuota, setPadronizarWaitingQuota] = useState(0);  // segundos de espera por quota Gemini
+  const [restaurarOpen, setRestaurarOpen] = useState(false);
+  const [restaurarRunning, setRestaurarRunning] = useState(false);
+  const [restaurarResults, setRestaurarResults] = useState<RestauracaoResult[]>([]);
 
-  // Helper sleep
-  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const itensComPadronizacaoIA = items.filter(it =>
+    (it as any).nomeOriginalLIE || (it as any).descricaoOriginalLIE || (it as any).unidadeOriginalLIE
+  );
+
+  const startRestauracao = async () => {
+    if (itensComPadronizacaoIA.length === 0) return;
+    setRestaurarRunning(true);
+    setRestaurarResults([]);
+    const results: RestauracaoResult[] = [];
+    for (const it of itensComPadronizacaoIA) {
+      try {
+        const itAny = it as any;
+        const nomeOriginal = itAny.nomeOriginalLIE;
+        const descricaoOriginal = itAny.descricaoOriginalLIE;
+        const unidadeOriginal = itAny.unidadeOriginalLIE;
+        if (!nomeOriginal && !descricaoOriginal && !unidadeOriginal) {
+          results.push({ itemId: it.id, itemNome: it.nome, status: 'sem-original' });
+          setRestaurarResults([...results]);
+          continue;
+        }
+        const patch: any = {
+          // Snapshot do que IA escreveu — preserva historico, não perde dado
+          nomePadronizadoIA: it.nome,
+          descricaoPadronizadaIA: it.descricao || '',
+          unidadePadronizadaIA: it.unidade || '',
+          // Restaura originais
+          ...(nomeOriginal ? { nome: nomeOriginal } : {}),
+          ...(descricaoOriginal !== undefined ? { descricao: descricaoOriginal } : {}),
+          ...(unidadeOriginal ? { unidade: unidadeOriginal } : {}),
+          // Marca pra wizard de atributos (Fase 2 redesign)
+          precisaCompletarWizard: true,
+          restauradoEm: serverTimestamp(),
+        };
+        await setDoc(doc(db, 'items', it.id), patch, { merge: true });
+        results.push({ itemId: it.id, itemNome: nomeOriginal || it.nome, status: 'restaurado' });
+        setRestaurarResults([...results]);
+      } catch (e: any) {
+        results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: e?.message || String(e) });
+        setRestaurarResults([...results]);
+      }
+    }
+    setRestaurarRunning(false);
+    await carregarItens();
+  };
 
   const itensComCatmat = items.filter(it => it.codigoCatmat && it.codigoCatmat > 0);
 
-  /**
-   * Padronizacao em lote AGRESSIVA: processa TODOS os itens.
-   * - Item COM CATMAT: pega amostra de cotacoes + chama Gemini padronizar
-   * - Item SEM CATMAT: chama IA pra DESCOBRIR codigo, vincula, e padroniza
-   * Preserva originais em nomeOriginalLIE/descricaoOriginalLIE/unidadeOriginalLIE.
-   */
-  const startPadronizacao = async () => {
-    const alvos = items;  // TODOS os itens, nao soh com CATMAT
-    if (alvos.length === 0) return;
-    setPadronizarRunning(true);
-    setPadronizarResults([]);
-    setPadronizarProgress({ done: 0, total: alvos.length, current: '' });
-    const results: PadronizacaoResult[] = [];
-    // Plano Gemini Tier 1 (pago) = 2000 RPM. Sequencial sem throttle nao chega
-    // perto disso. Mantemos no-op pra preservar a estrutura caso precise reativar.
-    const throttle = async () => { /* no-op com plano pago */ };
-    // Em quota_exceeded, pausa 60s e retenta. Soh aborta se acontecer 2x seguidas.
-    let quotaErrosConsecutivos = 0;
-    const handleQuota = async (): Promise<boolean> => {
-      quotaErrosConsecutivos++;
-      if (quotaErrosConsecutivos >= 2) {
-        console.error('[padronizar] 2 quota exceeded seguidas — abortando batch');
-        return false;
-      }
-      console.warn('[padronizar] quota Gemini esgotada — pausando 65s');
-      for (let s = 65; s > 0; s--) {
-        setPadronizarWaitingQuota(s);
-        await sleep(1000);
-      }
-      setPadronizarWaitingQuota(0);
-      return true;
-    };
-
-    for (let i = 0; i < alvos.length; i++) {
-      const it = alvos[i];
-      setPadronizarProgress({ done: i, total: alvos.length, current: it.nome });
-      try {
-        // ETAPA 1: garantir codigoCatmat — se nao tem, IA descobre proativamente
-        let codigoCatmat = it.codigoCatmat;
-        let tipoCatmat = it.tipoCatmat;
-        let nomeCatmatOficial = it.nomeCatmatOficial || '';
-        let descricaoCatmatOficial = it.descricaoCatmatOficial || '';
-
-        if (!codigoCatmat || codigoCatmat <= 0) {
-          // BUSCA ATIVA: combina nome + descricao pra dar mais contexto
-          const termoBusca = `${it.nome}${it.descricao ? ' — ' + it.descricao : ''}`.substring(0, 200);
-          await throttle();
-          let traducao;
-          try {
-            traducao = await traduzirTermoComIA(termoBusca);
-            quotaErrosConsecutivos = 0;  // reset on success
-          } catch (qErr) {
-            if (qErr instanceof GeminiQuotaError) {
-              const podeRetentar = await handleQuota();
-              if (!podeRetentar) {
-                results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'Gemini quota esgotada (2x). Batch abortado — tente novamente em 1h.' });
-                setPadronizarResults([...results]);
-                break;
-              }
-              i--;  // reprocessa este item
-              continue;
-            }
-            throw qErr;
-          }
-          const top = traducao?.candidatos?.[0];
-          if (!top) {
-            results.push({
-              itemId: it.id,
-              itemNome: it.nome,
-              status: 'erro',
-              reason: 'IA nao encontrou CATMAT/CATSER compativel a partir do nome+descricao'
-            });
-            setPadronizarResults([...results]);
-            continue;
-          }
-          codigoCatmat = top.codigo;
-          tipoCatmat = top.tipo;
-          nomeCatmatOficial = top.nome;
-          descricaoCatmatOficial = top.descricao;
-          // Salva o vinculo imediatamente
-          await setDoc(doc(db, 'items', it.id), {
-            codigoCatmat,
-            tipoCatmat,
-            nomeCatmatOficial,
-            descricaoCatmatOficial,
-            vinculadoPorIA: true,
-            vinculadoEm: serverTimestamp(),
-          }, { merge: true });
-        }
-
-        // ETAPA 2: pega amostra de cotacoes do mercado (se houver)
-        let mercadoItem = mercado[codigoCatmat];
-        if (!mercadoItem) {
-          mercadoItem = await coletarMercadoItem(codigoCatmat, tipoCatmat || 'material');
-          if (mercadoItem) setMercado(prev => ({ ...prev, [codigoCatmat!]: mercadoItem! }));
-        }
-        const amostraCotacoes = (mercadoItem?.cotacoes || []).slice(0, 8).map(c => ({
-          descricaoItem: c.descricaoItem,
-          siglaUnidadeFornecimento: c.siglaUnidadeFornecimento,
-          nomeUnidadeFornecimento: c.unidadeFornecimento,
-          capacidadeUnidadeFornecimento: c.capacidadeUnidadeFornecimento,
-          siglaUnidadeMedida: c.siglaUnidadeMedida,
-        }));
-
-        // ETAPA 3: padronizar nome/desc/unidade/embalagem
-        await throttle();
-        let resp;
-        try {
-          resp = await padronizarItemNomenclatura({
-            itemNome: it.nome,
-            itemDescricao: it.descricao || '',
-            itemUnidade: String(it.unidade || ''),
-            codigoCatmat,
-            tipoCatmat: (tipoCatmat || 'material') as 'material' | 'servico',
-            nomeCatmatOficial,
-            descricaoCatmatOficial,
-            amostraCotacoes,
-          });
-          quotaErrosConsecutivos = 0;
-        } catch (qErr) {
-          if (qErr instanceof GeminiQuotaError) {
-            const podeRetentar = await handleQuota();
-            if (!podeRetentar) {
-              results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'Gemini quota esgotada (2x). Batch abortado — tente novamente em 1h.' });
-              setPadronizarResults([...results]);
-              break;
-            }
-            i--;
-            continue;
-          }
-          throw qErr;
-        }
-        if (!resp) {
-          results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: 'IA nao retornou resposta valida na padronizacao' });
-          setPadronizarResults([...results]);
-          continue;
-        }
-        await setDoc(doc(db, 'items', it.id), {
-          nomeOriginalLIE: (it as any).nomeOriginalLIE || it.nome,
-          descricaoOriginalLIE: (it as any).descricaoOriginalLIE || it.descricao || '',
-          unidadeOriginalLIE: (it as any).unidadeOriginalLIE || it.unidade || '',
-          nome: resp.nomeAlinhado,
-          descricao: resp.descricaoAlinhada,
-          unidade: resp.unidadeAlinhada || it.unidade,
-          embalagemDescricao: resp.embalagemDescricao || it.embalagemDescricao || '',
-          fatorConversao: resp.fatorConversao ?? it.fatorConversao ?? null,
-          unidadeBase: resp.unidadeBase ?? it.unidadeBase ?? null,
-          padronizadoEm: serverTimestamp(),
-          padronizadoModelo: resp.modelo,
-        }, { merge: true });
-        results.push({
-          itemId: it.id,
-          itemNome: it.nome,
-          status: 'ok',
-          antes: { nome: it.nome, descricao: it.descricao || '', unidade: String(it.unidade || '') },
-          depois: resp,
-        });
-        setPadronizarResults([...results]);
-      } catch (e: any) {
-        results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: e?.message || String(e) });
-        setPadronizarResults([...results]);
-      }
-    }
-    setPadronizarProgress({ done: alvos.length, total: alvos.length, current: '' });
-    setPadronizarRunning(false);
-    await carregarItens();
-  };
-
-  const startBatchPesquisa = async () => {
-    const alvos = itensComCatmat;
-    if (alvos.length === 0) return;
-    setBatchRunning(true);
-    setBatchResults([]);
-    setBatchProgress({ done: 0, total: alvos.length, current: '' });
-    const results: AutoPesquisaResult[] = [];
-    for (let i = 0; i < alvos.length; i++) {
-      const it = alvos[i];
-      setBatchProgress({ done: i, total: alvos.length, current: it.nome });
-      const res = await pesquisarItemMasterAutomatico(it);
-      results.push(res);
-      setBatchResults([...results]);
-    }
-    setBatchProgress({ done: alvos.length, total: alvos.length, current: '' });
-    setBatchRunning(false);
-    await carregarItens();
-  };
+  // REMOVIDO em v1.13.0.0 (Fase 1 redesign 2026-05-29):
+  // startPadronizacao + startBatchPesquisa estavam causando o problema de agrupar
+  // itens diferentes sob CATSER generico. Substituidos pelo fluxo de wizard de
+  // atributos (Fase 2-4) e pesquisa deterministica (Fase 5).
+  // Os campos nomeOriginalLIE/descricaoOriginalLIE/unidadeOriginalLIE viram
+  // fonte da restauracao via startRestauracao acima.
 
   const buscarEmbalagensOficiais = async () => {
     if (!formData.codigoCatmat) return;
@@ -883,19 +735,6 @@ export default function ItensMasterPage() {
             </span>
           </button>
 
-          {/* Padronizar Nomenclatura — IA busca CATMAT ativamente + reescreve nome/desc/unidade */}
-          <button
-            onClick={() => setPadronizarOpen(true)}
-            disabled={items.length === 0}
-            title="IA processa TODOS os itens: busca CATMAT/CATSER ativamente pra quem nao tem vinculo, depois reescreve nome/descricao/unidade pra alinhar com catalogo oficial. Preserva originais em nomeOriginalLIE."
-            className="group flex items-center bg-purple-50 border border-purple-300 text-purple-700 rounded-lg p-2 transition-all duration-300 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-          >
-            <Wand2 className="w-5 h-5 shrink-0 text-purple-600" />
-            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
-              Padronizar Nomenclatura (IA)
-            </span>
-          </button>
-
           {/* Preview rapido Mercado Gov — apenas leitura, cache 24h */}
           <button
             onClick={carregarMercadoPreview}
@@ -913,20 +752,19 @@ export default function ItensMasterPage() {
             </span>
           </button>
 
-          {/* Atualizar mercado em lote — pesquisa de preco em todos os itens com CATMAT */}
-          <button
-            onClick={() => setBatchOpen(true)}
-            disabled={itensComCatmat.length === 0}
-            title={itensComCatmat.length === 0
-              ? 'Nenhum item com CATMAT vinculado'
-              : `Re-pesquisar preco publico em ${itensComCatmat.length} item(ns) — arquiva certidoes e atualiza referencias salvas pra todos os projetos`}
-            className="group flex items-center bg-emerald-50 border border-emerald-300 text-emerald-700 rounded-lg p-2 transition-all duration-300 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-          >
-            <RefreshCcw className="w-5 h-5 shrink-0 text-emerald-600" />
-            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
-              Atualizar Mercado em Lote ({itensComCatmat.length})
-            </span>
-          </button>
+          {/* Restaurar dados originais — reverte itens que foram modificados pelo batch Padronizar Nomenclatura (v1.12.x) */}
+          {itensComPadronizacaoIA.length > 0 && (
+            <button
+              onClick={() => setRestaurarOpen(true)}
+              title={`${itensComPadronizacaoIA.length} item(ns) com nome/descrição/unidade sobrescritos pela IA. Restaurar valores originais preservados em nomeOriginalLIE.`}
+              className="group flex items-center bg-amber-50 border border-amber-300 text-amber-700 rounded-lg p-2 transition-all duration-300 hover:bg-amber-100 shadow-sm"
+            >
+              <ArrowLeft className="w-5 h-5 shrink-0 text-amber-600" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+                Restaurar Originais ({itensComPadronizacaoIA.length})
+              </span>
+            </button>
+          )}
 
           {/* Limpar Duplicatas */}
           <button
@@ -1316,6 +1154,14 @@ export default function ItensMasterPage() {
                         ⚠ Sem CATMAT
                       </span>
                     )}
+                    {(it as any).precisaCompletarWizard && (
+                      <span
+                        title="Item restaurado do batch IA. Precisa completar atributos no novo wizard (em construção — Fase 2 do redesign 2026-05-29)."
+                        className="text-[9px] font-bold px-1.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded shrink-0 uppercase tracking-wider"
+                      >
+                        🔧 Completar
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => openEdit(it)}
@@ -1563,204 +1409,31 @@ export default function ItensMasterPage() {
         onAtualizado={carregarItens}
       />
 
-      {/* ===== MODAL DE PADRONIZACAO DE NOMENCLATURA (IA) ===== */}
-      {padronizarOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[88vh]">
-            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-500 rounded-lg">
-                  <Wand2 className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold">Padronizar Nomenclatura (IA)</h3>
-                  <p className="text-xs text-gray-300">
-                    {padronizarRunning
-                      ? `Processando ${padronizarProgress.done + 1} de ${padronizarProgress.total} — ${padronizarProgress.current}`
-                      : padronizarResults.length > 0
-                        ? `Concluido: ${padronizarResults.filter(r => r.status === 'ok').length} alinhado(s), ${padronizarResults.filter(r => r.status === 'erro').length} erro(s)`
-                        : `${items.length} item(ns) serao processados (busca ativa CATMAT + alinhamento de nomenclatura)`
-                    }
-                  </p>
-                </div>
-              </div>
-              {!padronizarRunning && (
-                <button
-                  onClick={() => { setPadronizarOpen(false); setPadronizarResults([]); }}
-                  className="hover:bg-white/10 p-2 rounded-full transition"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              )}
-            </header>
 
-            <div className="p-6 overflow-y-auto flex-1 space-y-4">
-              {padronizarRunning && (
-                <div className="space-y-2">
-                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-purple-500 h-full transition-all duration-300"
-                      style={{ width: `${(padronizarProgress.done / Math.max(padronizarProgress.total, 1)) * 100}%` }}
-                    />
-                  </div>
-                  {padronizarWaitingQuota > 0 ? (
-                    <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="flex-1">
-                        <p className="text-xs font-bold text-amber-800">Cota Gemini esgotada (15 chamadas/minuto)</p>
-                        <p className="text-xs text-amber-700 mt-0.5">
-                          Pausando <strong>{padronizarWaitingQuota}s</strong> e retomando automaticamente…
-                          Os itens ja processados foram salvos.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-gray-500 flex items-center gap-2">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Consultando Gemini 2.5 Flash (plano pago — 2000 RPM)…
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {!padronizarRunning && padronizarResults.length === 0 && (
-                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
-                  <p>
-                    A IA processa <strong>todos os {items.length} itens</strong> em 2 etapas:
-                  </p>
-                  <ol className="text-xs text-gray-600 space-y-1 ml-4 list-decimal">
-                    <li><strong>Busca ativa:</strong> pra itens SEM CATMAT/CATSER vinculado, IA descobre o codigo oficial a partir do nome + descricao (com validacao anti-alucinacao em 3 camadas).</li>
-                    <li><strong>Padronizacao:</strong> reescreve nome, descricao, unidade e embalagem pra alinhar com o catalogo CATMAT/CATSER oficial e as cotacoes reais do mercado.</li>
-                  </ol>
-                  <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-lg p-2">
-                    <strong>⏱ Tempo estimado:</strong> ~5-15s por chamada Gemini (resposta da IA).
-                    Itens com CATMAT fazem 1 chamada, sem CATMAT fazem 2 (busca ativa + padronizacao).
-                    <strong> Estimativa total: ~{Math.ceil(items.length * 8 / 60)} a {Math.ceil(items.length * 18 / 60)} minutos</strong> pros {items.length} itens.
-                  </p>
-                  <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg p-2">
-                    <strong>Por que faz diferenca:</strong> "AGUA COPOS 200ML" + unidade "unidade"
-                    vira "AGUA MINERAL NATURAL" + unidade "copo" + capacidade 200ml — o filtro de
-                    embalagem da pesquisa de preco passa a funcionar corretamente.
-                  </p>
-                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
-                    <strong>⚠ Reescrita agressiva:</strong> nome/descricao originais sao preservados
-                    em <code>nomeOriginalLIE</code> e <code>descricaoOriginalLIE</code> pra auditoria/rollback,
-                    mas os campos exibidos na UI sao substituidos.
-                  </p>
-                  <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-2">
-                    <strong>Tempo estimado:</strong> 5-15 segundos por item (chamada Gemini + amostra de cotacoes).
-                  </p>
-                </div>
-              )}
-
-              {padronizarResults.length > 0 && (
-                <div className="space-y-2 max-h-[55vh] overflow-y-auto">
-                  {padronizarResults.map((r, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded-lg border text-xs ${
-                        r.status === 'ok' ? 'bg-green-50 border-green-200' :
-                        r.status === 'pulado' ? 'bg-gray-50 border-gray-200' :
-                        'bg-red-50 border-red-200'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        {r.status === 'ok' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
-                        {r.status === 'erro' && <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
-                        <div className="flex-1 min-w-0">
-                          <div className="font-bold text-gray-800">{r.itemNome}</div>
-                          {r.status === 'erro' && (
-                            <div className="text-red-700 mt-0.5">{r.reason}</div>
-                          )}
-                          {r.status === 'ok' && r.antes && r.depois && (
-                            <div className="mt-2 space-y-1.5">
-                              <div className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-0.5">
-                                <span className="text-gray-500 font-semibold">Nome:</span>
-                                <span className="text-gray-700"><span className="line-through text-gray-400">{r.antes.nome}</span> → <strong className="text-purple-700">{r.depois.nomeAlinhado}</strong></span>
-                                <span className="text-gray-500 font-semibold">Unidade:</span>
-                                <span className="text-gray-700"><span className="line-through text-gray-400">{r.antes.unidade}</span> → <strong className="text-purple-700">{r.depois.unidadeAlinhada}</strong></span>
-                                {r.depois.embalagemDescricao && (
-                                  <>
-                                    <span className="text-gray-500 font-semibold">Embalagem:</span>
-                                    <span className="text-purple-700"><strong>{r.depois.embalagemDescricao}</strong></span>
-                                  </>
-                                )}
-                              </div>
-                              {r.depois.justificativa && (
-                                <div className="text-[10px] text-gray-500 italic mt-1 leading-tight">
-                                  {r.depois.justificativa}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
-              {!padronizarRunning && padronizarResults.length === 0 && (
-                <>
-                  <button
-                    onClick={() => setPadronizarOpen(false)}
-                    className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={startPadronizacao}
-                    className="flex-1 py-2 bg-purple-500 text-white font-bold rounded-lg hover:bg-purple-600 transition flex items-center justify-center gap-2"
-                  >
-                    <Wand2 className="w-4 h-4" />
-                    Padronizar {items.length} item(ns)
-                  </button>
-                </>
-              )}
-              {padronizarRunning && (
-                <button disabled className="flex-1 py-2 bg-gray-300 text-gray-500 font-bold rounded-lg cursor-not-allowed">
-                  Processando…
-                </button>
-              )}
-              {!padronizarRunning && padronizarResults.length > 0 && (
-                <button
-                  onClick={() => { setPadronizarOpen(false); setPadronizarResults([]); }}
-                  className="flex-1 py-2 bg-lie-ink text-white font-bold rounded-lg hover:bg-black transition"
-                >
-                  Fechar
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== MODAL DE PESQUISA DE PRECO EM LOTE (Banco) ===== */}
-      {batchOpen && (
+      {/* ===== MODAL DE RESTAURAÇÃO DOS ITENS (Fase 1 redesign 2026-05-29) ===== */}
+      {restaurarOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh]">
             <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-emerald-500 rounded-lg">
-                  <Sparkles className="w-5 h-5 text-white" />
+                <div className="p-2 bg-amber-500 rounded-lg">
+                  <ArrowLeft className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="font-bold">Atualizar Mercado em Lote</h3>
+                  <h3 className="font-bold">Restaurar Dados Originais</h3>
                   <p className="text-xs text-gray-300">
-                    {batchRunning
-                      ? `Processando ${batchProgress.done + 1} de ${batchProgress.total} — ${batchProgress.current}`
-                      : batchResults.length > 0
-                        ? `Concluido: ${batchResults.length} item(ns) processado(s)`
-                        : `${itensComCatmat.length} item(ns) com CATMAT serao re-pesquisados (IN 65/2021)`
+                    {restaurarRunning
+                      ? `Restaurando ${restaurarResults.length + 1} de ${itensComPadronizacaoIA.length}…`
+                      : restaurarResults.length > 0
+                        ? `Concluído: ${restaurarResults.filter(r => r.status === 'restaurado').length} restaurado(s), ${restaurarResults.filter(r => r.status === 'erro').length} erro(s)`
+                        : `${itensComPadronizacaoIA.length} item(ns) terão nome/descrição/unidade restaurados`
                     }
                   </p>
                 </div>
               </div>
-              {!batchRunning && (
+              {!restaurarRunning && (
                 <button
-                  onClick={() => { setBatchOpen(false); setBatchResults([]); }}
+                  onClick={() => { setRestaurarOpen(false); setRestaurarResults([]); }}
                   className="hover:bg-white/10 p-2 rounded-full transition"
                 >
                   <X className="w-5 h-5" />
@@ -1769,84 +1442,45 @@ export default function ItensMasterPage() {
             </header>
 
             <div className="p-6 overflow-y-auto flex-1 space-y-4">
-              {batchRunning && (
-                <div className="space-y-2">
-                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-emerald-500 h-full transition-all duration-300"
-                      style={{ width: `${(batchProgress.done / Math.max(batchProgress.total, 1)) * 100}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Consultando Compras.gov.br/PNCP e arquivando comprovantes…
+              {!restaurarRunning && restaurarResults.length === 0 && (
+                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                  <p>
+                    Os <strong>{itensComPadronizacaoIA.length} itens</strong> abaixo tiveram
+                    nome/descrição/unidade reescritos pela IA na v1.12.0.0 (Padronizar Nomenclatura).
+                    Os valores originais foram preservados em campos auxiliares e serão
+                    restaurados agora.
+                  </p>
+                  <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
+                    <strong>O que IA escreveu não será perdido:</strong> fica preservado em
+                    <code className="text-xs bg-emerald-100 px-1 mx-1 rounded">nomePadronizadoIA</code>,
+                    <code className="text-xs bg-emerald-100 px-1 mx-1 rounded">descricaoPadronizadaIA</code>,
+                    <code className="text-xs bg-emerald-100 px-1 mx-1 rounded">unidadePadronizadaIA</code>.
+                    Pode consultar a qualquer momento.
+                  </p>
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
+                    Cada item restaurado ganha marca <code className="text-xs bg-amber-100 px-1 mx-1 rounded">precisaCompletarWizard</code>
+                    pra entrar no novo fluxo do wizard de atributos (Fase 2-4 do redesign).
                   </p>
                 </div>
               )}
 
-              {!batchRunning && batchResults.length === 0 && (() => {
-                const semEmb = itensComCatmat.filter(it => !it.fatorConversao || !it.unidadeBase).length;
-                return (
-                  <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
-                    <p>
-                      Pra cada item do Banco com CATMAT/CATSER vinculado, o sistema vai consultar
-                      a API governamental (Compras.gov.br + PNCP) e atualizar a cesta de
-                      referencias salvas no master. <strong>A cesta vale pra todos os projetos</strong>
-                      {' '}que usam esse item.
-                    </p>
-                    <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
-                      <strong>Filtro de embalagem ativo (Lei 14.133 art. 23 §1o, IN 65/2021):</strong>{' '}
-                      cotacoes cuja capacidade da embalagem diverge mais de ±15% da cadastrada serao
-                      <strong> rejeitadas automaticamente</strong>. Protege a instituicao em auditoria
-                      contra comparar copo 200ml com garrafa 1.5L.
-                    </p>
-                    {semEmb > 0 && (
-                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
-                        <strong>⚠ Atencao:</strong> {semEmb} item(ns) com CATMAT mas SEM embalagem cadastrada
-                        (fator de conversao + unidade base). Esses NAO serao filtrados — risco auditorial.
-                        Edite o item e use "Adotar embalagem oficial" antes de pesquisar.
-                      </p>
-                    )}
-                    <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-2">
-                      <strong>Tempo estimado:</strong> 10-60 segundos por item dependendo de quantas
-                      cotacoes a API retorna.
-                    </p>
-                  </div>
-                );
-              })()}
-
-              {batchResults.length > 0 && (
-                <div className="space-y-2 max-h-[40vh] overflow-y-auto">
-                  {batchResults.map((r, idx) => (
+              {restaurarResults.length > 0 && (
+                <div className="space-y-2 max-h-[55vh] overflow-y-auto">
+                  {restaurarResults.map((r, idx) => (
                     <div
                       key={idx}
                       className={`flex items-start gap-2 p-2.5 rounded-lg border text-xs ${
-                        r.status === 'ok' ? 'bg-green-50 border-green-200' :
-                        r.status === 'sem-catmat-real' ? 'bg-orange-50 border-orange-200' :
-                        r.status === 'sem-match' ? 'bg-gray-50 border-gray-200' :
-                        r.status === 'sem-refs' ? 'bg-amber-50 border-amber-200' :
+                        r.status === 'restaurado' ? 'bg-green-50 border-green-200' :
+                        r.status === 'sem-original' ? 'bg-gray-50 border-gray-200' :
                         'bg-red-50 border-red-200'
                       }`}
                     >
-                      {r.status === 'ok' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
-                      {(r.status === 'sem-catmat-real' || r.status === 'sem-match' || r.status === 'sem-refs') && <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />}
+                      {r.status === 'restaurado' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
+                      {r.status === 'sem-original' && <AlertTriangle className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />}
                       {r.status === 'erro' && <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
                       <div className="flex-1">
                         <div className="font-bold text-gray-800">{r.itemNome}</div>
-                        <div className="text-gray-600 mt-0.5">
-                          {r.status === 'ok' && `${r.refsCount} referencia(s) homologada(s).`}
-                          {r.status !== 'ok' && r.reason}
-                        </div>
-                        {((r.rejeitadasEmbalagem || 0) + (r.rejeitadasSemDados || 0) + (r.rejeitadasFaixa || 0)) > 0 && (
-                          <div className="text-[10px] text-gray-500 mt-1 leading-tight">
-                            <span className="font-semibold">Filtros aplicados:</span>{' '}
-                            {(r.rejeitadasEmbalagem || 0) > 0 && <span title="Capacidade da embalagem fora de ±15% da cadastrada — protecao auditorial (Lei 14.133 art. 23)">{r.rejeitadasEmbalagem} embalagem ≠</span>}
-                            {(r.rejeitadasEmbalagem || 0) > 0 && (r.rejeitadasSemDados || 0) > 0 && ' · '}
-                            {(r.rejeitadasSemDados || 0) > 0 && <span title="API governamental nao retornou capacidade/sigla — sem como verificar equivalencia">{r.rejeitadasSemDados} sem dados</span>}
-                            {((r.rejeitadasEmbalagem || 0) > 0 || (r.rejeitadasSemDados || 0) > 0) && (r.rejeitadasFaixa || 0) > 0 && ' · '}
-                            {(r.rejeitadasFaixa || 0) > 0 && <span title="Valor abaixo do estimado — cesta soh aceita >= valor cadastrado">{r.rejeitadasFaixa} fora da faixa</span>}
-                          </div>
-                        )}
+                        {r.reason && <div className="text-gray-600 mt-0.5">{r.reason}</div>}
                       </div>
                     </div>
                   ))}
@@ -1855,31 +1489,31 @@ export default function ItensMasterPage() {
             </div>
 
             <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
-              {!batchRunning && batchResults.length === 0 && (
+              {!restaurarRunning && restaurarResults.length === 0 && (
                 <>
                   <button
-                    onClick={() => setBatchOpen(false)}
+                    onClick={() => setRestaurarOpen(false)}
                     className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
                   >
                     Cancelar
                   </button>
                   <button
-                    onClick={startBatchPesquisa}
-                    className="flex-1 py-2 bg-emerald-500 text-white font-bold rounded-lg hover:bg-emerald-600 transition flex items-center justify-center gap-2"
+                    onClick={startRestauracao}
+                    className="flex-1 py-2 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 transition flex items-center justify-center gap-2"
                   >
-                    <Sparkles className="w-4 h-4" />
-                    Pesquisar {itensComCatmat.length} item(ns)
+                    <ArrowLeft className="w-4 h-4" />
+                    Restaurar {itensComPadronizacaoIA.length} item(ns)
                   </button>
                 </>
               )}
-              {batchRunning && (
+              {restaurarRunning && (
                 <button disabled className="flex-1 py-2 bg-gray-300 text-gray-500 font-bold rounded-lg cursor-not-allowed">
-                  Processando…
+                  Restaurando…
                 </button>
               )}
-              {!batchRunning && batchResults.length > 0 && (
+              {!restaurarRunning && restaurarResults.length > 0 && (
                 <button
-                  onClick={() => { setBatchOpen(false); setBatchResults([]); }}
+                  onClick={() => { setRestaurarOpen(false); setRestaurarResults([]); }}
                   className="flex-1 py-2 bg-lie-ink text-white font-bold rounded-lg hover:bg-black transition"
                 >
                   Fechar

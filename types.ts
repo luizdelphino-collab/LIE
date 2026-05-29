@@ -343,6 +343,21 @@ export interface ItemMaster {
   tokenPesquisa?: string;
   ultimoCodigoVinculado?: number;
   pesquisaAtualizadaEm?: Timestamp;
+  // Snapshot pre-IA (preservado pra rollback do batch Padronizar Nomenclatura v1.12.x)
+  nomeOriginalLIE?: string;
+  descricaoOriginalLIE?: string;
+  unidadeOriginalLIE?: string;
+  // Snapshot pos-IA (preservado quando restauramos os originais — historico)
+  nomePadronizadoIA?: string;
+  descricaoPadronizadaIA?: string;
+  unidadePadronizadaIA?: string;
+  padronizadoEm?: Timestamp;
+  padronizadoModelo?: string;
+  vinculadoPorIA?: boolean;
+  vinculadoEm?: Timestamp;
+  // Sinal de que o item precisa passar pelo wizard de atributos (redesign 2026-05-29)
+  precisaCompletarWizard?: boolean;
+  restauradoEm?: Timestamp;
 }
 
 export interface PrecoReferencia {
