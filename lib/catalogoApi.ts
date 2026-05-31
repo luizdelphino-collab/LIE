@@ -354,6 +354,10 @@ const DICIONARIO_SINONIMOS_LIE: Record<string, string[]> = {
   // ----- Estruturas evento -----
   'box truss': ['locação estrutura box truss alumínio', 'treliça alumínio evento'],
   'palco': ['locação palco praticável', 'estrutura modular evento'],
+  'tenda': ['locação cobertura desmontável', 'locação tenda', 'barraca', 'locação estrutura modular evento'],
+  'barraca': ['locação cobertura desmontável', 'cobertura passarela toldo barraca'],
+  'toldo': ['locação cobertura desmontável', 'cobertura passarela toldo barraca'],
+  'tendas': ['locação cobertura desmontável', 'locação tenda', 'barraca'],
   'painel led': ['locação painel led', 'telão LED alta definição'],
   'som': ['locação sistema som evento', 'sonorização evento'],
   'polionda': ['painel polipropileno ondulado', 'placa comunicação visual'],
@@ -406,37 +410,50 @@ export function extrairPalavrasChave(termo: string): string[] {
 }
 
 /**
- * Pontua o quão relevante um nome de PDM/serviço é pro termo buscado.
- * Conta acerto de palavra-chave (inteira ou prefixo, p/ singular↔plural) e
- * soma um bônus de similaridade global. Retorna 0 quando NENHUMA palavra-chave
- * bate — assim conseguimos filtrar lixo (ex.: "cartucho toner" pra "tenda").
+ * Pontua o quão relevante um nome de PDM/serviço é pro termo buscado, comparando
+ * contra TODAS as variantes (termo saneado + sinônimos do dicionário). Pontuar
+ * contra os sinônimos é essencial: um resultado trazido por "locação tenda" tem
+ * nome "Locação cobertura desmontável" e não contém a palavra "tenda" — sem isso
+ * o filtro o descartaria por engano.
+ *
+ * Pra cada variante conta quantas das suas palavras-chave aparecem no nome
+ * (inteira ou por prefixo, cobrindo singular↔plural), pondera pela cobertura e
+ * soma um bônus de similaridade. Fica com o melhor score entre as variantes.
+ * Retorna 0 quando NENHUMA variante casa nada — assim filtramos lixo
+ * (ex.: "cirurgia de tendão" pra "tenda").
  */
-function pontuarRelevancia(nome: string, keywords: string[], frase: string): number {
+function pontuarRelevancia(nome: string, variantes: string[]): number {
   const n = normalizar(nome);
   if (!n) return 0;
   const palavras = n.split(' ').filter(Boolean);
 
-  let score = 0;
-  let acertos = 0;
-  for (const kw of keywords) {
-    let melhor = 0;
-    for (const w of palavras) {
-      if (w === kw) {
-        melhor = Math.max(melhor, Math.min(kw.length, 8) + 3);
-      } else if (kw.length >= 4 && (w.startsWith(kw) || kw.startsWith(w))) {
-        // prefixo cobre singular/plural e flexões: "tendas"↔"tenda"
-        melhor = Math.max(melhor, Math.min(Math.min(kw.length, w.length), 8) + 1);
+  let melhorScore = 0;
+  for (const variante of variantes) {
+    const kws = extrairPalavrasChave(variante);
+    if (kws.length === 0) continue;
+
+    let acertos = 0;
+    let pontos = 0;
+    for (const kw of kws) {
+      let m = 0;
+      for (const w of palavras) {
+        if (w === kw) {
+          m = Math.max(m, 3);
+        } else if (kw.length >= 4 && w.length >= 4 && (w.startsWith(kw) || kw.startsWith(w))) {
+          // prefixo só entre palavras substanciais (tenda↔tendas), nunca com "e"/"de"
+          m = Math.max(m, 2);
+        }
       }
+      if (m > 0) acertos++;
+      pontos += m;
     }
-    if (melhor > 0) acertos++;
-    score += melhor;
+    if (acertos === 0) continue; // essa variante não casou nada
+
+    const cobertura = acertos / kws.length;        // fração das palavras da variante achadas
+    const score = cobertura * 5 + pontos + similaridade(variante, nome) * 3;
+    melhorScore = Math.max(melhorScore, score);
   }
-
-  // Sem nenhum acerto de palavra-chave → irrelevante (some da lista).
-  if (keywords.length > 0 && acertos === 0) return 0;
-
-  score += similaridade(frase, nome) * 3;
-  return score;
+  return melhorScore;
 }
 
 /**
@@ -520,16 +537,12 @@ export async function buscarPdmsMultiTermo(termoOriginal: string): Promise<PdmMa
     }
   }
 
-  // Ranqueia por relevância real ao termo (não pela variante que trouxe).
-  // Quando há palavras-chave, descarta o que não casa nenhuma (ex.: toner pra "tenda").
-  const keywords = extrairPalavrasChave(termoOriginal);
-  const frase = keywords.join(' ').trim() || termoOriginal.trim();
-  const comRelev = Array.from(mapa.values()).map(pdm => ({
-    pdm,
-    relev: pontuarRelevancia(pdm.nomePdm || '', keywords, frase),
-  }));
-  const temMatch = keywords.length > 0 && comRelev.some(x => x.relev > 0);
-  return (temMatch ? comRelev.filter(x => x.relev > 0) : comRelev)
+  // Ranqueia por relevância real (contra termo saneado + sinônimos) e descarta
+  // o que não casa nenhuma palavra-chave. Lista vazia → UI sugere outra busca/IA.
+  const comRelev = Array.from(mapa.values())
+    .map(pdm => ({ pdm, relev: pontuarRelevancia(pdm.nomePdm || '', variantes) }))
+    .filter(x => x.relev > 0);
+  return comRelev
     .sort((a, b) => (b.relev - a.relev) || (b.pdm.scoreRelevancia - a.pdm.scoreRelevancia))
     .slice(0, 60)
     .map(x => x.pdm);
@@ -557,15 +570,12 @@ export async function buscarServicosMultiTermo(termoOriginal: string): Promise<S
     }
   }
 
-  // Ranqueia por relevância real ao termo e descarta o que não casa nenhuma palavra-chave.
-  const keywords = extrairPalavrasChave(termoOriginal);
-  const frase = keywords.join(' ').trim() || termoOriginal.trim();
-  const comRelev = Array.from(mapa.values()).map(s => ({
-    s,
-    relev: pontuarRelevancia(s.descricaoServicoAcentuado || s.descricaoServico || '', keywords, frase),
-  }));
-  const temMatch = keywords.length > 0 && comRelev.some(x => x.relev > 0);
-  return (temMatch ? comRelev.filter(x => x.relev > 0) : comRelev)
+  // Ranqueia por relevância real (contra termo saneado + sinônimos) e descarta
+  // o que não casa nenhuma palavra-chave. Lista vazia → UI sugere outra busca/IA.
+  const comRelev = Array.from(mapa.values())
+    .map(s => ({ s, relev: pontuarRelevancia(s.descricaoServicoAcentuado || s.descricaoServico || '', variantes) }))
+    .filter(x => x.relev > 0);
+  return comRelev
     .sort((a, b) => (b.relev - a.relev) || (b.s.scoreRelevancia - a.s.scoreRelevancia))
     .slice(0, 60)
     .map(x => x.s);
