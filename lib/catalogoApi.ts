@@ -379,33 +379,101 @@ const DICIONARIO_SINONIMOS_LIE: Record<string, string[]> = {
   'inscrições': ['serviço plataforma inscrição online', 'sistema cadastro online'],
 };
 
+// Stopwords genéricas que não ajudam a busca no catálogo.
+const STOPWORDS_BUSCA = new Set([
+  'para', 'pelo', 'pela', 'com', 'sem', 'dos', 'das', 'que', 'por',
+  'uma', 'uns', 'umas', 'tipo', 'modelo', 'cada',
+]);
+
+/**
+ * Extrai as palavras-chave significativas de um termo, descartando o ruído
+ * de dimensão/medida que polui a busca no catálogo SERPRO.
+ * Ex.: "TENDAS 3m x 3m" → ["tendas"]  (descarta "3m", "x", "3m")
+ *      "PAPEL TOALHA 200 folhas" → ["papel", "toalha", "folhas"]
+ * Regra: ≥3 letras, sem dígitos, fora da lista de stopwords.
+ */
+export function extrairPalavrasChave(termo: string): string[] {
+  const limpo = normalizar(termo);
+  if (!limpo) return [];
+  const out: string[] = [];
+  for (const p of limpo.split(' ')) {
+    if (p.length < 3) continue;          // "x", "3m", "de" etc.
+    if (/\d/.test(p)) continue;          // tokens com dígito = medida/dimensão
+    if (STOPWORDS_BUSCA.has(p)) continue;
+    if (!out.includes(p)) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Pontua o quão relevante um nome de PDM/serviço é pro termo buscado.
+ * Conta acerto de palavra-chave (inteira ou prefixo, p/ singular↔plural) e
+ * soma um bônus de similaridade global. Retorna 0 quando NENHUMA palavra-chave
+ * bate — assim conseguimos filtrar lixo (ex.: "cartucho toner" pra "tenda").
+ */
+function pontuarRelevancia(nome: string, keywords: string[], frase: string): number {
+  const n = normalizar(nome);
+  if (!n) return 0;
+  const palavras = n.split(' ').filter(Boolean);
+
+  let score = 0;
+  let acertos = 0;
+  for (const kw of keywords) {
+    let melhor = 0;
+    for (const w of palavras) {
+      if (w === kw) {
+        melhor = Math.max(melhor, Math.min(kw.length, 8) + 3);
+      } else if (kw.length >= 4 && (w.startsWith(kw) || kw.startsWith(w))) {
+        // prefixo cobre singular/plural e flexões: "tendas"↔"tenda"
+        melhor = Math.max(melhor, Math.min(Math.min(kw.length, w.length), 8) + 1);
+      }
+    }
+    if (melhor > 0) acertos++;
+    score += melhor;
+  }
+
+  // Sem nenhum acerto de palavra-chave → irrelevante (some da lista).
+  if (keywords.length > 0 && acertos === 0) return 0;
+
+  score += similaridade(frase, nome) * 3;
+  return score;
+}
+
 /**
  * Gera variantes de busca a partir de um termo do usuário.
  * Retorna no máximo 5 termos pra controlar o número de chamadas paralelas.
  * Estratégia:
- *   1. Termo original (sempre primeiro)
+ *   1. Frase-chave saneada (sem ruído de dimensão) — melhor sinal pro catálogo
  *   2. Sinônimos do dicionário LIE quando alguma chave bate
- *   3. Palavras individuais ≥3 letras quando termo é multi-palavra
+ *   3. Palavras-chave individuais quando há mais de uma
  */
 export function gerarSinonimosBusca(termo: string): string[] {
-  const limpo = (termo || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
+  const limpo = normalizar(termo);
   if (!limpo) return [];
 
-  const variantes: string[] = [termo.trim()];
+  const keywords = extrairPalavrasChave(termo);
+  const frase = keywords.join(' ').trim();
 
-  // 1. Sinônimos do dicionário
+  // 1. Frase saneada como variante principal; cai pro termo cru se sobrou nada.
+  const variantes: string[] = [];
+  variantes.push(frase || termo.trim());
+
+  // 2. Sinônimos do dicionário (compara contra o termo e contra cada keyword,
+  //    normalizando a chave pra casar mesmo com acento — ex.: "água", "ônibus").
   for (const [chave, sins] of Object.entries(DICIONARIO_SINONIMOS_LIE)) {
-    if (limpo.includes(chave)) {
+    const chaveNorm = normalizar(chave);
+    const bate = limpo.includes(chaveNorm)
+      || keywords.some(k => chaveNorm.includes(k) || k.includes(chaveNorm));
+    if (bate) {
       for (const s of sins) {
         if (!variantes.includes(s)) variantes.push(s);
       }
     }
   }
 
-  // 2. Palavras individuais (se termo tem >1 palavra)
-  const palavras = limpo.split(/\s+/).filter(p => p.length >= 4 && !['para', 'pelo', 'pela', 'com', 'sem', 'dos', 'das'].includes(p));
-  if (palavras.length > 1) {
-    for (const p of palavras) {
+  // 3. Palavras-chave individuais (se há mais de uma)
+  if (keywords.length > 1) {
+    for (const p of keywords) {
       if (!variantes.includes(p)) variantes.push(p);
     }
   }
@@ -452,7 +520,19 @@ export async function buscarPdmsMultiTermo(termoOriginal: string): Promise<PdmMa
     }
   }
 
-  return Array.from(mapa.values()).sort((a, b) => b.scoreRelevancia - a.scoreRelevancia);
+  // Ranqueia por relevância real ao termo (não pela variante que trouxe).
+  // Quando há palavras-chave, descarta o que não casa nenhuma (ex.: toner pra "tenda").
+  const keywords = extrairPalavrasChave(termoOriginal);
+  const frase = keywords.join(' ').trim() || termoOriginal.trim();
+  const comRelev = Array.from(mapa.values()).map(pdm => ({
+    pdm,
+    relev: pontuarRelevancia(pdm.nomePdm || '', keywords, frase),
+  }));
+  const temMatch = keywords.length > 0 && comRelev.some(x => x.relev > 0);
+  return (temMatch ? comRelev.filter(x => x.relev > 0) : comRelev)
+    .sort((a, b) => (b.relev - a.relev) || (b.pdm.scoreRelevancia - a.pdm.scoreRelevancia))
+    .slice(0, 60)
+    .map(x => x.pdm);
 }
 
 export async function buscarServicosMultiTermo(termoOriginal: string): Promise<ServicoMatchComOrigem[]> {
@@ -477,7 +557,18 @@ export async function buscarServicosMultiTermo(termoOriginal: string): Promise<S
     }
   }
 
-  return Array.from(mapa.values()).sort((a, b) => b.scoreRelevancia - a.scoreRelevancia);
+  // Ranqueia por relevância real ao termo e descarta o que não casa nenhuma palavra-chave.
+  const keywords = extrairPalavrasChave(termoOriginal);
+  const frase = keywords.join(' ').trim() || termoOriginal.trim();
+  const comRelev = Array.from(mapa.values()).map(s => ({
+    s,
+    relev: pontuarRelevancia(s.descricaoServicoAcentuado || s.descricaoServico || '', keywords, frase),
+  }));
+  const temMatch = keywords.length > 0 && comRelev.some(x => x.relev > 0);
+  return (temMatch ? comRelev.filter(x => x.relev > 0) : comRelev)
+    .sort((a, b) => (b.relev - a.relev) || (b.s.scoreRelevancia - a.s.scoreRelevancia))
+    .slice(0, 60)
+    .map(x => x.s);
 }
 
 /**
