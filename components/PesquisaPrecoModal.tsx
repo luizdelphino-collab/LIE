@@ -190,26 +190,84 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
     return null;
   };
 
+  // Tolerancia de capacidade pra considerar duas embalagens equivalentes (±30%).
+  // Absorve variacoes de redondeio/descricao (200ml vs 250ml NAO; 200ml vs 220ml OK).
+  const MARGEM_EMBALAGEM = 0.3;
+
   /**
    * Filtra cotacoes por compatibilidade de embalagem com o item.
-   * Quando o item tem fatorConversao + unidadeBase, mantem apenas cotacoes
-   * cuja capacidade detectada esteja em faixa ±30% da capacidade do item.
-   * Cotacoes sem capacidade detectavel passam por padrao (nao excluimos
+   *
+   * Fase 5 (redesign 2026-05): prioriza `embalagensAceitas[]` amarradas no wizard
+   * (multi-equivalente). Uma cotacao passa se a capacidade detectada na descricao
+   * casar com QUALQUER uma das embalagens aceitas (±30%). Isso torna a pesquisa
+   * deterministica — a cesta so traz cotacoes da(s) embalagem(ns) que o usuario
+   * declarou equivalentes (ex: COPO 200ml OU GARRAFA 200ml).
+   *
+   * Fallback legado: item sem embalagensAceitas usa a embalagem unica
+   * (fatorConversao + unidadeBase), comportamento anterior.
+   *
+   * Em ambos os modos, cotacoes sem capacidade detectavel passam (nao excluimos
    * por falta de info — exclusao so quando ha info contraditoria).
    */
   const filtrarCotacoesPorEmbalagem = (cotacoes: PrecoReferencia[]): PrecoReferencia[] => {
+    // Embalagens amarradas pelo wizard (so existem no ItemMaster — acesso defensivo)
+    const aceitasComCap = ((item as Partial<ItemMaster>).embalagensAceitas || [])
+      .filter(e => e.capacidade > 0 && e.siglaCapacidade);
+
+    if (aceitasComCap.length > 0) {
+      return cotacoes.filter(c => {
+        let algumaDetectou = false;
+        for (const emb of aceitasComCap) {
+          const cap = extrairCapacidadeCotacao(c.descricaoItem || '', emb.siglaCapacidade);
+          if (cap === null) continue; // esta embalagem nao consegue ler a descricao
+          algumaDetectou = true;
+          const min = emb.capacidade * (1 - MARGEM_EMBALAGEM);
+          const max = emb.capacidade * (1 + MARGEM_EMBALAGEM);
+          if (cap >= min && cap <= max) return true; // casou com esta embalagem aceita
+        }
+        // Nenhuma embalagem leu capacidade na descricao → mantem (conservador).
+        // Leu em alguma mas nao casou em nenhuma → rejeita (embalagem divergente).
+        return !algumaDetectou;
+      });
+    }
+
+    // Fallback legado: embalagem unica via fatorConversao + unidadeBase
     if (!item.fatorConversao || !item.unidadeBase || item.fatorConversao <= 0) {
       return cotacoes; // sem dados de embalagem, nao filtra
     }
     const capacidadeItem = item.fatorConversao;
-    const margem = 0.3;
-    const min = capacidadeItem * (1 - margem);
-    const max = capacidadeItem * (1 + margem);
+    const min = capacidadeItem * (1 - MARGEM_EMBALAGEM);
+    const max = capacidadeItem * (1 + MARGEM_EMBALAGEM);
     return cotacoes.filter(c => {
       const cap = extrairCapacidadeCotacao(c.descricaoItem || '', item.unidadeBase || '');
       if (cap === null) return true; // sem info de embalagem na cotacao, mantem
       return cap >= min && cap <= max;
     });
+  };
+
+  // ===== Fase 5: casamento de atributos do PDM (soft — classifica, nao rejeita) =====
+  // Atributos resolvidos pelo wizard (so existem no ItemMaster — acesso defensivo).
+  const atributosWizardItem = (item as Partial<ItemMaster>).atributosWizard || [];
+
+  // Normaliza pra comparacao tolerante a acento/caixa.
+  const normalizarTexto = (s: string) =>
+    (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+
+  /**
+   * Conta quantos atributos amarrados no wizard aparecem na descricao da cotacao.
+   * Retorna null quando o item nao passou pelo wizard (nada a classificar).
+   * Como a API publica nao traz atributos estruturados, o casamento e textual:
+   * procura o valor do atributo (ex: "SEM GAS", "PLASTICO") dentro da descricaoItem.
+   */
+  const casarAtributos = (descricao: string): { casados: number; total: number } | null => {
+    if (atributosWizardItem.length === 0) return null;
+    const d = normalizarTexto(descricao);
+    let casados = 0;
+    for (const a of atributosWizardItem) {
+      const valor = normalizarTexto(a.nomeValorCaracteristica);
+      if (valor && d.includes(valor)) casados++;
+    }
+    return { casados, total: atributosWizardItem.length };
   };
 
   // Carregar referências já salvas no item, se existirem.
@@ -894,11 +952,29 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                       <span className="text-[10px] bg-green-50 border border-green-200 text-green-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Faixa elegivel: cotacoes >= R$ ${limiteInferior.toFixed(2)} e <= R$ ${limiteSuperior.toFixed(2)} (2.5x o valor estimado)`}>
                         ✓ Faixa R$ {limiteInferior.toFixed(2)}–{limiteSuperior.toFixed(2)}
                       </span>
-                      {item.fatorConversao && item.unidadeBase && (
-                        <span className="text-[10px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Cotacoes com embalagem incompativel com ${item.fatorConversao}${item.unidadeBase} foram descartadas`}>
-                          🎯 Embalagem ~{item.fatorConversao}{item.unidadeBase.toLowerCase()}
-                        </span>
-                      )}
+                      {(() => {
+                        // Fase 5: badge reflete as embalagens equivalentes amarradas no wizard.
+                        const aceitas = ((item as Partial<ItemMaster>).embalagensAceitas || [])
+                          .filter(e => e.capacidade > 0 && e.siglaCapacidade);
+                        if (aceitas.length > 0) {
+                          const resumo = aceitas
+                            .map(e => `${e.unidadeFornecimento} ${e.capacidade}${e.siglaCapacidade.toLowerCase()}`)
+                            .join(' · ');
+                          return (
+                            <span className="text-[10px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Só entram cotações que casem (±30%) com uma destas embalagens aceitas: ${resumo}`}>
+                              🎯 {aceitas.length === 1 ? 'Embalagem' : `${aceitas.length} embalagens`}: {resumo}
+                            </span>
+                          );
+                        }
+                        if (item.fatorConversao && item.unidadeBase) {
+                          return (
+                            <span className="text-[10px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider" title={`Cotacoes com embalagem incompativel com ${item.fatorConversao}${item.unidadeBase} foram descartadas`}>
+                              🎯 Embalagem ~{item.fatorConversao}{item.unidadeBase.toLowerCase()}
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                   </div>
 
@@ -970,7 +1046,33 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
                               </div>
                               
                               <h5 className="font-bold text-lie-ink text-xs mt-1">{p.identificadorCompra}</h5>
-                              
+
+                              {/* Fase 5: casamento de atributos do PDM (textual na descricao da cotacao) */}
+                              {(() => {
+                                const m = casarAtributos(p.descricaoItem || '');
+                                if (!m) return null;
+                                const completo = m.casados === m.total;
+                                const parcial = m.casados > 0 && !completo;
+                                return (
+                                  <span
+                                    className={`inline-flex items-center gap-1 mt-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                                      completo
+                                        ? 'bg-green-50 text-green-700 border border-green-200'
+                                        : parcial
+                                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                          : 'bg-gray-100 text-gray-500 border border-gray-200'
+                                    }`}
+                                    title={`Atributos do item presentes na descrição desta cotação: ${m.casados} de ${m.total}. ${
+                                      completo
+                                        ? 'Todos os atributos batem.'
+                                        : 'Confira a descrição — nem todos os atributos do wizard aparecem aqui.'
+                                    }`}
+                                  >
+                                    {completo ? '✓ atributos' : '⚠ atributos'} {m.casados}/{m.total}
+                                  </span>
+                                );
+                              })()}
+
                               <div className="flex justify-between items-center mt-2 pt-2 border-t border-dashed border-gray-100">
                                 <span className="text-[10px] text-gray-400">Homologado em: {p.dataHomologacao}</span>
                                 <div className="text-right">
