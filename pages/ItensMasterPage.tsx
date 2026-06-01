@@ -12,6 +12,7 @@ import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type Esta
 import { isRecursoHumano } from '../lib/apiCompras';
 import MercadoDetalheModal from '../components/MercadoDetalheModal';
 import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
+import ReferenciaPrecoMercado from '../components/ReferenciaPrecoMercado';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
 import { sincronizarCatalogoCNBS, getCatalogoStats, type SincronizarRespostaCatalogo } from '../lib/catalogoPdmsApi';
 import { Database } from 'lucide-react';
@@ -35,6 +36,20 @@ function normalizarNome(s: string): string {
     .trim();
 }
 
+
+// Item TEM embalagem real (material com garrafa/caixa/etc.) só quando o mercado
+// devolve alguma unidade com capacidade > 0. Serviços e itens cotados por unidade
+// vêm com capacidade 0 / "NÃO INFORMADO" — pra esses, embalagem/conversão não se aplica.
+function temEmbalagemReal(m: MercadoResposta | null | undefined): boolean {
+  return !!m && (m.porUnidade || []).some(u => u.capacidade > 0);
+}
+
+// Preço de referência saneado (TCU) — cai pra mediana bruta só se não houver saneamento.
+function precoRefSaneado(m: MercadoResposta | null | undefined): number | null {
+  if (!m) return null;
+  const v = m.saneamento?.precoReferencia ?? m.estatisticas?.mediano;
+  return typeof v === 'number' && v > 0 ? v : null;
+}
 
 const CATEGORIAS: CategoriaItem[] = ['Alimento', 'Transporte', 'Material Esportivo', 'Material não Esportivo', 'Recurso Humano', 'Outro'];
 const UNIDADES: (UnidadeMedida | string)[] = ['diária', 'metro', 'metro²', 'unidade', 'pacote', 'caixa', 'kit', 'mês', 'Kg', 'evento', 'jogo', 'geral'];
@@ -580,11 +595,19 @@ export default function ItensMasterPage() {
     setEditId(it.id);
     setFormData({ ...it });
     setSugestaoNomeOficial('');
-    // Adaptador só faz sentido ao vincular CATMAT novo. Em edicao de item
-    // ja vinculado, dispensa pra nao mostrar aviso "sem cotacoes" estatico.
+    // Adaptador de embalagem (material) fica dispensado na edição pra não repetir
+    // o aviso. Mas buscamos o mercado pra exibir a referência saneada de itens
+    // sem embalagem (serviço) — sem sobrescrever o preço já cadastrado.
     setAdaptadorDispensado(true);
     setMercadoAdaptador(null);
-    setBuscandoAdaptador(false);
+    if (it.codigoCatmat) {
+      setBuscandoAdaptador(true);
+      coletarMercadoItem(it.codigoCatmat, it.tipoCatmat || 'material')
+        .then(resp => setMercadoAdaptador(resp))
+        .finally(() => setBuscandoAdaptador(false));
+    } else {
+      setBuscandoAdaptador(false);
+    }
     setIsFormOpen(true);
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
@@ -618,12 +641,28 @@ export default function ItensMasterPage() {
       setSugestaoNomeOficial('');
     }
 
-    // Dispara busca de mercado em background pra o adaptador de unidade
+    // Dispara busca de mercado em background pra conduzir a catalogação.
     setAdaptadorDispensado(false);
     setMercadoAdaptador(null);
     setBuscandoAdaptador(true);
     coletarMercadoItem(sel.codigoCatmat, sel.tipoCatmat)
-      .then(resp => setMercadoAdaptador(resp))
+      .then(resp => {
+        setMercadoAdaptador(resp);
+        // Serviço / item sem embalagem: adota automaticamente a referência saneada
+        // como valor e limpa os campos de conversão que não se aplicam.
+        if (resp && !temEmbalagemReal(resp)) {
+          const ref = precoRefSaneado(resp);
+          if (ref) {
+            setFormData(p => ({
+              ...p,
+              valorUnitario: ref,
+              fatorConversao: undefined,
+              unidadeBase: undefined,
+              embalagemDescricao: undefined,
+            }));
+          }
+        }
+      })
       .finally(() => setBuscandoAdaptador(false));
   };
 
@@ -1012,8 +1051,9 @@ export default function ItensMasterPage() {
                     onClear={removerCatmat}
                   />
 
-                  {/* Adaptador automático: aparece após vincular CATMAT, oferece adequar unidade ao mercado */}
-                  {formData.codigoCatmat && !adaptadorDispensado && (
+                  {/* Adaptador de embalagem: só pra material com embalagem real (garrafa/caixa).
+                      Serviço/sem-embalagem usa o painel de referência saneada mais abaixo. */}
+                  {formData.codigoCatmat && !adaptadorDispensado && (buscandoAdaptador || temEmbalagemReal(mercadoAdaptador)) && (
                     <AdaptadorUnidadeCatmat
                       mercado={mercadoAdaptador}
                       carregando={buscandoAdaptador}
@@ -1083,7 +1123,20 @@ export default function ItensMasterPage() {
               </div>
             </div>
 
-            {/* === BLOCO CONVERSOR DE UNIDADE (opcional mas crítico) === */}
+            {/* Serviço / item sem embalagem: painel de referência saneada (TCU) — conduz
+                a catalogação mostrando direto o preço de referência, sem pedir embalagem. */}
+            {formData.codigoCatmat && mercadoAdaptador && !temEmbalagemReal(mercadoAdaptador) && (
+              <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
+                <ReferenciaPrecoMercado
+                  mercado={mercadoAdaptador}
+                  valorAtual={formData.valorUnitario || 0}
+                  onUsar={(v) => setFormData(p => ({ ...p, valorUnitario: v }))}
+                />
+              </div>
+            )}
+
+            {/* === BLOCO CONVERSOR DE UNIDADE === só material com embalagem real === */}
+            {!(formData.codigoCatmat && mercadoAdaptador && !temEmbalagemReal(mercadoAdaptador)) && (
             <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
               <div className="flex items-start gap-2 mb-3">
                 <Package className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
@@ -1218,6 +1271,7 @@ export default function ItensMasterPage() {
                 </div>
               )}
             </div>
+            )}
 
             <div className="md:col-span-3 flex justify-end gap-3 pt-2">
               <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancelar</button>
