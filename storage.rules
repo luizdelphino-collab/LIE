@@ -16,28 +16,24 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in roles;
     }
 
-    // Documentos vinculados a um projeto (planos, aprovações, ofícios).
-    match /projects/{projectId}/documents/{allPaths=**} {
+    // Anexos do projeto: documentos, referências de preço (IN 65/2021),
+    // comprovantes, relatórios. O app usa nomes em português (documentos,
+    // referencias_precos) — este catch-all cobre todas as subpastas.
+    match /projects/{projectId}/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+      allow write: if isAuthenticated();
     }
 
-    // Comprovantes de despesas (notas fiscais, recibos).
-    match /projects/{projectId}/expenses/{allPaths=**} {
+    // Comprovantes/anexos da execução mensal (notas, recibos por competência).
+    match /execucao/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+      allow write: if isAuthenticated();
     }
 
-    // Relatórios PDF gerados/anexados.
-    match /projects/{projectId}/reports/{allPaths=**} {
+    // Logos e documentos de fornecedores.
+    match /suppliers/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
-    }
-
-    // Fotos/anexos de beneficiários.
-    match /projects/{projectId}/beneficiaries/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if hasAnyRole(['admin', 'coordenador']);
+      allow write: if isAuthenticated();
     }
 
     // Logos de patrocinadores/parceiros.

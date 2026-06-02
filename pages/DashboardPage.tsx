@@ -23,9 +23,9 @@ export default function DashboardPage() {
       try {
         const [snapProjetos, snapEntidades, snapItens, snapFornecedores] = await Promise.all([
           getDocs(collection(db, 'projects')),
-          getDocs(collection(db, 'entidades')),
-          getDocs(collection(db, 'itens_master')),
-          getDocs(collection(db, 'fornecedores'))
+          getDocs(collection(db, 'entities')),
+          getDocs(collection(db, 'items')),
+          getDocs(collection(db, 'suppliers'))
         ]);
 
         const entidadesMap: Record<string, string> = {};
@@ -60,7 +60,11 @@ export default function DashboardPage() {
           projetosPorStatus
         };
         setStats(s);
-        setProjetosRecentes(projetos.sort((a, b) => b.criadoEm.toMillis() - a.criadoEm.toMillis()).slice(0, 5));
+        setProjetosRecentes(
+          projetos
+            .sort((a, b) => (b.criadoEm?.toMillis?.() ?? 0) - (a.criadoEm?.toMillis?.() ?? 0))
+            .slice(0, 5)
+        );
       } finally {
         setLoading(false);
       }

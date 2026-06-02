@@ -42,45 +42,45 @@ service cloud.firestore {
 
       // --- Subcoleções do projeto ---
 
+      // Itens do projeto (vinculados ao banco de itens master).
+      match /items/{itemId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated();
+        allow delete: if hasAnyRole(['admin', 'coordenador']);
+      }
+
       // Cronograma físico-financeiro (metas/etapas/atividades).
-      match /schedule/{itemId} {
+      match /cronograma/{itemId} {
         allow read: if isAuthenticated();
-        allow write: if hasAnyRole(['admin', 'coordenador']);
-      }
-
-      // Captação (aportes/incentivadores).
-      match /funding/{entryId} {
-        allow read: if isAuthenticated();
-        allow create, update: if hasAnyRole(['admin', 'coordenador', 'captador']);
+        allow create, update: if isAuthenticated();
         allow delete: if hasAnyRole(['admin', 'coordenador']);
       }
 
-      // Despesas (pagamentos, notas fiscais, comprovantes).
-      match /expenses/{expenseId} {
+      // Execução mensal (lançamentos físico-financeiros por competência).
+      match /execucao/{execId} {
         allow read: if isAuthenticated();
-        allow create, update: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
-        allow delete: if hasAnyRole(['admin', 'financeiro']);
+        allow create, update: if isAuthenticated();
+        allow delete: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
       }
 
-      // Beneficiários (atletas, alunos, comunidades atendidas).
-      match /beneficiaries/{benefId} {
+      // Documentos do projeto (planos, aprovações, ofícios, comprovantes).
+      match /documentos/{docId} {
         allow read: if isAuthenticated();
-        allow create, update: if hasAnyRole(['admin', 'coordenador']);
+        allow create, update: if isAuthenticated();
         allow delete: if hasAnyRole(['admin', 'coordenador']);
       }
 
-      // Documentos do projeto (planos, aprovações, ofícios).
-      match /documents/{docId} {
+      // Referências de preço (pesquisa automática IN 65/2021).
+      match /referencias_precos/{refId} {
         allow read: if isAuthenticated();
-        allow create, update: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
+        allow create, update: if isAuthenticated();
         allow delete: if hasAnyRole(['admin', 'coordenador']);
       }
 
-      // Relatórios (mensais, trimestrais, prestação de contas).
-      match /reports/{reportId} {
+      // Catch-all das demais subcoleções do projeto (segurança/extensibilidade).
+      match /{document=**} {
         allow read: if isAuthenticated();
-        allow create, update: if hasAnyRole(['admin', 'coordenador', 'financeiro']);
-        allow delete: if hasAnyRole(['admin', 'coordenador']);
+        allow write: if isAuthenticated();
       }
     }
 
@@ -122,6 +122,43 @@ service cloud.firestore {
         allow read: if isAuthenticated();
         allow write: if hasAnyRole(['admin', 'coordenador', 'captador']);
       }
+    }
+
+    // --- BANCO DE ITENS (master) ---
+    // Itens base reutilizados nos projetos (nome, categoria, unidade, CATMAT/CATSER).
+    match /items/{itemId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if hasAnyRole(['admin', 'coordenador']);
+    }
+
+    // --- FORNECEDORES ---
+    match /suppliers/{supplierId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if hasAnyRole(['admin', 'coordenador']);
+
+      match /{document=**} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated();
+      }
+    }
+
+    // --- CATÁLOGO CATMAT/CATSER (cache CNBS, sincronizado pelas Functions) ---
+    match /catalogo_pdms/{pdmId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+    match /catalogo_servicos/{servicoId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // --- MODALIDADES ESPORTIVAS ---
+    match /modalidades/{modalidadeId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if hasAnyRole(['admin', 'coordenador']);
     }
 
     // --- Default: bloqueia tudo o resto exceto admin ---
