@@ -1,0 +1,23 @@
+[
+  {
+    "origin": [
+      "https://projetos.lie.com.br",
+      "https://lie-projetos.web.app",
+      "https://lie-projetos.firebaseapp.com",
+      "http://localhost:5173",
+      "http://localhost:5000",
+      "http://127.0.0.1:5173"
+    ],
+    "method": ["GET", "HEAD"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Content-Encoding",
+      "Content-Disposition",
+      "Cache-Control",
+      "ETag",
+      "x-goog-meta-*"
+    ]
+  }
+]

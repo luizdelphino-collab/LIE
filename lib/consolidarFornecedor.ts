@@ -1,6 +1,5 @@
 import jsPDF from 'jspdf';
 import { doc, getDoc } from 'firebase/firestore';
-import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
 import type { Fornecedor } from '../types';
 
@@ -11,25 +10,25 @@ const CONTENT_W = PAGE_W - MARGIN * 2;
 const LINE_H = 7;
 const COR_PRIMARIA: [number, number, number] = [22, 163, 74]; // lie-green (tailwind)
 
+function downloadStorageFileUrl(path: string): string {
+  const projectId = storage.app.options.projectId;
+  return `https://us-central1-${projectId}.cloudfunctions.net/downloadStorageFile?path=${encodeURIComponent(path)}`;
+}
+
 async function fetchImageAsBase64(url: string): Promise<string | null> {
+  if (!url) return null;
+  if (url.startsWith('data:')) return url;
+
+  let fetchUrl = url;
+  if (url.includes('firebasestorage.googleapis.com')) {
+    const match = url.match(/\/o\/([^?]+)/);
+    const path = match ? decodeURIComponent(match[1]) : null;
+    if (path) fetchUrl = downloadStorageFileUrl(path);
+  }
+
   try {
-    if (!url) return null;
-    if (url.startsWith('data:')) return url;
-    try {
-      const match = url.match(/\/o\/([^?]+)/);
-      const path = match ? decodeURIComponent(match[1]) : null;
-      if (path) {
-        const blob = await getBlob(ref(storage, path));
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
-      }
-    } catch (e) {
-      console.warn('Erro via Storage Blob:', e);
-    }
-    const resp = await fetch(url);
+    const resp = await fetch(fetchUrl);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const blob = await resp.blob();
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -37,7 +36,7 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
       reader.readAsDataURL(blob);
     });
   } catch (e) {
-    console.error('Erro ao buscar imagem:', e);
+    console.error('Erro ao buscar imagem:', url, e);
     return null;
   }
 }

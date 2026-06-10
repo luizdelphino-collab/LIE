@@ -318,13 +318,81 @@ export type UnidadeMedida =
 
 export interface ItemMaster {
   id: string;
-  codigo: number; // Gerado sequencialmente
+  codigo: number; // Gerado sequencialmente (interno)
   nome: string;
   descricao?: string;
   unidade: UnidadeMedida | string;
   valorUnitario: number;
   categoria: CategoriaItem | string;
   criadoEm: Timestamp;
+  // CATMAT/CATSER oficial validado via API do Compras.gov.br.
+  // Obrigatório pra que o item entre na pesquisa automática de preços.
+  codigoCatmat?: number;
+  tipoCatmat?: 'material' | 'servico';
+  nomeCatmatOficial?: string;
+  descricaoCatmatOficial?: string;
+  // Conversão de embalagem pra unidade base — permite comparação justa
+  // Ex: "caixa com 48 copos de 200ml" → fatorConversao=9600, unidadeBase='ML'
+  // Sistema calcula preço base = valorUnitario / fatorConversao (R$/ml)
+  fatorConversao?: number;
+  unidadeBase?: string; // ML, G, L, UN, M, M², KG
+  embalagemDescricao?: string; // texto livre p/ humano (ex: "Caixa com 48 copos de 200ml")
+  // Sigla canonica de fornecimento alinhada com API federal (compras.gov.br + PNCP)
+  // Primeira embalagem (compat legacy) — pra pesquisa rapida sem unfold do array
+  siglaUnidadeFornecimento?: string;
+  // Lista de embalagens aceitas como EQUIVALENTES na pesquisa de preco.
+  // Permite multi-selecao no wizard (ex: COPO 200ml + GARRAFA 200ml + COPO 250ml
+  // todos sao aceitos como referencia comparavel). A pesquisa de preco filtra
+  // cotacoes que casem com QUALQUER uma destas combinacoes.
+  embalagensAceitas?: Array<{
+    unidadeFornecimento: string;  // nome legivel: "COPO", "GARRAFA"
+    siglaFornecimento: string;    // sigla curta canonica: "COPO", "GRF"
+    capacidade: number;           // numero, ex: 200, 1500
+    siglaCapacidade: string;      // sigla base: "ML", "L", "KG"
+  }>;
+  // Item declaradamente sem correspondencia no CATMAT/CATSER. Pesquisa de preco
+  // segue rota legal alternativa: cotacoes com fornecedores (IN SEGES/ME 73/2020
+  // art. 5o IV ou IN 65/2021 art. 5o V — em linha com Lei 14.133/21 art. 28 e
+  // Acordao TCU 1445/2015 sobre fontes diversificadas).
+  semCorrespondenciaCatalogo?: boolean;
+
+  // Pesquisa de preco publica (IN 65/2021) — agora vive no Banco (etapa 5C).
+  // Quando o item e vinculado a um projeto, esses campos sao herdados via
+  // sincronizacao automatica. Pesquisa e feita UMA VEZ no Banco, vale pra
+  // todos os projetos que usam esse master.
+  pesquisado?: boolean;
+  referencias?: PrecoReferencia[];
+  mediaReferencia?: number;
+  medianaReferencia?: number;
+  tokenPesquisa?: string;
+  ultimoCodigoVinculado?: number;
+  pesquisaAtualizadaEm?: Timestamp;
+  // Snapshot pre-IA (preservado pra rollback do batch Padronizar Nomenclatura v1.12.x)
+  nomeOriginalLIE?: string;
+  descricaoOriginalLIE?: string;
+  unidadeOriginalLIE?: string;
+  // Snapshot pos-IA (preservado quando restauramos os originais — historico)
+  nomePadronizadoIA?: string;
+  descricaoPadronizadaIA?: string;
+  unidadePadronizadaIA?: string;
+  padronizadoEm?: Timestamp;
+  padronizadoModelo?: string;
+  vinculadoPorIA?: boolean;
+  vinculadoEm?: Timestamp;
+  // Sinal de que o item precisa passar pelo wizard de atributos (redesign 2026-05-29)
+  precisaCompletarWizard?: boolean;
+  restauradoEm?: Timestamp;
+  // Atributos do PDM resolvidos pelo wizard (Fase 3 redesign).
+  // Cada entrada eh (codigoCaracteristica, codigoValor) das caracteristicas obrigatorias.
+  // Salva tambem nomes pra exibicao rapida sem ter que cruzar com catalogo_pdms.
+  atributosWizard?: Array<{
+    codigoCaracteristica: string;
+    codigoValorCaracteristica: string;
+    nomeCaracteristica: string;
+    nomeValorCaracteristica: string;
+    siglaUnidadeMedida?: string | null;
+  }>;
+  atributosWizardCompletoEm?: Timestamp;
 }
 
 export interface PrecoReferencia {
@@ -335,9 +403,60 @@ export interface PrecoReferencia {
   quantidade?: number;
   unidadeMedida?: string;
   valorUnitario: number;
-  fonte: 'compras.gov.br' | 'pncp' | 'fomento' | 'manual';
+  fonte:
+    // Fontes governamentais automaticas (IN 73/2020 art. 5o I e II)
+    | 'compras.gov.br' | 'pncp' | 'pncp-contratacao' | 'pncp-ata' | 'tce-pe'
+    // Fontes manuais categorizadas (IN 73/2020 art. 5o II/III/IV/V)
+    | 'contrato-publico'  // contratos publicos similares de outros entes (II)
+    | 'convenio'          // convenios (II)
+    | 'termo-fomento'     // termos de fomento ou colaboracao - tipico LIE (II)
+    | 'tabela-preco'      // tabelas de precos / midia especializada (III)
+    | 'fomento'           // legado, equivalente a termo-fomento
+    | 'manual';           // ULTIMO RECURSO: 3 orcamentos de fornecedores (IV)
+  // Identidade do órgão
+  cnpjOrgao?: string;
+  poder?: string;
+  esfera?: string;
+  uf?: string;
+  // Legalidade
+  modalidade?: string;
+  situacao?: string;
+  // Identidade do item
+  codigoCatalogoItem?: string;
+  descricaoItem?: string;
+  // Adjudicatário
+  fornecedorNome?: string;
+  fornecedorCnpj?: string;
+  // Identificadores
+  numeroControlePNCP?: string;
+  // Temporal
+  dataVigenciaFinalAta?: string;
+  // Preservação da URL original do PNCP (sobrescrita pelo arquivo Storage quando cai no fallback)
+  linkPncpOriginal?: string;
   localizacaoUrl: string; // Para manual/fomento, é a URL de upload no Firebase Storage
   arquivoNome?: string;
+  // Campos enriquecidos (etapa pos-5C) extraidos da Cloud Function:
+  municipio?: string;
+  criterioJulgamento?: string;
+  modoDisputa?: string;
+  amparoLegal?: string;
+  leiAplicada?: string;
+  objetoCompra?: string;
+  inscricaoEstadualFornecedor?: string;
+  dataPublicacao?: string;
+  // PDF direto do edital (obtido via obterArquivosContratacao no momento da homologacao)
+  linkEditalPdf?: string;
+  // Lista de arquivos do PNCP (edital + anexos) — populada lazy quando enriquecemos
+  arquivosPNCP?: Array<{ tipo: string; titulo: string; url: string; dataPublicacao?: string }>;
+  // Embalagem do item homologado — separa quantidade (unidades) de capacidade (ML/L/G).
+  // Antes: unidadeMedida estava confundindo os dois conceitos. Agora:
+  // - quantidade + siglaUnidadeFornecimento = "1000 UN" (1000 unidades)
+  // - capacidadeUnidadeFornecimento + siglaUnidadeMedida = "200 ML" (cada unidade = 200ml)
+  // - nomeUnidadeFornecimento = "COPO" (forma humana da embalagem)
+  siglaUnidadeFornecimento?: string;
+  nomeUnidadeFornecimento?: string;
+  capacidadeUnidadeFornecimento?: number;
+  siglaUnidadeMedida?: string;
 }
 
 export interface ItemProjeto {
@@ -355,6 +474,19 @@ export interface ItemProjeto {
   moduloId?: string; // NOVO: Referência ao Módulo
   fornecedoresIds?: string[]; // IDs dos fornecedores vinculados ao item na execução
   criadoEm: Timestamp;
+
+  // CATMAT/CATSER oficial herdado do ItemMaster — usado pela pesquisa
+  codigoCatmat?: number;
+  tipoCatmat?: 'material' | 'servico';
+  nomeCatmatOficial?: string;
+  descricaoCatmatOficial?: string;
+  // Conversão de embalagem (herdada do master)
+  fatorConversao?: number;
+  unidadeBase?: string;
+  embalagemDescricao?: string;
+  // Item sem correspondencia no CATMAT/CATSER (herdado do master): pesquisa
+  // de preco segue rota legal de 3 orcamentos com fornecedores.
+  semCorrespondenciaCatalogo?: boolean;
 
   // Campos de Pesquisa de Preço Público (IN 65/2021)
   pesquisado?: boolean;

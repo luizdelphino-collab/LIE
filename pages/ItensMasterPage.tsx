@@ -1,10 +1,55 @@
 import { useEffect, useState } from 'react';
-import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, where } from 'firebase/firestore';
-import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, where, writeBatch } from 'firebase/firestore';
+import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ShieldCheck, Lightbulb, Package, Scale, Eye } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
+import CatalogoSearchPicker, { type CatalogoSelecao } from '../components/CatalogoSearchPicker';
+import ValidacaoCatmatLoteModal from '../components/ValidacaoCatmatLoteModal';
+import CatmatDiagnostico from '../components/CatmatDiagnostico';
+import { coletarMercadoItem, coletarMercadoLote, type MercadoResposta, type EstatisticasPorUnidade } from '../lib/mercadoApi';
+import { isRecursoHumano } from '../lib/apiCompras';
+import MercadoDetalheModal from '../components/MercadoDetalheModal';
+import AdaptadorUnidadeCatmat from '../components/AdaptadorUnidadeCatmat';
+import ReferenciaPrecoMercado from '../components/ReferenciaPrecoMercado';
+import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
+import { sincronizarCatalogoCNBS, getCatalogoStats, type SincronizarRespostaCatalogo } from '../lib/catalogoPdmsApi';
+import { Database } from 'lucide-react';
+import WizardAtributosPDM from '../components/WizardAtributosPDM';
 
+interface ItemComUso extends ItemMaster {
+  projetosUsando: number;
+}
+
+interface GrupoDuplicata {
+  nomeNormalizado: string;
+  paraManter: ItemComUso[];
+  paraExcluir: ItemComUso[];
+}
+
+function normalizarNome(s: string): string {
+  return (s || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+
+// Item TEM embalagem real (material com garrafa/caixa/etc.) só quando o mercado
+// devolve alguma unidade com capacidade > 0. Serviços e itens cotados por unidade
+// vêm com capacidade 0 / "NÃO INFORMADO" — pra esses, embalagem/conversão não se aplica.
+function temEmbalagemReal(m: MercadoResposta | null | undefined): boolean {
+  return !!m && (m.porUnidade || []).some(u => u.capacidade > 0);
+}
+
+// Preço de referência saneado (TCU) — cai pra mediana bruta só se não houver saneamento.
+function precoRefSaneado(m: MercadoResposta | null | undefined): number | null {
+  if (!m) return null;
+  const v = m.saneamento?.precoReferencia ?? m.estatisticas?.mediano;
+  return typeof v === 'number' && v > 0 ? v : null;
+}
 
 const CATEGORIAS: CategoriaItem[] = ['Alimento', 'Transporte', 'Material Esportivo', 'Material não Esportivo', 'Recurso Humano', 'Outro'];
 const UNIDADES: (UnidadeMedida | string)[] = ['diária', 'metro', 'metro²', 'unidade', 'pacote', 'caixa', 'kit', 'mês', 'Kg', 'evento', 'jogo', 'geral'];
@@ -28,6 +73,306 @@ export default function ItensMasterPage() {
     valorUnitario: 0,
     categoria: 'Alimento'
   });
+
+  // CATMAT/CATSER oficial — busca interativa no catálogo Compras.gov.br
+  const [sugestaoNomeOficial, setSugestaoNomeOficial] = useState<string>('');
+
+  // Paginação cliente
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(25);
+
+  // Validação CATMAT em lote
+  const [validacaoLoteOpen, setValidacaoLoteOpen] = useState(false);
+
+  // Preço de mercado (cache local em memória, busca paralela quando há CATMAT)
+  const [mercado, setMercado] = useState<Record<number, MercadoResposta | null>>({});
+  const [mercadoCarregando, setMercadoCarregando] = useState<Set<number>>(new Set());
+  const [mercadoDetalhe, setMercadoDetalhe] = useState<{ item: ItemMaster; dados: MercadoResposta } | null>(null);
+
+  // Picker de embalagem oficial: descobre embalagens do CATMAT no mercado e oferece adotar
+  const [embalagensDisponiveis, setEmbalagensDisponiveis] = useState<MercadoResposta['porUnidade'] | null>(null);
+  const [buscandoEmbalagens, setBuscandoEmbalagens] = useState(false);
+
+  // Adaptador automático de unidade: dispara após vincular CATMAT
+  const [mercadoAdaptador, setMercadoAdaptador] = useState<MercadoResposta | null>(null);
+  const [buscandoAdaptador, setBuscandoAdaptador] = useState(false);
+  const [adaptadorDispensado, setAdaptadorDispensado] = useState(false);
+
+  // Pesquisa de preço no Banco (etapa 5C): cesta vive no master, vale pra todos projetos
+  const [pesquisaItem, setPesquisaItem] = useState<ItemMaster | null>(null);
+
+  // Restauracao dos itens que foram modificados pelo batch Padronizar Nomenclatura (v1.12.x)
+  // Reverte nome/descricao/unidade pros valores originais preservados em nomeOriginalLIE/etc.
+  // Marca o item com precisaCompletarWizard=true pro novo fluxo (wizard de atributos).
+  type RestauracaoResult = {
+    itemId: string;
+    itemNome: string;
+    status: 'restaurado' | 'sem-original' | 'erro';
+    reason?: string;
+  };
+  const [restaurarOpen, setRestaurarOpen] = useState(false);
+  const [restaurarRunning, setRestaurarRunning] = useState(false);
+  const [restaurarResults, setRestaurarResults] = useState<RestauracaoResult[]>([]);
+
+  // Wizard de atributos PDM (Fase 3 redesign 2026-05-29)
+  const [wizardItem, setWizardItem] = useState<ItemMaster | null>(null);
+
+  // Sincronizacao do cache CNBS (Fase 2 redesign 2026-05-29)
+  const [sincronizarOpen, setSincronizarOpen] = useState(false);
+  const [sincronizarRunning, setSincronizarRunning] = useState(false);
+  const [sincronizarResultado, setSincronizarResultado] = useState<SincronizarRespostaCatalogo | null>(null);
+  const [catalogoStats, setCatalogoStats] = useState<{ pdmsCached: number; servicosCached: number; ultimaSync: Date | null } | null>(null);
+
+  // Carrega stats do catalogo quando abrir o modal
+  useEffect(() => {
+    if (sincronizarOpen && !catalogoStats) {
+      getCatalogoStats().then(setCatalogoStats);
+    }
+  }, [sincronizarOpen, catalogoStats]);
+
+  const startSincronizacao = async () => {
+    // Pega codigos unicos dos itens cadastrados (materials + services)
+    const codigosCatmat = Array.from(new Set(
+      items
+        .filter(it => it.codigoCatmat && it.codigoCatmat > 0 && (it.tipoCatmat === 'material' || !it.tipoCatmat))
+        .map(it => it.codigoCatmat!)
+    ));
+    const codigosCatser = Array.from(new Set(
+      items
+        .filter(it => it.codigoCatmat && it.codigoCatmat > 0 && it.tipoCatmat === 'servico')
+        .map(it => it.codigoCatmat!)
+    ));
+    if (codigosCatmat.length === 0 && codigosCatser.length === 0) return;
+
+    setSincronizarRunning(true);
+    setSincronizarResultado(null);
+    // Divide em chunks de 80 pra evitar timeout
+    const CHUNK = 80;
+    let aggMat = { pdmsAtualizados: 0, servicosAtualizados: 0, itensVinculadosTotal: 0, erros: [] as any[], timestamp: new Date().toISOString() };
+    for (let i = 0; i < codigosCatmat.length; i += CHUNK) {
+      const chunkMat = codigosCatmat.slice(i, i + CHUNK);
+      const chunkSer = i === 0 ? codigosCatser : [];  // CATSER vai no 1o batch
+      const resp = await sincronizarCatalogoCNBS({ codigosCatmat: chunkMat, codigosCatser: chunkSer });
+      if (resp) {
+        aggMat.pdmsAtualizados += resp.pdmsAtualizados;
+        aggMat.servicosAtualizados += resp.servicosAtualizados;
+        aggMat.itensVinculadosTotal += resp.itensVinculadosTotal;
+        aggMat.erros.push(...resp.erros);
+      }
+    }
+    // Se nao houver materials, sincroniza CATSERs sozinhos
+    if (codigosCatmat.length === 0 && codigosCatser.length > 0) {
+      const resp = await sincronizarCatalogoCNBS({ codigosCatser });
+      if (resp) {
+        aggMat.servicosAtualizados += resp.servicosAtualizados;
+        aggMat.erros.push(...resp.erros);
+      }
+    }
+    setSincronizarResultado(aggMat);
+    setSincronizarRunning(false);
+    // Atualiza stats
+    setCatalogoStats(null);  // forca recarga
+    getCatalogoStats().then(setCatalogoStats);
+  };
+
+  const itensComPadronizacaoIA = items.filter(it =>
+    (it as any).nomeOriginalLIE || (it as any).descricaoOriginalLIE || (it as any).unidadeOriginalLIE
+  );
+
+  // Itens cujo CATMAT/CATSER foi escolhido pela IA na padronizacao (v1.12.x)
+  // Esses provavelmente tem vinculacao errada (carrinho de pipoca → fornecimento refeicoes etc)
+  const itensVinculadosPorIA = items.filter(it => (it as any).vinculadoPorIA === true);
+
+  // Desvincula em lote todos os CATMAT/CATSER que foram escolhidos pela IA
+  // Marca como semCorrespondenciaCatalogo pra rota legal alternativa
+  const desvincularEmLote = async () => {
+    if (itensVinculadosPorIA.length === 0) return;
+    if (!confirm(`Desvincular o CATMAT/CATSER de ${itensVinculadosPorIA.length} item(ns) que foram vinculados pela IA?\n\nEles serão marcados como "sem correspondência no catálogo" (IN 73/2020 art. 5º IV) e a pesquisa de preço usará rota alternativa.`)) return;
+    for (const it of itensVinculadosPorIA) {
+      await setDoc(doc(db, 'items', it.id), {
+        codigoCatmat: null,
+        tipoCatmat: null,
+        nomeCatmatOficial: null,
+        descricaoCatmatOficial: null,
+        semCorrespondenciaCatalogo: true,
+        vinculadoPorIA: false,
+        desvinculadoEmLoteEm: serverTimestamp(),
+      }, { merge: true });
+    }
+    await carregarItens();
+    alert(`${itensVinculadosPorIA.length} item(ns) desvinculados.`);
+  };
+
+  const startRestauracao = async () => {
+    if (itensComPadronizacaoIA.length === 0) return;
+    setRestaurarRunning(true);
+    setRestaurarResults([]);
+    const results: RestauracaoResult[] = [];
+    for (const it of itensComPadronizacaoIA) {
+      try {
+        const itAny = it as any;
+        const nomeOriginal = itAny.nomeOriginalLIE;
+        const descricaoOriginal = itAny.descricaoOriginalLIE;
+        const unidadeOriginal = itAny.unidadeOriginalLIE;
+        if (!nomeOriginal && !descricaoOriginal && !unidadeOriginal) {
+          results.push({ itemId: it.id, itemNome: it.nome, status: 'sem-original' });
+          setRestaurarResults([...results]);
+          continue;
+        }
+        const patch: any = {
+          // Snapshot do que IA escreveu — preserva historico, não perde dado
+          nomePadronizadoIA: it.nome,
+          descricaoPadronizadaIA: it.descricao || '',
+          unidadePadronizadaIA: it.unidade || '',
+          // Restaura originais
+          ...(nomeOriginal ? { nome: nomeOriginal } : {}),
+          ...(descricaoOriginal !== undefined ? { descricao: descricaoOriginal } : {}),
+          ...(unidadeOriginal ? { unidade: unidadeOriginal } : {}),
+          // Marca pra wizard de atributos (Fase 2 redesign)
+          precisaCompletarWizard: true,
+          restauradoEm: serverTimestamp(),
+        };
+        await setDoc(doc(db, 'items', it.id), patch, { merge: true });
+        results.push({ itemId: it.id, itemNome: nomeOriginal || it.nome, status: 'restaurado' });
+        setRestaurarResults([...results]);
+      } catch (e: any) {
+        results.push({ itemId: it.id, itemNome: it.nome, status: 'erro', reason: e?.message || String(e) });
+        setRestaurarResults([...results]);
+      }
+    }
+    setRestaurarRunning(false);
+    await carregarItens();
+  };
+
+  const itensComCatmat = items.filter(it => it.codigoCatmat && it.codigoCatmat > 0);
+
+  // REMOVIDO em v1.13.0.0 (Fase 1 redesign 2026-05-29):
+  // startPadronizacao + startBatchPesquisa estavam causando o problema de agrupar
+  // itens diferentes sob CATSER generico. Substituidos pelo fluxo de wizard de
+  // atributos (Fase 2-4) e pesquisa deterministica (Fase 5).
+  // Os campos nomeOriginalLIE/descricaoOriginalLIE/unidadeOriginalLIE viram
+  // fonte da restauracao via startRestauracao acima.
+
+  const buscarEmbalagensOficiais = async () => {
+    if (!formData.codigoCatmat) return;
+    setBuscandoEmbalagens(true);
+    try {
+      const dados = await coletarMercadoItem(formData.codigoCatmat, formData.tipoCatmat || 'material');
+      setEmbalagensDisponiveis(dados?.porUnidade || []);
+    } finally {
+      setBuscandoEmbalagens(false);
+    }
+  };
+
+  const adotarEmbalagem = (emb: NonNullable<MercadoResposta['porUnidade']>[0]) => {
+    setFormData(p => ({
+      ...p,
+      unidade: emb.unidade.toLowerCase(),  // "GARRAFA" → "garrafa"
+      embalagemDescricao: emb.capacidade > 0
+        ? `${emb.unidade.toLowerCase()} ${emb.capacidade}${emb.siglaMedida.toLowerCase()}`
+        : emb.unidade.toLowerCase(),
+      fatorConversao: emb.capacidade > 0 ? emb.capacidade : undefined,
+      unidadeBase: emb.siglaMedida || undefined,
+      // Sugere o preço com a mediana saneada (user pode ajustar)
+      valorUnitario: p.valorUnitario || emb.estatisticas.mediano
+    }));
+    setEmbalagensDisponiveis(null);
+  };
+
+  // Adoção de embalagem direto pelo modal de detalhe de mercado (item ja salvo).
+  // razao = quantas embalagens do mercado cabem em 1 unidade atual do item.
+  // Ex: item "caixa" com 48 "copos 200ml" cada -> razao=48.
+  //
+  // MODELO A (preserva o que user compra):
+  //   - unidade INTACTA (continua "caixa")
+  //   - valorUnitario INTACTO (continua R$ 35,80/caixa)
+  //   - fatorConversao = razao * emb.capacidade (= 48 × 200 = 9600 ml/caixa)
+  //   - unidadeBase = emb.siglaMedida (ML)
+  //   - embalagemDescricao auto-formatada com a relacao completa
+  // Sistema calcula sozinho R$/ml e compara contra o mercado.
+  const handleAdotarEmbalagemModal = async (item: ItemMaster, emb: EstatisticasPorUnidade, razao?: number) => {
+    const razaoNum = razao && razao > 0 ? razao : 1;
+    const capacidade = emb.capacidade > 0 ? emb.capacidade : 1;
+    const fatorTotal = razaoNum * capacidade;
+    const unidadeBaseSig = emb.siglaMedida || 'UN';
+
+    // Descricao reflete a relacao real: "Caixa com 48 copos de 200ml"
+    const novaDescricao = razaoNum > 1
+      ? `${(item.unidade || 'unidade').toLowerCase()} com ${razaoNum} ${emb.unidade.toLowerCase()}${emb.capacidade > 0 ? ` de ${emb.capacidade}${unidadeBaseSig.toLowerCase()}` : ''}`
+      : (emb.capacidade > 0
+          ? `${emb.unidade.toLowerCase()} ${emb.capacidade}${unidadeBaseSig.toLowerCase()}`
+          : emb.unidade.toLowerCase());
+
+    const updates: Record<string, unknown> = {
+      embalagemDescricao: novaDescricao,
+      fatorConversao: fatorTotal,
+      unidadeBase: unidadeBaseSig,
+      // unidade e valorUnitario INTACTOS — preserva perspectiva de compra do user
+    };
+    await setDoc(doc(db, 'items', item.id), updates, { merge: true });
+
+    // Atualiza estado local
+    setItems(prev => prev.map(it => it.id === item.id
+      ? {
+          ...it,
+          embalagemDescricao: novaDescricao,
+          fatorConversao: fatorTotal,
+          unidadeBase: unidadeBaseSig,
+        }
+      : it));
+
+    // Atualiza item refletido no modal
+    setMercadoDetalhe(prev => prev && prev.item.id === item.id
+      ? {
+          ...prev,
+          item: {
+            ...prev.item,
+            embalagemDescricao: novaDescricao,
+            fatorConversao: fatorTotal,
+            unidadeBase: unidadeBaseSig,
+          }
+        }
+      : prev);
+  };
+
+  // Reset pra página 1 quando busca/filtro muda
+  useEffect(() => { setPaginaAtual(1); }, [searchTerm, tamanhoPagina]);
+
+  // Carregamento manual do preview Mercado Gov — antes era automatico no carregamento
+  // da pagina, mas o usuario pediu pra ser sob demanda. Cache de 24h na Cloud Function
+  // ainda funciona, mas a chamada so dispara quando o botao for clicado.
+  const carregarMercadoPreview = () => {
+    const itensComCatmat = items.filter(it => it.codigoCatmat && !(it.codigoCatmat in mercado));
+    if (itensComCatmat.length === 0) return;
+
+    const codigosAlvo = itensComCatmat.map(it => ({
+      codigoCatmat: it.codigoCatmat!,
+      tipo: (it.tipoCatmat || 'material') as 'material' | 'servico'
+    }));
+
+    setMercadoCarregando(prev => {
+      const n = new Set(prev);
+      codigosAlvo.forEach(c => n.add(c.codigoCatmat));
+      return n;
+    });
+
+    coletarMercadoLote(codigosAlvo).then(resultado => {
+      setMercado(prev => ({ ...prev, ...resultado }));
+      setMercadoCarregando(prev => {
+        const n = new Set(prev);
+        codigosAlvo.forEach(c => n.delete(c.codigoCatmat));
+        return n;
+      });
+    });
+  };
+
+  // Estado do limpador de duplicatas
+  const [limpezaOpen, setLimpezaOpen] = useState(false);
+  const [analisando, setAnalisando] = useState(false);
+  const [grupos, setGrupos] = useState<GrupoDuplicata[]>([]);
+  const [backupBaixado, setBackupBaixado] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+  const [excluidos, setExcluidos] = useState<number | null>(null);
 
   const carregarItens = async () => {
     try {
@@ -160,6 +505,16 @@ export default function ItensMasterPage() {
     carregarItens();
   }, []);
 
+  // Deep-link: ?edit={itemId} abre direto o form de edição (vindo do projeto)
+  const [searchParams] = useSearchParams();
+  const editFromUrl = searchParams.get('edit');
+  useEffect(() => {
+    if (!editFromUrl || items.length === 0) return;
+    const target = items.find(it => it.id === editFromUrl);
+    if (target) openEdit(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editFromUrl, items.length]);
+
   const handleSort = (field: keyof ItemMaster) => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -189,6 +544,12 @@ export default function ItensMasterPage() {
       if (valA! > valB!) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
+
+  const totalItens = sortedItems.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalItens / tamanhoPagina));
+  const paginaSegura = Math.min(paginaAtual, totalPaginas);
+  const offsetIni = (paginaSegura - 1) * tamanhoPagina;
+  const itensPaginados = sortedItems.slice(offsetIni, offsetIni + tamanhoPagina);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -252,6 +613,16 @@ export default function ItensMasterPage() {
         }, { merge: true });
       }
 
+      // Auto-sync CNBS pro item recém vinculado a CATMAT/CATSER
+      // (Fase 2 redesign 2026-05-29: garante cache local pra wizard de atributos)
+      if (formData.codigoCatmat && formData.codigoCatmat > 0) {
+        const tipo = (formData.tipoCatmat || 'material') as 'material' | 'servico';
+        sincronizarCatalogoCNBS({
+          codigosCatmat: tipo === 'material' ? [formData.codigoCatmat] : [],
+          codigosCatser: tipo === 'servico' ? [formData.codigoCatmat] : [],
+        }).catch(err => console.warn('[sync-cnbs] silent fail no save de item:', err));
+      }
+
       setIsFormOpen(false);
       carregarItens();
     } catch (e) {
@@ -265,13 +636,96 @@ export default function ItensMasterPage() {
   const openEdit = (it: ItemMaster) => {
     setEditId(it.id);
     setFormData({ ...it });
+    setSugestaoNomeOficial('');
+    // Adaptador de embalagem (material) fica dispensado na edição pra não repetir
+    // o aviso. Mas buscamos o mercado pra exibir a referência saneada de itens
+    // sem embalagem (serviço) — sem sobrescrever o preço já cadastrado.
+    setAdaptadorDispensado(true);
+    setMercadoAdaptador(null);
+    if (it.codigoCatmat) {
+      setBuscandoAdaptador(true);
+      coletarMercadoItem(it.codigoCatmat, it.tipoCatmat || 'material')
+        .then(resp => setMercadoAdaptador(resp))
+        .finally(() => setBuscandoAdaptador(false));
+    } else {
+      setBuscandoAdaptador(false);
+    }
     setIsFormOpen(true);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
   const openNew = () => {
     setEditId(null);
     setFormData({ nome: '', descricao: '', unidade: 'unidade', valorUnitario: 0, categoria: 'Alimento' });
+    setSugestaoNomeOficial('');
+    setAdaptadorDispensado(false);
+    setMercadoAdaptador(null);
+    setBuscandoAdaptador(false);
     setIsFormOpen(true);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  };
+
+  const handleCatalogoSelect = (sel: CatalogoSelecao, nomePdm: string) => {
+    setFormData(p => ({
+      ...p,
+      codigoCatmat: sel.codigoCatmat,
+      tipoCatmat: sel.tipoCatmat,
+      nomeCatmatOficial: sel.nomeCatmatOficial,
+      descricaoCatmatOficial: sel.descricaoCatmatOficial,
+      descricao: p.descricao || sel.descricaoCatmatOficial
+    }));
+    // Se o nome do user diverge do PDM oficial, oferece a sugestão
+    const nomeAtualNorm = (formData.nome || '').toUpperCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+    const nomePdmNorm = (nomePdm || '').toUpperCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+    if (nomePdm && nomeAtualNorm !== nomePdmNorm) {
+      setSugestaoNomeOficial(nomePdm);
+    } else {
+      setSugestaoNomeOficial('');
+    }
+
+    // Dispara busca de mercado em background pra conduzir a catalogação.
+    setAdaptadorDispensado(false);
+    setMercadoAdaptador(null);
+    setBuscandoAdaptador(true);
+    coletarMercadoItem(sel.codigoCatmat, sel.tipoCatmat)
+      .then(resp => {
+        setMercadoAdaptador(resp);
+        // Serviço / item sem embalagem: adota automaticamente a referência saneada
+        // como valor e limpa os campos de conversão que não se aplicam.
+        if (resp && !temEmbalagemReal(resp)) {
+          const ref = precoRefSaneado(resp);
+          if (ref) {
+            setFormData(p => ({
+              ...p,
+              valorUnitario: ref,
+              fatorConversao: undefined,
+              unidadeBase: undefined,
+              embalagemDescricao: undefined,
+            }));
+          }
+        }
+      })
+      .finally(() => setBuscandoAdaptador(false));
+  };
+
+  const removerCatmat = () => {
+    setFormData(p => ({
+      ...p,
+      codigoCatmat: undefined,
+      tipoCatmat: undefined,
+      nomeCatmatOficial: undefined,
+      descricaoCatmatOficial: undefined
+    }));
+    setSugestaoNomeOficial('');
+    setMercadoAdaptador(null);
+    setAdaptadorDispensado(false);
+  };
+
+  const aceitarSugestaoNome = () => {
+    if (sugestaoNomeOficial) {
+      setFormData(p => ({ ...p, nome: sugestaoNomeOficial }));
+      setSugestaoNomeOficial('');
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -285,10 +739,135 @@ export default function ItensMasterPage() {
     }
   };
 
+  const abrirLimpeza = async () => {
+    setLimpezaOpen(true);
+    setBackupBaixado(false);
+    setExcluidos(null);
+    setGrupos([]);
+    setAnalisando(true);
+    try {
+      // 1. Carregar todos masters
+      const mastersSnap = await getDocs(collection(db, 'items'));
+      const masters = mastersSnap.docs.map(d => ({ id: d.id, ...d.data() } as ItemMaster));
+
+      // 2. Cruzar com itens dos projetos
+      const projectsSnap = await getDocs(collection(db, 'projects'));
+      const usoPorItemId = new Map<string, Set<string>>();
+      await Promise.all(
+        projectsSnap.docs.map(async (projSnap) => {
+          const itemsSnap = await getDocs(collection(db, `projects/${projSnap.id}/items`));
+          itemsSnap.docs.forEach(d => {
+            const data = d.data() as any;
+            const refId: string | undefined = data.itemId || data.itemMasterId;
+            if (refId) {
+              if (!usoPorItemId.has(refId)) usoPorItemId.set(refId, new Set());
+              usoPorItemId.get(refId)!.add(projSnap.id);
+            }
+          });
+        })
+      );
+
+      // 3. Agrupar por nome normalizado
+      const mapa = new Map<string, ItemComUso[]>();
+      masters.forEach(m => {
+        const k = normalizarNome(m.nome);
+        if (!k) return;
+        if (!mapa.has(k)) mapa.set(k, []);
+        mapa.get(k)!.push({ ...m, projetosUsando: (usoPorItemId.get(m.id) || new Set()).size });
+      });
+
+      // 4. Decidir manter/excluir
+      const resultado: GrupoDuplicata[] = [];
+      mapa.forEach((itens, k) => {
+        if (itens.length <= 1) return;
+        const emUso = itens.filter(it => it.projetosUsando > 0);
+        const orfaos = itens.filter(it => it.projetosUsando === 0);
+        let paraManter: ItemComUso[];
+        let paraExcluir: ItemComUso[];
+        if (emUso.length > 0) {
+          paraManter = emUso;
+          paraExcluir = orfaos;
+        } else {
+          const ord = itens.slice().sort((a, b) => (a.codigo || 0) - (b.codigo || 0));
+          paraManter = [ord[0]];
+          paraExcluir = ord.slice(1);
+        }
+        if (paraExcluir.length > 0) {
+          resultado.push({ nomeNormalizado: k, paraManter, paraExcluir });
+        }
+      });
+
+      resultado.sort((a, b) => a.nomeNormalizado.localeCompare(b.nomeNormalizado));
+      setGrupos(resultado);
+    } catch (e: any) {
+      console.error(e);
+      alert(`Erro ao analisar duplicatas: ${e?.message || e}`);
+    } finally {
+      setAnalisando(false);
+    }
+  };
+
+  const baixarBackup = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'items'));
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const json = JSON.stringify({
+        exportadoEm: new Date().toISOString(),
+        total: data.length,
+        items: data
+      }, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.href = url;
+      a.download = `items-backup-${ts}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupBaixado(true);
+    } catch (e: any) {
+      alert(`Erro ao baixar backup: ${e?.message || e}`);
+    }
+  };
+
+  const executarExclusao = async () => {
+    const total = grupos.reduce((acc, g) => acc + g.paraExcluir.length, 0);
+    if (!backupBaixado) {
+      alert('Baixe o backup antes de excluir.');
+      return;
+    }
+    if (!confirm(`Excluir definitivamente ${total} item(s) duplicado(s)? Esta ação NÃO pode ser desfeita.`)) return;
+    if (!confirm('CONFIRMAÇÃO FINAL: a exclusão é permanente. Continuar?')) return;
+
+    setExcluindo(true);
+    try {
+      const idsExcluir = grupos.flatMap(g => g.paraExcluir.map(it => it.id));
+      // Firestore writeBatch suporta até 500 ops; particiona se preciso
+      for (let i = 0; i < idsExcluir.length; i += 400) {
+        const batch = writeBatch(db);
+        idsExcluir.slice(i, i + 400).forEach(id => {
+          batch.delete(doc(db, 'items', id));
+        });
+        await batch.commit();
+      }
+      setExcluidos(idsExcluir.length);
+      await carregarItens();
+    } catch (e: any) {
+      alert(`Erro ao excluir: ${e?.message || e}`);
+    } finally {
+      setExcluindo(false);
+    }
+  };
+
   if (loading) return <div className="p-6 text-lie-gray">Carregando banco de itens...</div>;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
+      {/* Diagnóstico CATMAT — mostra cobertura e permite vincular em lote */}
+      <CatmatDiagnostico items={items} onAtualizado={carregarItens} />
+
       <header className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-lie-ink">Banco de Dados de Itens</h1>
@@ -323,6 +902,90 @@ export default function ItensMasterPage() {
 
 
 
+          {/* Validar CATMAT em Lote */}
+          <button
+            onClick={() => setValidacaoLoteOpen(true)}
+            title="Buscar CATMAT/CATSER oficial em lote — atribui automaticamente"
+            className="group flex items-center bg-amber-50 border border-amber-300 text-amber-700 rounded-lg p-2 transition-all duration-300 hover:bg-amber-100 shadow-sm"
+          >
+            <Wand2 className="w-5 h-5 shrink-0 text-amber-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Validar CATMAT em Lote
+            </span>
+          </button>
+
+          {/* Preview rapido Mercado Gov — apenas leitura, cache 24h */}
+          <button
+            onClick={carregarMercadoPreview}
+            disabled={itensComCatmat.length === 0 || mercadoCarregando.size > 0}
+            title="Carregar preview de mercado (R$/unidade, saneadas) — leitura rapida, nao arquiva certidoes"
+            className="group flex items-center bg-blue-50 border border-blue-200 text-blue-700 rounded-lg p-2 transition-all duration-300 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            {mercadoCarregando.size > 0 ? (
+              <Loader2 className="w-5 h-5 shrink-0 text-blue-600 animate-spin" />
+            ) : (
+              <Eye className="w-5 h-5 shrink-0 text-blue-600" />
+            )}
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Carregar Mercado Gov ({itensComCatmat.length})
+            </span>
+          </button>
+
+          {/* Sincronizar Catalogo CNBS — Fase 2 redesign 2026-05-29 */}
+          <button
+            onClick={() => setSincronizarOpen(true)}
+            disabled={itensComCatmat.length === 0}
+            title={itensComCatmat.length === 0
+              ? 'Sem itens com CATMAT/CATSER vinculados'
+              : `Sincronizar ${itensComCatmat.length} PDMs do catalogo SERPRO CNBS no cache local. Habilita o novo wizard de cadastro com caracteristicas validadas.`}
+            className="group flex items-center bg-purple-50 border border-purple-300 text-purple-700 rounded-lg p-2 transition-all duration-300 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            <Database className="w-5 h-5 shrink-0 text-purple-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Sincronizar Catálogo
+            </span>
+          </button>
+
+          {/* Desvincular CATMAT/CATSER escolhidos pela IA (v1.12.x) */}
+          {itensVinculadosPorIA.length > 0 && (
+            <button
+              onClick={desvincularEmLote}
+              title={`${itensVinculadosPorIA.length} item(ns) tem CATMAT/CATSER que foram escolhidos pela IA na v1.12 (provavelmente errado, ex: carrinho de pipoca → fornecimento de refeições). Desvincular em lote pra usar rota alternativa.`}
+              className="group flex items-center bg-red-50 border border-red-300 text-red-700 rounded-lg p-2 transition-all duration-300 hover:bg-red-100 shadow-sm"
+            >
+              <AlertTriangle className="w-5 h-5 shrink-0 text-red-600" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+                Desvincular CATMAT IA ({itensVinculadosPorIA.length})
+              </span>
+            </button>
+          )}
+
+          {/* Restaurar dados originais — reverte itens que foram modificados pelo batch Padronizar Nomenclatura (v1.12.x) */}
+          {itensComPadronizacaoIA.length > 0 && (
+            <button
+              onClick={() => setRestaurarOpen(true)}
+              title={`${itensComPadronizacaoIA.length} item(ns) com nome/descrição/unidade sobrescritos pela IA. Restaurar valores originais preservados em nomeOriginalLIE.`}
+              className="group flex items-center bg-amber-50 border border-amber-300 text-amber-700 rounded-lg p-2 transition-all duration-300 hover:bg-amber-100 shadow-sm"
+            >
+              <ArrowLeft className="w-5 h-5 shrink-0 text-amber-600" />
+              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+                Restaurar Originais ({itensComPadronizacaoIA.length})
+              </span>
+            </button>
+          )}
+
+          {/* Limpar Duplicatas */}
+          <button
+            onClick={abrirLimpeza}
+            title="Limpar itens duplicados (mantém os em uso por projetos)"
+            className="group flex items-center bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 transition-all duration-300 hover:bg-red-100 shadow-sm"
+          >
+            <Wand2 className="w-5 h-5 shrink-0 text-red-600" />
+            <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium text-sm">
+              Limpar Duplicatas
+            </span>
+          </button>
+
           {/* New Item Button */}
           <button onClick={openNew} className="group flex items-center bg-lie-green text-white rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-lie-greenDark shadow-sm">
             <Plus className="w-5 h-5 shrink-0" />
@@ -351,6 +1014,32 @@ export default function ItensMasterPage() {
             <div className="md:col-span-2">
               <label className="block text-sm font-bold text-gray-700 mb-1">Nome do Item *</label>
               <input type="text" required value={formData.nome} onChange={e => setFormData(p => ({...p, nome: e.target.value}))} className="w-full border-gray-300 rounded-lg shadow-sm" />
+              {sugestaoNomeOficial && (
+                <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded text-xs flex items-start gap-2">
+                  <Lightbulb className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <span className="text-amber-900">
+                      Sugestão: o nome oficial no catálogo é <strong>"{sugestaoNomeOficial}"</strong>.
+                    </span>
+                    <div className="flex gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={aceitarSugestaoNome}
+                        className="text-amber-700 hover:text-amber-900 font-bold underline text-[10px] uppercase"
+                      >
+                        Usar nome oficial
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSugestaoNomeOficial('')}
+                        className="text-gray-500 hover:text-gray-700 text-[10px] uppercase"
+                      >
+                        Manter atual
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-1">Categoria *</label>
@@ -372,6 +1061,260 @@ export default function ItensMasterPage() {
               <label className="block text-sm font-bold text-gray-700 mb-1">Descrição / Especificação</label>
               <textarea rows={2} value={formData.descricao} onChange={e => setFormData(p => ({...p, descricao: e.target.value}))} className="w-full border-gray-300 rounded-lg shadow-sm" />
             </div>
+
+            {/* === BLOCO CATMAT/CATSER OFICIAL — BUSCA INTELIGENTE === */}
+            <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
+              <div className="flex items-start gap-2 mb-3">
+                <ShieldCheck className="w-5 h-5 text-lie-green shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-lie-ink">Código CATMAT / CATSER oficial</h3>
+                  <p className="text-xs text-gray-500 leading-snug">
+                    Busca direta no catálogo Compras.gov.br por palavra-chave. Obrigatório pra que o
+                    item entre na <strong>Pesquisa Automática de Preços</strong> (IN 65/2021).
+                  </p>
+                </div>
+              </div>
+
+              {!formData.semCorrespondenciaCatalogo && (
+                <>
+                  <CatalogoSearchPicker
+                    initialTermo={formData.nome}
+                    selecionado={
+                      formData.codigoCatmat
+                        ? {
+                            codigoCatmat: formData.codigoCatmat,
+                            tipoCatmat: formData.tipoCatmat || 'material',
+                            nomeCatmatOficial: formData.nomeCatmatOficial || '',
+                            descricaoCatmatOficial: formData.descricaoCatmatOficial || ''
+                          }
+                        : null
+                    }
+                    onSelect={handleCatalogoSelect}
+                    onClear={removerCatmat}
+                  />
+
+                  {/* Adaptador de embalagem: só pra material com embalagem real (garrafa/caixa).
+                      Serviço/sem-embalagem usa o painel de referência saneada mais abaixo. */}
+                  {formData.codigoCatmat && !adaptadorDispensado && (buscandoAdaptador || temEmbalagemReal(mercadoAdaptador)) && (
+                    <AdaptadorUnidadeCatmat
+                      mercado={mercadoAdaptador}
+                      carregando={buscandoAdaptador}
+                      unidadeAtual={formData.unidade || 'unidade'}
+                      nomeItem={formData.nome || ''}
+                      valorUnitarioAtual={formData.valorUnitario || 0}
+                      onAdaptar={(a) => {
+                        // Modelo A: preserva unidade e valor, so seta fator/base/descricao
+                        setFormData(p => ({
+                          ...p,
+                          embalagemDescricao: a.embalagemDescricao,
+                          fatorConversao: a.fatorConversao,
+                          unidadeBase: a.unidadeBase,
+                          ...(a.unidade !== undefined ? { unidade: a.unidade } : {}),
+                          ...(a.valorUnitario !== undefined ? { valorUnitario: a.valorUnitario } : {}),
+                        }));
+                        setAdaptadorDispensado(true);
+                      }}
+                      onDispensar={() => setAdaptadorDispensado(true)}
+                    />
+                  )}
+                </>
+              )}
+
+              {/* Toggle de rota legal alternativa */}
+              <div className={`mt-3 rounded-lg border ${formData.semCorrespondenciaCatalogo ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'} p-3`}>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!formData.semCorrespondenciaCatalogo}
+                    onChange={e => setFormData(p => ({
+                      ...p,
+                      semCorrespondenciaCatalogo: e.target.checked,
+                      // Se ativando rota alternativa, limpa o CATMAT (incompatíveis)
+                      ...(e.target.checked && {
+                        codigoCatmat: undefined,
+                        tipoCatmat: undefined,
+                        nomeCatmatOficial: undefined,
+                        descricaoCatmatOficial: undefined
+                      })
+                    }))}
+                    className="mt-0.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                  />
+                  <div className="flex-1">
+                    <div className="text-xs font-bold text-lie-ink">
+                      Este item não tem código CATMAT/CATSER correspondente
+                    </div>
+                    <div className="text-[11px] text-gray-600 mt-0.5 leading-relaxed">
+                      Use esta opção para itens que genuinamente não existem no catálogo
+                      Compras.gov.br (ex: carrinho de pipoca para evento, oficinas específicas,
+                      figurino de mascote personalizado). A pesquisa de preço seguirá a{' '}
+                      <strong>rota legal alternativa: 3 orçamentos com fornecedores</strong>,
+                      conforme <strong>IN SEGES/ME 73/2020 art. 5º IV</strong> (pesquisa
+                      direta com fornecedores nos últimos 6 meses) ou{' '}
+                      <strong>IN 65/2021 art. 5º V</strong> (notas fiscais eletrônicas) —
+                      em linha com Lei 14.133/21 art. 28 e Acórdão TCU 1445/2015.
+                    </div>
+                    {formData.semCorrespondenciaCatalogo && (
+                      <div className="mt-2 text-[11px] text-purple-900 bg-white border border-purple-200 rounded p-2 leading-relaxed">
+                        ✓ Item marcado para rota alternativa. Adicione no mínimo{' '}
+                        <strong>3 cotações de fornecedores</strong> pela aba de
+                        <em> Cotações Manuais / Fomento</em> ao gerar o relatório do projeto.
+                      </div>
+                    )}
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Serviço / item sem embalagem: painel de referência saneada (TCU) — conduz
+                a catalogação mostrando direto o preço de referência, sem pedir embalagem. */}
+            {formData.codigoCatmat && mercadoAdaptador && !temEmbalagemReal(mercadoAdaptador) && (
+              <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
+                <ReferenciaPrecoMercado
+                  mercado={mercadoAdaptador}
+                  valorAtual={formData.valorUnitario || 0}
+                  onUsar={(v) => setFormData(p => ({ ...p, valorUnitario: v }))}
+                />
+              </div>
+            )}
+
+            {/* === BLOCO CONVERSOR DE UNIDADE === só material com embalagem real === */}
+            {!(formData.codigoCatmat && mercadoAdaptador && !temEmbalagemReal(mercadoAdaptador)) && (
+            <div className="md:col-span-3 border-t border-gray-200 pt-4 mt-2">
+              <div className="flex items-start gap-2 mb-3">
+                <Package className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-lie-ink">Embalagem oficial</h3>
+                    {formData.codigoCatmat && (
+                      <button
+                        type="button"
+                        onClick={buscarEmbalagensOficiais}
+                        disabled={buscandoEmbalagens}
+                        className="text-xs px-3 py-1 bg-blue-600 text-white font-bold rounded hover:bg-blue-700 transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                      >
+                        {buscandoEmbalagens ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                        {buscandoEmbalagens ? 'Buscando…' : 'Ver embalagens do mercado'}
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 leading-snug mt-1">
+                    <strong>Ideal:</strong> usar a mesma embalagem que aparece no mercado público
+                    (ex: GARRAFA 500ml). Assim a comparação é direta, sem conversão e o parecerista
+                    não precisa interpretar matemática.
+                  </p>
+                </div>
+              </div>
+
+              {/* Picker de embalagens do mercado */}
+              {embalagensDisponiveis && (
+                <div className="mb-3 border-2 border-blue-200 rounded-lg overflow-hidden bg-blue-50/30">
+                  <div className="bg-blue-100 px-3 py-2 text-xs font-bold text-blue-900 flex items-center justify-between">
+                    <span>
+                      {embalagensDisponiveis.length === 0
+                        ? 'Nenhuma embalagem encontrada nas cotações públicas'
+                        : `${embalagensDisponiveis.length} embalagem(ns) encontrada(s) — clique pra adotar`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEmbalagensDisponiveis(null)}
+                      className="text-blue-700 hover:text-blue-900"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="divide-y divide-blue-100 max-h-60 overflow-y-auto">
+                    {embalagensDisponiveis.map((emb, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => adotarEmbalagem(emb)}
+                        className="w-full text-left p-2.5 hover:bg-blue-100 transition flex items-start gap-3"
+                      >
+                        <Package className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-sm text-lie-ink">
+                            {emb.unidade}
+                            {emb.capacidade > 0 && (
+                              <span className="text-blue-700 ml-1">{emb.capacidade} {emb.siglaMedida}</span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-gray-600 mt-0.5">
+                            {emb.totalCotacoes} cotação(ões) • Mediana: <strong>{emb.estatisticas.mediano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>
+                            {' '}({emb.estatisticas.minimo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} a {emb.estatisticas.maximo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})
+                          </div>
+                        </div>
+                        <CheckCircle2 className="w-4 h-4 text-green-600 opacity-0 group-hover:opacity-100 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="px-3 py-2 bg-blue-50 text-[10px] text-blue-800 italic border-t border-blue-100">
+                    Ao adotar, preenche unidade, fator de conversão e sugere o preço pela mediana saneada.
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                <div className="md:col-span-6">
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Descrição da embalagem (humano)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Caixa com 48 copos de 200ml"
+                    value={formData.embalagemDescricao || ''}
+                    onChange={e => setFormData(p => ({ ...p, embalagemDescricao: e.target.value }))}
+                    className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                  />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Quantidade total na embalagem</label>
+                  <input
+                    type="number" step="0.001" min={0}
+                    placeholder="Ex: 9600 (= 48 × 200ml)"
+                    value={formData.fatorConversao ?? ''}
+                    onChange={e => setFormData(p => ({ ...p, fatorConversao: e.target.value ? Number(e.target.value) : undefined }))}
+                    className="w-full border-gray-300 rounded-lg shadow-sm text-sm font-mono"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Total da unidade que você compra na base abaixo. Ex: 1 <strong>caixa</strong> = 48 × 200ml = <strong>9600 ml</strong>.
+                  </p>
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Unidade base</label>
+                  <select
+                    value={formData.unidadeBase || ''}
+                    onChange={e => setFormData(p => ({ ...p, unidadeBase: e.target.value || undefined }))}
+                    className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                  >
+                    <option value="">Selecione…</option>
+                    <option value="ML">ML (mililitros)</option>
+                    <option value="L">L (litros)</option>
+                    <option value="G">G (gramas)</option>
+                    <option value="KG">KG (quilogramas)</option>
+                    <option value="UN">UN (unidades)</option>
+                    <option value="M">M (metros)</option>
+                    <option value="M²">M² (metro quadrado)</option>
+                    <option value="M³">M³ (metro cúbico)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Preview do cálculo */}
+              {formData.fatorConversao && formData.unidadeBase && (formData.valorUnitario || 0) > 0 && (
+                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                  <span className="text-green-900">
+                    Preço base calculado:{' '}
+                    <strong className="font-mono">
+                      {((formData.valorUnitario || 0) / formData.fatorConversao).toFixed(4)}
+                    </strong>{' '}
+                    R$/{formData.unidadeBase.toLowerCase()}
+                    {' '}— este valor será comparado contra a mediana saneada das cotações governamentais
+                    na mesma unidade base.
+                  </span>
+                </div>
+              )}
+            </div>
+            )}
+
             <div className="md:col-span-3 flex justify-end gap-3 pt-2">
               <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancelar</button>
               <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-8 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2">
@@ -384,66 +1327,238 @@ export default function ItensMasterPage() {
       )}
 
       <div className="bg-white rounded-xl shadow-premium overflow-hidden border border-gray-100">
-        <table className="w-full text-left">
-          <thead className="bg-gray-50 text-xs font-bold text-lie-gray uppercase border-b border-gray-200">
+        <div className="overflow-x-auto">
+        <table className="w-full text-left min-w-[950px]">
+          <thead className="bg-gray-50 text-[10px] font-bold text-lie-gray uppercase border-b border-gray-200">
             <tr>
-              <th className="px-4 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('categoria')}>
+              <th className="px-2 py-2.5 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('categoria')}>
                 <div className="flex items-center gap-1">Categoria <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-4 py-3 w-20 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('codigo')}>
+              <th className="px-2 py-2.5 w-16 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('codigo')}>
                 <div className="flex items-center gap-1">Nº <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-4 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('nome')}>
+              <th className="px-2 py-2.5 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('nome')}>
                 <div className="flex items-center gap-1">Item <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-4 py-3">Descritivo</th>
-              <th className="px-4 py-3 w-24 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('unidade')}>
+              <th className="px-2 py-2.5 hidden xl:table-cell">Descritivo</th>
+              <th className="px-2 py-2.5 w-20 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('unidade')}>
                 <div className="flex items-center gap-1">Unidade <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-4 py-3 w-32 text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('valorUnitario')}>
+              <th className="px-2 py-2.5 w-28 text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('valorUnitario')}>
                 <div className="flex items-center gap-1 justify-end">$ Unitário <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-4 py-3 w-24 text-right">Ações</th>
+              <th className="px-2 py-2.5 w-32 text-right" title="Mediana do mercado público (Compras.gov.br + PNCP)">
+                <div className="flex items-center gap-1 justify-end">Mercado Gov</div>
+              </th>
+              <th className="px-1.5 py-2.5 w-[108px] text-right">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {sortedItems.map(it => (
+            {itensPaginados.map(it => (
               <tr key={it.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-4 py-3">
-                  <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-100 rounded-full text-gray-600 uppercase">{it.categoria}</span>
+                <td className="px-2 py-2">
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 bg-gray-100 rounded-full text-gray-600 uppercase">{it.categoria}</span>
                 </td>
-                <td className="px-4 py-3 text-sm font-mono text-gray-500">#{String(it.codigo).padStart(3, '0')}</td>
-                <td className="px-4 py-3 font-bold text-lie-ink">{it.nome}</td>
-                <td className="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">{it.descricao || '-'}</td>
-                <td className="px-4 py-3 text-sm text-gray-600">{it.unidade}</td>
-                <td className="px-4 py-3 text-sm font-bold text-right text-lie-ink">
+                <td className="px-2 py-2 text-[11px] font-mono text-gray-500">#{String(it.codigo).padStart(3, '0')}</td>
+                <td className="px-2 py-2 font-bold text-lie-ink text-[13px]">
+                  <div className="flex items-center gap-2">
+                    {it.codigoCatmat ? (
+                      <span
+                        title={`${it.tipoCatmat === 'servico' ? 'CATSER' : 'CATMAT'} ${it.codigoCatmat} — ${it.nomeCatmatOficial || ''}`}
+                        className="text-[9px] font-bold px-1.5 py-0.5 bg-green-100 text-green-800 border border-green-200 rounded shrink-0 uppercase tracking-wider"
+                      >
+                        ✓ {it.tipoCatmat === 'servico' ? 'CATSER' : 'CATMAT'}
+                      </span>
+                    ) : (
+                      <span
+                        title="Sem CATMAT/CATSER oficial — não entra na pesquisa automática de preços"
+                        className="text-[9px] font-bold px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-200 rounded shrink-0 uppercase tracking-wider"
+                      >
+                        ⚠ Sem CATMAT
+                      </span>
+                    )}
+                    {(it as any).precisaCompletarWizard && it.codigoCatmat && (
+                      <button
+                        type="button"
+                        onClick={() => setWizardItem(it)}
+                        title="Clique pra abrir o wizard de atributos e estruturar o item com as características oficiais do CATMAT/CATSER"
+                        className="text-[9px] font-bold px-1.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded shrink-0 uppercase tracking-wider hover:bg-purple-200 hover:border-purple-400 transition cursor-pointer"
+                      >
+                        🔧 Completar
+                      </button>
+                    )}
+                    {it.atributosWizard && it.atributosWizard.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setWizardItem(it)}
+                        title={`Atributos estruturados (${it.atributosWizard.length}): ${it.atributosWizard.map(a => `${a.nomeCaracteristica}=${a.nomeValorCaracteristica}`).join(' · ')}. Clique pra editar.`}
+                        className="text-[9px] font-bold px-1.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded shrink-0 uppercase tracking-wider hover:bg-emerald-200 transition cursor-pointer"
+                      >
+                        ✓ Estruturado ({it.atributosWizard.length})
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => openEdit(it)}
+                      className="truncate text-left hover:text-lie-green hover:underline transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-lie-green/30 rounded"
+                      title="Clique para editar este item"
+                    >
+                      {it.nome}
+                    </button>
+                  </div>
+                </td>
+                <td className="px-2 py-2 text-[11px] text-gray-500 max-w-[220px] truncate hidden xl:table-cell">{it.descricao || '-'}</td>
+                <td className="px-2 py-2 text-[12px] text-gray-600">{it.unidade}</td>
+                <td className="px-2 py-2 text-[12px] font-bold text-right text-lie-ink whitespace-nowrap">
                   {it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex items-center justify-end gap-1">
+                <td className="px-2 py-2 text-[11px] text-right">
+                  {(() => {
+                    const cod = it.codigoCatmat;
+
+                    // Sem CATMAT — diferenciar 3 sub-estados: rota legal alternativa, RH, sem código
+                    if (!cod) {
+                      // 1. Item formalmente marcado como "sem CATMAT — rota de 3 orçamentos"
+                      if (it.semCorrespondenciaCatalogo) {
+                        return (
+                          <span
+                            className="text-[9px] text-purple-700 font-semibold leading-tight block text-right cursor-help"
+                            title="Item sem correspondência no CATMAT/CATSER por design. Pesquisa de preço segue rota legal de 3 orçamentos com fornecedores (IN 73/2020 art. 5º IV ou IN 65/2021 art. 5º V)."
+                          >
+                            📑 3 orçamentos
+                          </span>
+                        );
+                      }
+                      // 2. Recurso Humano — sem licitação pública por natureza
+                      const isRH = isRecursoHumano(it);
+                      if (isRH) {
+                        return (
+                          <span className="text-[9px] text-gray-400 italic leading-tight block text-right">
+                            N/A<br />Serv. Pessoal
+                          </span>
+                        );
+                      }
+                      // 3. Item sem código (falta vincular)
+                      return (
+                        <span
+                          className="text-[9px] text-amber-600 font-semibold italic cursor-help"
+                          title="Este item não tem código CATMAT/CATSER. Edite o item e vincule o código para habilitar a comparação de preços de mercado, ou marque-o como 'sem correspondência no catálogo' para usar a rota legal alternativa."
+                        >
+                          ⚠ sem CATMAT
+                        </span>
+                      );
+                    }
+                    const dados = mercado[cod];
+                    if (mercadoCarregando.has(cod) && !dados) {
+                      return (
+                        <span className="text-gray-400 italic flex items-center justify-end gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" /> buscando…
+                        </span>
+                      );
+                    }
+                    if (dados && dados.totalCotacoes > 0) {
+                      // Comparação justa quando user cadastrou fator de conversão
+                      const temFator = !!(it.fatorConversao && it.fatorConversao > 0);
+                      const precoBaseItem = temFator ? it.valorUnitario / it.fatorConversao! : it.valorUnitario;
+                      // Preço de referência (saneado se disponível)
+                      const precoRefGov = dados.saneamento?.precoReferencia ?? dados.estatisticas.mediano;
+                      // Calcula referência base: se cotações têm capacidade, divide
+                      const capacidadeGov = dados.unidadeDominante?.capacidade || 0;
+                      const precoBaseGov = capacidadeGov > 0 ? precoRefGov / capacidadeGov : precoRefGov;
+
+                      // Quando dá pra comparar em base unificada (item TEM fator E mercado TEM capacidade)
+                      const podeCompararBase = temFator && capacidadeGov > 0
+                        && it.unidadeBase?.toUpperCase() === dados.unidadeDominante?.siglaMedida?.toUpperCase();
+
+                      const valorComparado = podeCompararBase ? precoBaseGov : precoRefGov;
+                      const nossoValor = podeCompararBase ? precoBaseItem : it.valorUnitario;
+                      const diff = ((nossoValor - valorComparado) / valorComparado) * 100;
+                      const cor = diff > 20 ? 'text-red-600' : diff < -20 ? 'text-amber-600' : 'text-green-600';
+                      const seta = diff > 5 ? '↑' : diff < -5 ? '↓' : '≈';
+
+                      const diverge = !podeCompararBase && dados.unidadeDominante && it.unidade &&
+                        !it.unidade.toLowerCase().includes(dados.unidadeDominante.unidade.toLowerCase().slice(0, 4));
+
+                      const fmtPreco = (v: number) => v < 0.01
+                        ? `R$ ${v.toFixed(4)}`
+                        : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+                      return (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setMercadoDetalhe({ item: it, dados }); }}
+                          className={`group inline-flex flex-col items-end gap-0 hover:bg-blue-50 px-2 py-1 rounded transition ${diverge ? 'ring-1 ring-amber-300' : ''}`}
+                          title={podeCompararBase
+                            ? `Comparação em R$/${it.unidadeBase?.toLowerCase()}: você R$${precoBaseItem.toFixed(4)} vs mercado R$${precoBaseGov.toFixed(4)}`
+                            : 'Clique pra ver cotações detalhadas e auditar saneamento'}
+                        >
+                          <span className="font-bold text-blue-700 flex items-baseline gap-1">
+                            {fmtPreco(valorComparado)}
+                            <span className="text-[9px] text-gray-500 font-normal">
+                              /{podeCompararBase ? it.unidadeBase?.toLowerCase() : (dados.unidadeDominante?.unidade?.toLowerCase() || 'un')}
+                            </span>
+                          </span>
+                          <span className="text-[9px] text-gray-500 font-medium uppercase tracking-wider">
+                            {dados.saneamento ? `${dados.saneamento.cotacoesIncluidas}/${dados.totalCotacoes} saneadas` : `${dados.totalCotacoes} cotações`}
+                          </span>
+                          {diverge ? (
+                            <span className="text-[9px] font-bold text-amber-700">⚠ unidade difere</span>
+                          ) : (
+                            <span className={`text-[9px] font-bold ${cor}`}>
+                              {seta} {Math.abs(diff).toFixed(0)}% vs nosso
+                            </span>
+                          )}
+                        </button>
+                      );
+                    }
+                    if (dados && dados.totalCotacoes === 0) {
+                      return <span className="text-amber-600 text-[10px] italic">sem cotação</span>;
+                    }
+                    return <span className="text-gray-300 italic">…</span>;
+                  })()}
+                </td>
+                <td className="px-1.5 py-2 text-right">
+                  <div className="flex items-center justify-end gap-0.5">
                     {confirmDeleteId === it.id ? (
                       <>
-                        <span className="text-xs text-red-600 font-semibold mr-1">Excluir?</span>
+                        <span className="text-[10px] text-red-600 font-semibold mr-1">Excluir?</span>
                         <button
                           onClick={() => handleDelete(it.id)}
-                          className="px-2 py-1 bg-red-500 text-white text-xs font-bold rounded hover:bg-red-600 transition"
+                          className="px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-bold rounded hover:bg-red-600 transition"
                         >
                           Sim
                         </button>
                         <button
                           onClick={() => setConfirmDeleteId(null)}
-                          className="px-2 py-1 bg-gray-200 text-gray-700 text-xs font-bold rounded hover:bg-gray-300 transition"
+                          className="px-1.5 py-0.5 bg-gray-200 text-gray-700 text-[10px] font-bold rounded hover:bg-gray-300 transition"
                         >
                           Não
                         </button>
                       </>
                     ) : (
                       <>
-                        <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar">
-                          <Edit3 className="w-4 h-4" />
+                        <button
+                          onClick={() => setPesquisaItem(it)}
+                          className={`p-1 rounded transition ${it.pesquisado ? 'text-lie-green hover:bg-lie-green/10' : 'text-amber-500 hover:bg-amber-50'}`}
+                          title={it.pesquisado ? 'Pesquisa de Preços realizada — clique para refazer/adicionar cotações' : 'Pesquisa de Preços Públicos (IN 65/2021)'}
+                        >
+                          <Scale className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => setConfirmDeleteId(it.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition" title="Excluir">
-                          <Trash2 className="w-4 h-4" />
+                        {it.pesquisado && it.tokenPesquisa && (
+                          <a
+                            href={`/#/validar?token=${it.tokenPesquisa}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1 text-blue-500 hover:bg-blue-50 rounded transition flex items-center justify-center"
+                            title="Visualizar Certificado da Pesquisa (vale pra todos os projetos)"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <button onClick={() => openEdit(it)} className="p-1 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar">
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setConfirmDeleteId(it.id)} className="p-1 text-red-500 hover:bg-red-50 rounded transition" title="Excluir">
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </>
                     )}
@@ -453,10 +1568,522 @@ export default function ItensMasterPage() {
             ))}
           </tbody>
         </table>
+        </div>
         {sortedItems.length === 0 && (
           <div className="p-12 text-center text-lie-gray italic">Nenhum item encontrado.</div>
         )}
+
+        {/* Paginação */}
+        {totalItens > 0 && (
+          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="text-gray-600">
+              Mostrando <strong>{offsetIni + 1}</strong>–<strong>{Math.min(offsetIni + tamanhoPagina, totalItens)}</strong> de <strong>{totalItens}</strong> item(ns)
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-gray-500">Por página:</label>
+              <select
+                value={tamanhoPagina}
+                onChange={e => setTamanhoPagina(Number(e.target.value))}
+                className="border border-gray-300 rounded px-2 py-1 text-xs bg-white focus:ring-lie-green focus:border-lie-green"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={500}>Todos</option>
+              </select>
+            </div>
+
+            {totalPaginas > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPaginaAtual(1)}
+                  disabled={paginaSegura === 1}
+                  className="px-2 py-1 border border-gray-300 rounded text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  title="Primeira página"
+                >
+                  «
+                </button>
+                <button
+                  onClick={() => setPaginaAtual(p => Math.max(1, p - 1))}
+                  disabled={paginaSegura === 1}
+                  className="px-3 py-1 border border-gray-300 rounded text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  Anterior
+                </button>
+                <span className="px-3 py-1 bg-lie-green text-white rounded font-bold">
+                  {paginaSegura} <span className="font-normal opacity-70">de {totalPaginas}</span>
+                </span>
+                <button
+                  onClick={() => setPaginaAtual(p => Math.min(totalPaginas, p + 1))}
+                  disabled={paginaSegura === totalPaginas}
+                  className="px-3 py-1 border border-gray-300 rounded text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  Próximo
+                </button>
+                <button
+                  onClick={() => setPaginaAtual(totalPaginas)}
+                  disabled={paginaSegura === totalPaginas}
+                  className="px-2 py-1 border border-gray-300 rounded text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  title="Última página"
+                >
+                  »
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* ===== MODAL DE VALIDAÇÃO CATMAT EM LOTE ===== */}
+      <ValidacaoCatmatLoteModal
+        isOpen={validacaoLoteOpen}
+        onClose={() => setValidacaoLoteOpen(false)}
+        items={items}
+        onAtualizado={carregarItens}
+      />
+
+
+      {/* ===== WIZARD DE ATRIBUTOS PDM (Fase 3 redesign 2026-05-29) ===== */}
+      {wizardItem && (
+        <WizardAtributosPDM
+          item={wizardItem}
+          onClose={() => setWizardItem(null)}
+          onComplete={() => { setWizardItem(null); carregarItens(); }}
+        />
+      )}
+
+      {/* ===== MODAL DE SINCRONIZAÇÃO DO CATÁLOGO CNBS (Fase 2 redesign 2026-05-29) ===== */}
+      {sincronizarOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh]">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-500 rounded-lg">
+                  <Database className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Sincronizar Catálogo CNBS</h3>
+                  <p className="text-xs text-gray-300">
+                    {sincronizarRunning
+                      ? 'Baixando PDMs e características da API SERPRO…'
+                      : sincronizarResultado
+                        ? `Concluído: ${sincronizarResultado.pdmsAtualizados} PDMs, ${sincronizarResultado.servicosAtualizados} serviços`
+                        : 'Baixa estrutura oficial pro wizard de cadastro'
+                    }
+                  </p>
+                </div>
+              </div>
+              {!sincronizarRunning && (
+                <button
+                  onClick={() => { setSincronizarOpen(false); setSincronizarResultado(null); }}
+                  className="hover:bg-white/10 p-2 rounded-full transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {!sincronizarRunning && !sincronizarResultado && (
+                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                  <p>
+                    Vou baixar do SERPRO CNBS os <strong>PDMs (Padrão Descritivo de Material)</strong>
+                    {' '}dos {itensComCatmat.length} itens que você tem cadastrados,
+                    incluindo todas as <strong>características obrigatórias</strong> de cada um
+                    (tipo, material, embalagem, capacidade…) e os valores possíveis.
+                  </p>
+                  <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg p-2">
+                    <strong>Por que isso importa:</strong> com esses dados em cache local,
+                    o wizard de cadastro (próxima fase) poderá perguntar as características
+                    de cada item de forma estruturada — eliminando o problema de itens
+                    diferentes virarem o mesmo CATSER genérico.
+                  </p>
+                  {catalogoStats && (
+                    <div className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                      <div className="font-bold mb-1">Estado atual do cache</div>
+                      <div>PDMs cacheados: <strong>{catalogoStats.pdmsCached}</strong></div>
+                      <div>Serviços cacheados: <strong>{catalogoStats.servicosCached}</strong></div>
+                      {catalogoStats.ultimaSync && (
+                        <div className="text-gray-500 mt-1">
+                          Última sincronização: {catalogoStats.ultimaSync.toLocaleString('pt-BR')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                    <strong>Tempo estimado:</strong> 30s a 2min, dependendo de quantos PDMs únicos
+                    estão envolvidos. SERPRO não cobra pelo uso desta API.
+                  </p>
+                </div>
+              )}
+
+              {sincronizarRunning && (
+                <div className="space-y-2">
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div className="bg-purple-500 h-full animate-pulse" style={{ width: '60%' }} />
+                  </div>
+                  <p className="text-xs text-gray-500 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Consultando SERPRO CNBS — pode levar até 2 minutos…
+                  </p>
+                </div>
+              )}
+
+              {sincronizarResultado && !sincronizarRunning && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-green-700">{sincronizarResultado.pdmsAtualizados}</div>
+                      <div className="text-xs text-green-600 font-semibold uppercase tracking-wider">PDMs cacheados</div>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-blue-700">{sincronizarResultado.servicosAtualizados}</div>
+                      <div className="text-xs text-blue-600 font-semibold uppercase tracking-wider">Serviços cacheados</div>
+                    </div>
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-purple-700">{sincronizarResultado.itensVinculadosTotal}</div>
+                      <div className="text-xs text-purple-600 font-semibold uppercase tracking-wider">Itens vinculados</div>
+                    </div>
+                  </div>
+                  {sincronizarResultado.erros.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-bold text-amber-800">⚠ {sincronizarResultado.erros.length} erro(s):</div>
+                      <div className="max-h-40 overflow-y-auto space-y-1">
+                        {sincronizarResultado.erros.slice(0, 15).map((e, idx) => (
+                          <div key={idx} className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-1.5">
+                            <strong>{e.tipo} {e.codigo}:</strong> {e.motivo}
+                          </div>
+                        ))}
+                        {sincronizarResultado.erros.length > 15 && (
+                          <div className="text-[11px] text-gray-500 italic">…e mais {sincronizarResultado.erros.length - 15}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
+              {!sincronizarRunning && !sincronizarResultado && (
+                <>
+                  <button
+                    onClick={() => setSincronizarOpen(false)}
+                    className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={startSincronizacao}
+                    className="flex-1 py-2 bg-purple-500 text-white font-bold rounded-lg hover:bg-purple-600 transition flex items-center justify-center gap-2"
+                  >
+                    <Database className="w-4 h-4" />
+                    Sincronizar agora
+                  </button>
+                </>
+              )}
+              {sincronizarRunning && (
+                <button disabled className="flex-1 py-2 bg-gray-300 text-gray-500 font-bold rounded-lg cursor-not-allowed">
+                  Sincronizando…
+                </button>
+              )}
+              {!sincronizarRunning && sincronizarResultado && (
+                <button
+                  onClick={() => { setSincronizarOpen(false); setSincronizarResultado(null); }}
+                  className="flex-1 py-2 bg-lie-ink text-white font-bold rounded-lg hover:bg-black transition"
+                >
+                  Fechar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== MODAL DE RESTAURAÇÃO DOS ITENS (Fase 1 redesign 2026-05-29) ===== */}
+      {restaurarOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh]">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-500 rounded-lg">
+                  <ArrowLeft className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Restaurar Dados Originais</h3>
+                  <p className="text-xs text-gray-300">
+                    {restaurarRunning
+                      ? `Restaurando ${restaurarResults.length + 1} de ${itensComPadronizacaoIA.length}…`
+                      : restaurarResults.length > 0
+                        ? `Concluído: ${restaurarResults.filter(r => r.status === 'restaurado').length} restaurado(s), ${restaurarResults.filter(r => r.status === 'erro').length} erro(s)`
+                        : `${itensComPadronizacaoIA.length} item(ns) terão nome/descrição/unidade restaurados`
+                    }
+                  </p>
+                </div>
+              </div>
+              {!restaurarRunning && (
+                <button
+                  onClick={() => { setRestaurarOpen(false); setRestaurarResults([]); }}
+                  className="hover:bg-white/10 p-2 rounded-full transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {!restaurarRunning && restaurarResults.length === 0 && (
+                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                  <p>
+                    Os <strong>{itensComPadronizacaoIA.length} itens</strong> abaixo tiveram
+                    nome/descrição/unidade reescritos pela IA na v1.12.0.0 (Padronizar Nomenclatura).
+                    Os valores originais foram preservados em campos auxiliares e serão
+                    restaurados agora.
+                  </p>
+                  <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
+                    <strong>O que IA escreveu não será perdido:</strong> fica preservado em
+                    <code className="text-xs bg-emerald-100 px-1 mx-1 rounded">nomePadronizadoIA</code>,
+                    <code className="text-xs bg-emerald-100 px-1 mx-1 rounded">descricaoPadronizadaIA</code>,
+                    <code className="text-xs bg-emerald-100 px-1 mx-1 rounded">unidadePadronizadaIA</code>.
+                    Pode consultar a qualquer momento.
+                  </p>
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
+                    Cada item restaurado ganha marca <code className="text-xs bg-amber-100 px-1 mx-1 rounded">precisaCompletarWizard</code>
+                    pra entrar no novo fluxo do wizard de atributos (Fase 2-4 do redesign).
+                  </p>
+                </div>
+              )}
+
+              {restaurarResults.length > 0 && (
+                <div className="space-y-2 max-h-[55vh] overflow-y-auto">
+                  {restaurarResults.map((r, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex items-start gap-2 p-2.5 rounded-lg border text-xs ${
+                        r.status === 'restaurado' ? 'bg-green-50 border-green-200' :
+                        r.status === 'sem-original' ? 'bg-gray-50 border-gray-200' :
+                        'bg-red-50 border-red-200'
+                      }`}
+                    >
+                      {r.status === 'restaurado' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
+                      {r.status === 'sem-original' && <AlertTriangle className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />}
+                      {r.status === 'erro' && <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
+                      <div className="flex-1">
+                        <div className="font-bold text-gray-800">{r.itemNome}</div>
+                        {r.reason && <div className="text-gray-600 mt-0.5">{r.reason}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
+              {!restaurarRunning && restaurarResults.length === 0 && (
+                <>
+                  <button
+                    onClick={() => setRestaurarOpen(false)}
+                    className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={startRestauracao}
+                    className="flex-1 py-2 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 transition flex items-center justify-center gap-2"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    Restaurar {itensComPadronizacaoIA.length} item(ns)
+                  </button>
+                </>
+              )}
+              {restaurarRunning && (
+                <button disabled className="flex-1 py-2 bg-gray-300 text-gray-500 font-bold rounded-lg cursor-not-allowed">
+                  Restaurando…
+                </button>
+              )}
+              {!restaurarRunning && restaurarResults.length > 0 && (
+                <button
+                  onClick={() => { setRestaurarOpen(false); setRestaurarResults([]); }}
+                  className="flex-1 py-2 bg-lie-ink text-white font-bold rounded-lg hover:bg-black transition"
+                >
+                  Fechar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== MODAL DE PESQUISA DE PREÇO (Banco) ===== */}
+      {pesquisaItem && (
+        <PesquisaPrecoModal
+          isOpen={true}
+          onClose={() => setPesquisaItem(null)}
+          item={{ ...pesquisaItem, __origem: 'banco' as const }}
+          projetoTitulo={undefined}
+          entidadeNome={undefined}
+          onSave={() => { carregarItens(); }}
+        />
+      )}
+
+      {/* ===== MODAL DE DETALHE DE MERCADO ===== */}
+      {mercadoDetalhe && (
+        <MercadoDetalheModal
+          item={mercadoDetalhe.item}
+          dados={mercadoDetalhe.dados}
+          onClose={() => setMercadoDetalhe(null)}
+          onAtualizar={(novo) => {
+            setMercado(prev => ({ ...prev, [novo.codigoCatmat]: novo }));
+            setMercadoDetalhe(prev => prev ? { ...prev, dados: novo } : null);
+          }}
+          onAdotarEmbalagem={(emb, razao) => handleAdotarEmbalagemModal(mercadoDetalhe.item, emb, razao)}
+          onEditarItem={() => { openEdit(mercadoDetalhe.item); setMercadoDetalhe(null); }}
+        />
+      )}
+
+      {/* ===== MODAL DE LIMPEZA DE DUPLICATAS ===== */}
+      {limpezaOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-zoom-in">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-500 rounded-lg">
+                  <Wand2 className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Limpar Itens Duplicados</h3>
+                  <p className="text-xs text-gray-300">
+                    {analisando ? 'Analisando banco de itens e cruzando com projetos…' :
+                     excluidos !== null ? `Concluído: ${excluidos} item(s) excluído(s).` :
+                     grupos.length === 0 ? 'Nenhum grupo de duplicatas encontrado.' :
+                     `${grupos.length} grupo(s) de duplicatas — ${grupos.reduce((a, g) => a + g.paraExcluir.length, 0)} item(s) serão excluídos.`}
+                  </p>
+                </div>
+              </div>
+              {!analisando && !excluindo && (
+                <button onClick={() => setLimpezaOpen(false)} className="hover:bg-white/10 p-2 rounded-full">
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {analisando && (
+                <div className="flex flex-col items-center py-10 text-gray-500">
+                  <Loader2 className="w-8 h-8 animate-spin text-red-500 mb-3" />
+                  <p className="text-sm">Carregando masters e percorrendo projetos…</p>
+                </div>
+              )}
+
+              {!analisando && excluidos === null && grupos.length === 0 && (
+                <div className="p-6 text-center text-green-700 bg-green-50 border border-green-200 rounded-xl">
+                  <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-600" />
+                  <p className="font-bold">Banco está limpo!</p>
+                  <p className="text-xs mt-1">Nenhum grupo de itens com mesmo nome foi encontrado.</p>
+                </div>
+              )}
+
+              {!analisando && excluidos === null && grupos.length > 0 && (
+                <>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 flex gap-2 leading-relaxed">
+                    <ShieldAlert className="w-5 h-5 shrink-0 text-amber-600" />
+                    <div>
+                      <strong>Regra aplicada:</strong> itens com mesmo nome (normalizado) são considerados
+                      duplicatas. Pra cada grupo:
+                      <ul className="list-disc ml-5 mt-1 space-y-0.5">
+                        <li>Se houver pelo menos 1 em uso por projetos → mantém todos os em uso, exclui órfãos.</li>
+                        <li>Se nenhum estiver em uso → mantém o de menor código, exclui o resto.</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
+                    {grupos.map((g) => (
+                      <div key={g.nomeNormalizado} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                        <div className="font-bold text-sm text-lie-ink mb-2">{g.nomeNormalizado}</div>
+                        <div className="space-y-1">
+                          {g.paraManter.map(it => (
+                            <div key={it.id} className="flex items-center gap-2 text-xs bg-green-50 border border-green-200 rounded px-2 py-1.5">
+                              <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                              <span className="font-mono text-gray-500">#{String(it.codigo || 0).padStart(3, '0')}</span>
+                              <span className="flex-1 truncate">{it.nome} · {it.unidade}</span>
+                              <span className="text-[10px] font-bold uppercase text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
+                                {it.projetosUsando > 0 ? `Em uso (${it.projetosUsando})` : 'Mantido (menor #)'}
+                              </span>
+                            </div>
+                          ))}
+                          {g.paraExcluir.map(it => (
+                            <div key={it.id} className="flex items-center gap-2 text-xs bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                              <Trash2 className="w-4 h-4 text-red-600 shrink-0" />
+                              <span className="font-mono text-gray-500">#{String(it.codigo || 0).padStart(3, '0')}</span>
+                              <span className="flex-1 truncate">{it.nome} · {it.unidade}</span>
+                              <span className="text-[10px] font-bold uppercase text-red-700 bg-red-100 px-1.5 py-0.5 rounded">
+                                Excluir
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {excluidos !== null && (
+                <div className="p-6 text-center text-green-700 bg-green-50 border border-green-200 rounded-xl">
+                  <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-600" />
+                  <p className="font-bold">{excluidos} item(s) excluído(s) com sucesso!</p>
+                  <p className="text-xs mt-1">O backup JSON foi baixado antes da exclusão.</p>
+                </div>
+              )}
+            </div>
+
+            {!analisando && excluidos === null && grupos.length > 0 && (
+              <div className="p-4 bg-gray-50 border-t flex flex-wrap gap-3 items-center justify-between">
+                <button
+                  onClick={baixarBackup}
+                  className={`flex items-center gap-2 px-4 py-2 font-bold rounded-lg transition ${
+                    backupBaixado ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-amber-500 text-white hover:bg-amber-600'
+                  }`}
+                >
+                  {backupBaixado ? <CheckCircle2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+                  {backupBaixado ? 'Backup baixado' : 'Baixar backup JSON'}
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setLimpezaOpen(false)}
+                    className="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={executarExclusao}
+                    disabled={!backupBaixado || excluindo}
+                    className="flex items-center gap-2 px-5 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {excluindo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    {excluindo ? 'Excluindo…' : `Excluir ${grupos.reduce((a, g) => a + g.paraExcluir.length, 0)} item(s)`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(analisando || excluindo || excluidos !== null) && (
+              <div className="p-4 bg-gray-50 border-t flex justify-end">
+                <button
+                  onClick={() => setLimpezaOpen(false)}
+                  disabled={analisando || excluindo}
+                  className="px-5 py-2 bg-lie-green text-white font-bold rounded-lg hover:bg-lie-greenDark disabled:opacity-50"
+                >
+                  Fechar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

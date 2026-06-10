@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query, deleteDoc, doc, setDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileDown, Loader2, Trash2, Calendar, Building2, FileText, Package, Copy } from 'lucide-react';
+import { Plus, Search, Printer, Loader2, Trash2, Calendar, Building2, FileText, Package, Copy } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { consolidarProjeto } from '../lib/consolidarProjeto';
-import RubricaModal from '../components/RubricaModal';
+import { consolidarProjeto, type PrintOptions } from '../lib/consolidarProjeto';
+import PrintOptionsModal from '../components/PrintOptionsModal';
 import type { Projeto, Entidade, StatusProjeto } from '../types';
 
 export default function ProjetosPage() {
@@ -159,26 +159,26 @@ export default function ProjetosPage() {
   };
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [selectedProjId, setSelectedProjId] = useState<string | null>(null);
+  const [projetoIdAcao, setProjetoIdAcao] = useState<string | null>(null);
 
   const handleConsolidar = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    setSelectedProjId(id);
+    setProjetoIdAcao(id);
     setModalOpen(true);
   };
 
-  const confirmConsolidar = async (rubricaUrl?: string) => {
-    if (!selectedProjId) return;
+  const confirmConsolidar = async (options: PrintOptions) => {
+    if (!projetoIdAcao) return;
     setModalOpen(false);
-    setConsolidando(selectedProjId);
+    setConsolidando(projetoIdAcao);
     try {
-      await consolidarProjeto(selectedProjId, rubricaUrl);
+      await consolidarProjeto(projetoIdAcao, options);
     } catch (err) {
       console.error(err);
-      alert('Erro ao gerar PDF do projeto.');
+      alert('Erro ao consolidar projeto.');
     } finally {
       setConsolidando(null);
-      setSelectedProjId(null);
+      setProjetoIdAcao(null);
     }
   };
 
@@ -342,10 +342,11 @@ export default function ProjetosPage() {
                       <button
                         onClick={(ev) => handleConsolidar(ev, p.id)}
                         disabled={!!consolidando}
-                        className="p-1.5 text-lie-green hover:bg-green-50 rounded transition"
-                        title="Consolidar PDF"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-lie-green hover:bg-lie-greenDark text-white rounded text-xs font-medium transition shadow-sm"
+                        title="Visualizar Impressão (PDF)"
                       >
-                        {consolidando === p.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                        {consolidando === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+                        <span>Imprimir</span>
                       </button>
                       <button
                         onClick={(ev) => handleDuplicar(ev, p)}
@@ -369,11 +370,11 @@ export default function ProjetosPage() {
           </table>
         </div>
       )}
-      <RubricaModal 
+      <PrintOptionsModal 
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)} 
         onConfirm={confirmConsolidar}
-        title="Plano de Trabalho do Projeto"
+        title="Gerar Relatório PDF"
       />
     </div>
   );

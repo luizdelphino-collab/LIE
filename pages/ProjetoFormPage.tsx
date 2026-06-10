@@ -2,10 +2,10 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query, writeBatch, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, FileDown, FileText, Package, Settings } from 'lucide-react';
+import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, Printer, FileText, Package, Settings } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
-import { consolidarProjeto } from '../lib/consolidarProjeto';
-import RubricaModal from '../components/RubricaModal';
+import { consolidarProjeto, type PrintOptions } from '../lib/consolidarProjeto';
+import PrintOptionsModal from '../components/PrintOptionsModal';
 import type { Projeto, Entidade, InstrumentoOrigem, AmbitoAplicacao, AcaoCronograma, MetaProjeto, ModalidadeProjeto } from '../types';
 
 const INSTRUMENTOS: InstrumentoOrigem[] = [
@@ -398,11 +398,11 @@ export default function ProjetoFormPage() {
     setModalOpen(true);
   };
 
-  const confirmConsolidar = async (rubricaUrl?: string) => {
+  const confirmConsolidar = async (options: PrintOptions) => {
     setModalOpen(false);
     setConsolidando(true);
     try {
-      await consolidarProjeto(id!, rubricaUrl);
+      await consolidarProjeto(id!, options);
     } catch (err) {
       console.error(err);
       alert('Erro ao gerar PDF.');
@@ -478,11 +478,12 @@ export default function ProjetoFormPage() {
             <button 
               onClick={handleConsolidar} 
               disabled={consolidando}
-              className="group flex items-center bg-white border border-gray-300 text-gray-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-50 shadow-sm"
+              className="flex items-center gap-2 bg-lie-ink hover:bg-lie-ink/90 text-white rounded-lg px-3 py-2 transition-all duration-300 shadow-sm"
+              title="Visualizar Impressão (PDF)"
             >
-              {consolidando ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : <FileDown className="w-5 h-5 shrink-0" />}
-              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
-                Consolidar PDF
+              {consolidando ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : <Printer className="w-5 h-5 shrink-0" />}
+              <span className="font-medium whitespace-nowrap">
+                Visualizar Impressão
               </span>
             </button>
             <button 
@@ -992,11 +993,11 @@ export default function ProjetoFormPage() {
 
       </form>
 
-      <RubricaModal 
+      <PrintOptionsModal 
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)} 
         onConfirm={confirmConsolidar}
-        title="Plano de Trabalho"
+        title="Gerar Relatório PDF"
       />
 
       {isManagingModalidades && (

@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp, orderBy, writeBatch } from 'firebase/firestore';
-import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck, Folder, Download } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Trash2, Edit3, Loader2, Calculator, Package, Check, FileSpreadsheet, Scale, ShieldCheck, Folder, Download, Eye, Sparkles, X, CheckCircle2, AlertCircle, RefreshCcw } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { ItemMaster, ItemProjeto, Projeto, ModuloProjeto } from '../types';
 import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
+import { pesquisarItemAutomatico, type AutoPesquisaResult } from '../lib/pesquisaAutomatica';
 
 export default function ProjetoItensPage() {
   const { id } = useParams();
@@ -54,6 +55,109 @@ export default function ProjetoItensPage() {
   const [isPesquisaOpen, setIsPesquisaOpen] = useState(false);
   const [selectedItemForPesquisa, setSelectedItemForPesquisa] = useState<ItemProjeto | null>(null);
 
+  // Estados para pesquisa automática em lote
+  const [batchPesquisaOpen, setBatchPesquisaOpen] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, current: '' });
+  const [batchResults, setBatchResults] = useState<AutoPesquisaResult[]>([]);
+
+  const [entidadeNome, setEntidadeNome] = useState<string>('');
+
+  // Sincronização com o Banco de Itens (etapa 5A)
+  const [ultimoSync, setUltimoSync] = useState<{ total: number; campos: number; quando: Date } | null>(null);
+  const [sincronizando, setSincronizando] = useState(false);
+
+  /**
+   * Sincroniza os itens do projeto com seus masters no Banco.
+   * Sobrescreve no Firestore os campos que vivem na fonte (Banco) e mantém
+   * intactos os campos do projeto (quantidade, memorialCalculo, ordem,
+   * fornecedoresIds, referencias, tokenPesquisa, pesquisado, medianaReferencia).
+   * Retorna o array atualizado e quantos itens / campos foram sincronizados.
+   */
+  const sincronizarItensComBanco = async (
+    itensProj: ItemProjeto[],
+    itensMast: ItemMaster[]
+  ): Promise<{ sincronizados: ItemProjeto[]; totalItens: number; totalCampos: number }> => {
+    if (!id) return { sincronizados: itensProj, totalItens: 0, totalCampos: 0 };
+
+    // Campos que vivem no Banco de Itens — sao espelhados no projeto pra
+    // continuidade da pesquisa de preco, mas a fonte é sempre o master.
+    const CAMPOS_DO_BANCO = [
+      'nome', 'descricao', 'unidade', 'valorUnitario',
+      'codigoCatmat', 'tipoCatmat', 'nomeCatmatOficial', 'descricaoCatmatOficial',
+      'fatorConversao', 'unidadeBase', 'embalagemDescricao',
+      'semCorrespondenciaCatalogo',
+      // Etapa 5C: pesquisa de preco agora vive no Banco. Quando o master e
+      // pesquisado, todos os projetos que usam esse item refletem automaticamente.
+      'pesquisado', 'referencias', 'mediaReferencia', 'medianaReferencia',
+      'tokenPesquisa', 'ultimoCodigoVinculado',
+    ] as const;
+
+    type Update = {
+      docRef: ReturnType<typeof doc>;
+      itemId: string;
+      data: Record<string, unknown>;
+      camposMudaram: number;
+    };
+    const updates: Update[] = [];
+
+    for (const ip of itensProj) {
+      const master = itensMast.find(m => m.id === ip.itemId);
+      if (!master) continue; // master deletado — preserva o item do projeto como histórico
+
+      const updateData: Record<string, unknown> = {};
+      let camposMudaram = 0;
+
+      for (const campo of CAMPOS_DO_BANCO) {
+        const masterVal = (master as any)[campo];
+        const projVal = (ip as any)[campo];
+        // Pula quando master nao tem o campo (undefined). Firestore nao aceita
+        // undefined, e remover campos automaticamente pode quebrar projetos antigos.
+        if (masterVal === undefined || masterVal === null) continue;
+        if (masterVal !== projVal) {
+          updateData[campo] = masterVal;
+          camposMudaram++;
+        }
+      }
+
+      if (camposMudaram === 0) continue;
+
+      // Recalcular valorTotal se valorUnitario mudou
+      if ('valorUnitario' in updateData) {
+        const novoValor = updateData.valorUnitario as number;
+        updateData.valorTotal = novoValor * (ip.quantidade || 0);
+      }
+
+      updates.push({
+        docRef: doc(db, `projects/${id}/items`, ip.id),
+        itemId: ip.id,
+        data: updateData,
+        camposMudaram,
+      });
+    }
+
+    if (updates.length === 0) {
+      return { sincronizados: itensProj, totalItens: 0, totalCampos: 0 };
+    }
+
+    // Aplicar em batches de 400 (limite firestore = 500)
+    for (let i = 0; i < updates.length; i += 400) {
+      const batch = writeBatch(db);
+      updates.slice(i, i + 400).forEach(u => batch.update(u.docRef, u.data as { [k: string]: any }));
+      await batch.commit();
+    }
+
+    // Atualiza array local
+    const sincronizados = itensProj.map(ip => {
+      const u = updates.find(x => x.itemId === ip.id);
+      if (!u) return ip;
+      return { ...ip, ...u.data } as ItemProjeto;
+    });
+
+    const totalCampos = updates.reduce((acc, u) => acc + u.camposMudaram, 0);
+    return { sincronizados, totalItens: updates.length, totalCampos };
+  };
+
   const carregarDados = async () => {
     if (!id) return;
     try {
@@ -61,7 +165,14 @@ export default function ProjetoItensPage() {
       
       // Projeto
       const projSnap = await getDoc(doc(db, 'projects', id));
-      if (projSnap.exists()) setProjeto({ id: projSnap.id, ...projSnap.data() } as Projeto);
+      if (projSnap.exists()) {
+        const projData = { id: projSnap.id, ...projSnap.data() } as Projeto;
+        setProjeto(projData);
+        if (projData.entidadeId) {
+          const entSnap = await getDoc(doc(db, 'entities', projData.entidadeId));
+          if (entSnap.exists()) setEntidadeNome((entSnap.data() as any).nome || '');
+        }
+      }
 
       // Módulos do Projeto
       const snapModulos = await getDocs(query(collection(db, `projects/${id}/modulos`), orderBy('criadoEm', 'asc')));
@@ -69,11 +180,29 @@ export default function ProjetoItensPage() {
 
       // Itens do Projeto
       const snapProj = await getDocs(query(collection(db, `projects/${id}/items`), orderBy('criadoEm', 'asc')));
-      setItensProjeto(snapProj.docs.map(d => ({ id: d.id, ...d.data() } as ItemProjeto)));
+      const itensProjLidos = snapProj.docs.map(d => ({ id: d.id, ...d.data() } as ItemProjeto));
 
       // Banco de Itens Master (para seleção)
       const snapMaster = await getDocs(query(collection(db, 'items'), orderBy('nome', 'asc')));
-      setItensMaster(snapMaster.docs.map(d => ({ id: d.id, ...d.data() } as ItemMaster)));
+      const itensMastLidos = snapMaster.docs.map(d => ({ id: d.id, ...d.data() } as ItemMaster));
+
+      // Sincronizar com o Banco antes de exibir (etapa 5A)
+      // Banco é a fonte da verdade. Projetos refletem nome/unidade/valor/CATMAT
+      // do master; mantem quantidade/memorial/pesquisa do projeto.
+      setSincronizando(true);
+      const syncResult = await sincronizarItensComBanco(itensProjLidos, itensMastLidos);
+      setSincronizando(false);
+
+      setItensProjeto(syncResult.sincronizados);
+      setItensMaster(itensMastLidos);
+
+      if (syncResult.totalItens > 0) {
+        setUltimoSync({
+          total: syncResult.totalItens,
+          campos: syncResult.totalCampos,
+          quando: new Date(),
+        });
+      }
 
     } catch (e) {
       console.error(e);
@@ -298,6 +427,9 @@ export default function ProjetoItensPage() {
     setFormData({ ...ip });
     setShowItemPicker(false);
     setIsFormOpen(true);
+    // Scroll to top pra o form ficar visivel (sem isso parece que clicar
+    // no editar nao faz nada quando o user ja esta scrollado na lista)
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
   const toggleMasterSelection = (it: ItemMaster) => {
@@ -327,27 +459,48 @@ export default function ProjetoItensPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !selectedMaster) return;
+    if (!id) return;
+    // Em edicao, selectedMaster pode estar nulo se o master foi deletado
+    // do Banco depois. Nesse caso, usa o formData (que tem snapshot dos
+    // campos copiados no momento da vinculacao). Em criacao, requer master.
+    if (!editId && !selectedMaster) {
+      alert('Selecione um item do Banco antes de vincular.');
+      return;
+    }
     setSaving(true);
     try {
       const docId = editId || doc(collection(db, `projects/${id}/items`)).id;
-      const valorTotal = (selectedMaster.valorUnitario || 0) * (formData.quantidade || 0);
+      // Fonte dos campos do master: preferimos selectedMaster (master atual),
+      // fallback pra formData (snapshot do momento da vinculacao)
+      const fonteCampos = selectedMaster || (formData as ItemProjeto);
+      const valorTotal = (fonteCampos.valorUnitario || 0) * (formData.quantidade || 0);
 
       const payload: Partial<ItemProjeto> = {
         ...formData,
         id: docId,
         projectId: id,
-        itemId: selectedMaster.id,
-        nome: selectedMaster.nome,
-        descricao: selectedMaster.descricao || '',
-        unidade: selectedMaster.unidade,
-        valorUnitario: selectedMaster.valorUnitario,
+        itemId: (selectedMaster?.id) || formData.itemId || docId,
+        nome: fonteCampos.nome || formData.nome || '',
+        descricao: fonteCampos.descricao || '',
+        unidade: fonteCampos.unidade || formData.unidade || 'unidade',
+        valorUnitario: fonteCampos.valorUnitario,
         valorTotal,
+        // Propaga CATMAT/CATSER oficial (Firestore nao aceita undefined)
+        ...(fonteCampos.codigoCatmat && { codigoCatmat: fonteCampos.codigoCatmat }),
+        ...(fonteCampos.tipoCatmat && { tipoCatmat: fonteCampos.tipoCatmat }),
+        ...(fonteCampos.nomeCatmatOficial && { nomeCatmatOficial: fonteCampos.nomeCatmatOficial }),
+        ...(fonteCampos.descricaoCatmatOficial && { descricaoCatmatOficial: fonteCampos.descricaoCatmatOficial }),
+        // Conversor de unidade
+        ...(fonteCampos.fatorConversao && { fatorConversao: fonteCampos.fatorConversao }),
+        ...(fonteCampos.unidadeBase && { unidadeBase: fonteCampos.unidadeBase }),
+        ...(fonteCampos.embalagemDescricao && { embalagemDescricao: fonteCampos.embalagemDescricao }),
+        // Rota legal alternativa (3 orcamentos com fornecedores)
+        ...(fonteCampos.semCorrespondenciaCatalogo && { semCorrespondenciaCatalogo: true }),
         criadoEm: formData.criadoEm || serverTimestamp() as Timestamp
       };
 
       await setDoc(doc(db, `projects/${id}/items`, docId), payload as any, { merge: true });
-      
+
       setIsFormOpen(false);
       carregarDados();
     } catch (e) {
@@ -382,6 +535,17 @@ export default function ProjetoItensPage() {
           memorialCalculo: data.memorialCalculo,
           quantidade: data.quantidade,
           valorTotal,
+          // Propaga CATMAT/CATSER oficial do master (Firestore nao aceita undefined)
+          ...(m.codigoCatmat && { codigoCatmat: m.codigoCatmat }),
+          ...(m.tipoCatmat && { tipoCatmat: m.tipoCatmat }),
+          ...(m.nomeCatmatOficial && { nomeCatmatOficial: m.nomeCatmatOficial }),
+          ...(m.descricaoCatmatOficial && { descricaoCatmatOficial: m.descricaoCatmatOficial }),
+          // Conversor de unidade
+          ...(m.fatorConversao && { fatorConversao: m.fatorConversao }),
+          ...(m.unidadeBase && { unidadeBase: m.unidadeBase }),
+          ...(m.embalagemDescricao && { embalagemDescricao: m.embalagemDescricao }),
+          // Rota legal alternativa
+          ...(m.semCorrespondenciaCatalogo && { semCorrespondenciaCatalogo: true }),
           criadoEm: serverTimestamp() as Timestamp
         };
 
@@ -417,6 +581,26 @@ export default function ProjetoItensPage() {
 
   const totalProjeto = itensProjeto.reduce((acc, it) => acc + (it.valorTotal || 0), 0);
 
+  const startBatchPesquisa = async () => {
+    if (!projeto) return;
+    setBatchRunning(true);
+    setBatchResults([]);
+    setBatchProgress({ done: 0, total: itensProjeto.length, current: '' });
+
+    const results: AutoPesquisaResult[] = [];
+    for (let i = 0; i < itensProjeto.length; i++) {
+      const item = itensProjeto[i];
+      setBatchProgress({ done: i, total: itensProjeto.length, current: item.nome });
+      const res = await pesquisarItemAutomatico(item, projeto.titulo, entidadeNome);
+      results.push(res);
+      setBatchResults([...results]);
+    }
+
+    setBatchProgress({ done: itensProjeto.length, total: itensProjeto.length, current: '' });
+    setBatchRunning(false);
+    await carregarDados();
+  };
+
   if (loading) return <div className="p-6 text-lie-gray">Carregando itens do projeto...</div>;
 
   return (
@@ -429,10 +613,23 @@ export default function ProjetoItensPage() {
           <div>
             <h1 className="text-2xl font-bold text-lie-ink">Itens do Projeto</h1>
             <p className="text-sm text-lie-gray">{projeto?.titulo}</p>
+            {sincronizando && (
+              <span className="text-[11px] text-blue-600 flex items-center gap-1 mt-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Sincronizando com Banco de Itens…
+              </span>
+            )}
+            {!sincronizando && ultimoSync && (
+              <span className="text-[11px] text-green-700 flex items-center gap-1 mt-1">
+                <RefreshCcw className="w-3 h-3" />
+                {ultimoSync.total} item(ns) atualizado(s) do Banco de Itens
+                ({ultimoSync.campos} campo{ultimoSync.campos > 1 ? 's' : ''} sincronizado{ultimoSync.campos > 1 ? 's' : ''})
+              </span>
+            )}
           </div>
         </div>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={openNewModulo}
             className="group flex items-center bg-white border border-gray-300 text-lie-ink rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-50 shadow-sm"
           >
@@ -441,8 +638,11 @@ export default function ProjetoItensPage() {
               Módulos
             </span>
           </button>
-          <button 
-            onClick={exportToExcel} 
+          {/* Pesquisa de preço agora vive no Banco de Itens (etapa 5C).
+              O botão de pesquisa em lote foi removido daqui — pesquisa-se uma vez
+              no Banco e vale pra todos os projetos que vinculam o item. */}
+          <button
+            onClick={exportToExcel}
             disabled={itensProjeto.length === 0}
             className="group flex items-center bg-white border border-gray-300 text-green-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-green-50 shadow-sm disabled:opacity-50"
           >
@@ -630,59 +830,155 @@ export default function ProjetoItensPage() {
             </div>
           ) : editId ? (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {selectedMaster && (
-                <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between mb-2">
-                  <div>
-                    <span className="text-[10px] font-bold text-lie-green uppercase">Item Selecionado</span>
-                    <h3 className="font-bold text-lie-ink">{selectedMaster.nome}</h3>
-                    <p className="text-xs text-gray-500">{selectedMaster.unidade} • {selectedMaster.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+              {/* ===== SEÇÃO 1: DADOS DO BANCO (READ-ONLY) ===== */}
+              <div className="p-4 bg-lie-green/5 rounded-lg border-2 border-lie-green/20">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-lie-green" />
+                    <span className="text-xs font-bold text-lie-green uppercase tracking-wider">Dados do Banco de Itens</span>
+                    <span className="text-[10px] text-gray-500 italic">(sincronizados automaticamente — não editáveis aqui)</span>
                   </div>
+                  {(selectedMaster?.id || formData.itemId) && (
+                    <a
+                      href={`/#/itens?edit=${selectedMaster?.id || formData.itemId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline flex items-center gap-1 shrink-0"
+                      title="Abre o item no Banco em outra aba pra editar nome, valor, CATMAT, embalagem, etc."
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      Editar no Banco
+                    </a>
+                  )}
                 </div>
-              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="lg:col-span-3">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Módulo</label>
-                  <select value={formData.moduloId || ''} onChange={e => setFormData(p => ({...p, moduloId: e.target.value}))} className="w-full border-gray-300 rounded-lg shadow-sm">
-                    <option value="">Sem módulo</option>
-                    {modulos.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
-                  </select>
+                {!selectedMaster && (
+                  <div className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <div>
+                      Este item não existe mais no Banco (foi removido). Os dados abaixo são o snapshot preservado no momento da vinculação.
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2 text-xs">
+                  <div>
+                    <h3 className="font-bold text-lie-ink text-sm leading-tight">{selectedMaster?.nome || formData.nome || '—'}</h3>
+                    {(selectedMaster?.descricao || formData.descricao) && (
+                      <p className="text-[11px] text-gray-600 mt-0.5 leading-snug">{selectedMaster?.descricao || formData.descricao}</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-lie-green/20">
+                    <div>
+                      <span className="text-[10px] text-gray-500 uppercase block">Categoria</span>
+                      <strong className="text-gray-800 text-[11px]">{selectedMaster?.categoria || '—'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-500 uppercase block">Unidade</span>
+                      <strong className="text-gray-800 text-[11px]">{selectedMaster?.unidade || formData.unidade || '—'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-500 uppercase block">Valor Unitário</span>
+                      <strong className="text-lie-green text-[12px] font-mono">
+                        {(selectedMaster?.valorUnitario ?? formData.valorUnitario ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-500 uppercase block">Cód. #</span>
+                      <strong className="text-gray-800 text-[11px] font-mono">#{String(selectedMaster?.codigo ?? '—').padStart(3, '0')}</strong>
+                    </div>
+                  </div>
+
+                  {/* CATMAT/CATSER se existir */}
+                  {(selectedMaster?.codigoCatmat || formData.codigoCatmat) && (
+                    <div className="pt-2 border-t border-lie-green/20">
+                      <span className="text-[10px] text-gray-500 uppercase block">
+                        Código {(selectedMaster?.tipoCatmat || formData.tipoCatmat) === 'servico' ? 'CATSER' : 'CATMAT'} Vinculado
+                      </span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[11px] font-bold font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                          {selectedMaster?.codigoCatmat || formData.codigoCatmat}
+                        </span>
+                        {(selectedMaster?.nomeCatmatOficial || formData.nomeCatmatOficial) && (
+                          <span className="text-[11px] text-gray-700 truncate">{selectedMaster?.nomeCatmatOficial || formData.nomeCatmatOficial}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Embalagem se existir */}
+                  {(selectedMaster?.embalagemDescricao || (selectedMaster?.fatorConversao && selectedMaster?.unidadeBase)) && (
+                    <div className="pt-2 border-t border-lie-green/20">
+                      <span className="text-[10px] text-gray-500 uppercase block">Embalagem oficial</span>
+                      <strong className="text-gray-800 text-[11px]">
+                        {selectedMaster?.embalagemDescricao || `${selectedMaster?.fatorConversao} ${selectedMaster?.unidadeBase || ''}`}
+                      </strong>
+                    </div>
+                  )}
+
+                  {/* Rota legal alternativa se aplicável */}
+                  {(selectedMaster?.semCorrespondenciaCatalogo || formData.semCorrespondenciaCatalogo) && (
+                    <div className="pt-2 border-t border-lie-green/20">
+                      <span className="text-[10px] text-purple-700 font-bold uppercase">📑 Rota legal de 3 orçamentos (IN 73/2020 art. 5º IV)</span>
+                    </div>
+                  )}
                 </div>
-                <div className="lg:col-span-2 md:col-span-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Memorial de Cálculo *</label>
-                  <textarea 
-                    required 
-                    rows={2} 
-                    placeholder="Ex: 10 alunos x 5 dias x R$ 2,50"
-                    value={formData.memorialCalculo} 
-                    onChange={e => setFormData(p => ({...p, memorialCalculo: e.target.value}))} 
-                    className="w-full border-gray-300 rounded-lg shadow-sm"
-                  />
+              </div>
+
+              {/* ===== SEÇÃO 2: DADOS DO PROJETO (EDITÁVEIS) ===== */}
+              <div className="p-4 bg-amber-50/40 rounded-lg border-2 border-amber-200">
+                <div className="flex items-center gap-2 mb-3">
+                  <Edit3 className="w-4 h-4 text-amber-700" />
+                  <span className="text-xs font-bold text-amber-900 uppercase tracking-wider">Dados específicos deste projeto</span>
+                  <span className="text-[10px] text-gray-500 italic">(só estes campos são editados aqui)</span>
                 </div>
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Quantidade Total *</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    required 
-                    value={formData.quantidade} 
-                    onChange={e => setFormData(p => ({...p, quantidade: parseFloat(e.target.value) || 0}))} 
-                    className="w-full border-gray-300 rounded-lg shadow-sm" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Total do Item (Auto)</label>
-                  <div className="px-4 py-2 bg-gray-100 rounded-lg font-bold text-lie-ink">
-                    {((selectedMaster?.valorUnitario || 0) * (formData.quantidade || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-3">
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Memorial de Cálculo *</label>
+                    <textarea
+                      required
+                      rows={3}
+                      placeholder="Ex: 20 diárias de competição × 6 jogos × 168 atletas..."
+                      value={formData.memorialCalculo}
+                      onChange={e => setFormData(p => ({...p, memorialCalculo: e.target.value}))}
+                      className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">Justificativa do cálculo da quantidade — visível no PDF do projeto.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Módulo</label>
+                    <select value={formData.moduloId || ''} onChange={e => setFormData(p => ({...p, moduloId: e.target.value}))} className="w-full border-gray-300 rounded-lg shadow-sm text-sm">
+                      <option value="">Sem módulo</option>
+                      {modulos.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Quantidade Total *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={formData.quantidade}
+                      onChange={e => setFormData(p => ({...p, quantidade: parseFloat(e.target.value) || 0}))}
+                      className="w-full border-gray-300 rounded-lg shadow-sm text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Total do Item (Auto)</label>
+                    <div className="px-4 py-2 bg-gray-100 rounded-lg font-bold text-lie-ink text-sm">
+                      {((selectedMaster?.valorUnitario ?? formData.valorUnitario ?? 0) * (formData.quantidade || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+              <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancelar</button>
                 <button type="submit" disabled={saving} className="bg-lie-green hover:bg-lie-greenDark text-white px-8 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2">
                   {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {saving ? 'Vinculando...' : 'Salvar Alterações'}
+                  {saving ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
               </div>
             </form>
@@ -845,9 +1141,24 @@ export default function ProjetoItensPage() {
                       <td className="px-4 py-3 text-sm font-bold text-right text-lie-ink">{it.valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => { setSelectedItemForPesquisa(it); setIsPesquisaOpen(true); }} className={`p-1.5 rounded transition ${it.pesquisado ? 'text-lie-green hover:bg-lie-green/10' : 'text-amber-500 hover:bg-amber-50'}`} title="Pesquisa de Preços Públicos">
-                            <Scale className="w-4 h-4" />
-                          </button>
+                          {it.pesquisado && it.tokenPesquisa ? (
+                            <a
+                              href={`/#/validar?token=${it.tokenPesquisa}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition flex items-center justify-center"
+                              title="Visualizar Certificado da Pesquisa (gerado no Banco de Itens)"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </a>
+                          ) : (
+                            <span
+                              className="p-1.5 text-gray-300 cursor-help"
+                              title="Item ainda não pesquisado. Faça a pesquisa no Banco de Itens — vale pra todos os projetos."
+                            >
+                              <Scale className="w-4 h-4" />
+                            </span>
+                          )}
                           <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar"><Edit3 className="w-4 h-4" /></button>
                           <button onClick={() => handleDelete(it.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition" title="Excluir"><Trash2 className="w-4 h-4" /></button>
                         </div>
@@ -900,9 +1211,24 @@ export default function ProjetoItensPage() {
                       <td className="px-4 py-3 text-sm font-bold text-right text-lie-ink">{it.valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => { setSelectedItemForPesquisa(it); setIsPesquisaOpen(true); }} className={`p-1.5 rounded transition ${it.pesquisado ? 'text-lie-green hover:bg-lie-green/10' : 'text-amber-500 hover:bg-amber-50'}`} title="Pesquisa de Preços Públicos">
-                            <Scale className="w-4 h-4" />
-                          </button>
+                          {it.pesquisado && it.tokenPesquisa ? (
+                            <a
+                              href={`/#/validar?token=${it.tokenPesquisa}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition flex items-center justify-center"
+                              title="Visualizar Certificado da Pesquisa (gerado no Banco de Itens)"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </a>
+                          ) : (
+                            <span
+                              className="p-1.5 text-gray-300 cursor-help"
+                              title="Item ainda não pesquisado. Faça a pesquisa no Banco de Itens — vale pra todos os projetos."
+                            >
+                              <Scale className="w-4 h-4" />
+                            </span>
+                          )}
                           <button onClick={() => openEdit(it)} className="p-1.5 text-lie-ink hover:bg-gray-100 rounded transition" title="Editar"><Edit3 className="w-4 h-4" /></button>
                           <button onClick={() => handleDelete(it.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition" title="Excluir"><Trash2 className="w-4 h-4" /></button>
                         </div>
@@ -949,6 +1275,137 @@ export default function ProjetoItensPage() {
           entidadeNome={projeto?.entidadeSigla || "Entidade"}
           onSave={() => carregarDados()}
         />
+      )}
+
+      {batchPesquisaOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh] animate-zoom-in">
+            <header className="bg-lie-ink p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-500 rounded-lg">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Pesquisa Automática de Preços</h3>
+                  <p className="text-xs text-gray-300">
+                    {batchRunning
+                      ? `Processando ${batchProgress.done + 1} de ${batchProgress.total} — ${batchProgress.current}`
+                      : batchResults.length > 0
+                        ? `Concluído: ${batchResults.length} item(ns) processado(s)`
+                        : `${itensProjeto.length} item(ns) serão pesquisados sequencialmente (IN 65/2021)`
+                    }
+                  </p>
+                </div>
+              </div>
+              {!batchRunning && (
+                <button
+                  onClick={() => { setBatchPesquisaOpen(false); setBatchResults([]); }}
+                  className="hover:bg-white/10 p-2 rounded-full transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </header>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {batchRunning && (
+                <div className="space-y-2">
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-amber-500 h-full transition-all duration-300"
+                      style={{ width: `${(batchProgress.done / batchProgress.total) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Buscando catálogo CATMAT/CATSER, consultando Compras.gov.br/PNCP e arquivando comprovantes…
+                  </p>
+                </div>
+              )}
+
+              {!batchRunning && batchResults.length === 0 && (
+                <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+                  <p>
+                    A pesquisa automática executa, pra cada item do projeto, o mesmo fluxo da
+                    pesquisa individual: busca no catálogo público, consulta de preços praticados
+                    e auto-seleção de referências <strong>iguais ou superiores</strong> ao valor estimado.
+                  </p>
+                  <p>
+                    Os itens já pesquisados serão <strong>reprocessados</strong> e suas cestas atualizadas.
+                    Cada referência gera um comprovante PDF arquivado no Storage.
+                  </p>
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                    <strong>Tempo estimado:</strong> aproximadamente 10–60 segundos por item, dependendo
+                    da quantidade de cotações encontradas e da resposta da API governamental.
+                  </p>
+                </div>
+              )}
+
+              {batchResults.length > 0 && (
+                <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+                  {batchResults.map((r, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex items-start gap-2 p-2.5 rounded-lg border text-xs ${
+                        r.status === 'ok' ? 'bg-green-50 border-green-200' :
+                        r.status === 'sem-catmat-real' ? 'bg-orange-50 border-orange-200' :
+                        r.status === 'sem-match' ? 'bg-gray-50 border-gray-200' :
+                        r.status === 'sem-refs' ? 'bg-amber-50 border-amber-200' :
+                        'bg-red-50 border-red-200'
+                      }`}
+                    >
+                      {r.status === 'ok' && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
+                      {r.status === 'sem-catmat-real' && <AlertCircle className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />}
+                      {r.status === 'sem-match' && <AlertCircle className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />}
+                      {r.status === 'sem-refs' && <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />}
+                      {r.status === 'erro' && <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
+                      <div className="flex-1">
+                        <div className="font-bold text-gray-800">{r.itemNome}</div>
+                        <div className="text-gray-600 mt-0.5">
+                          {r.status === 'ok' && `${r.refsCount} referência(s) homologada(s).`}
+                          {r.status !== 'ok' && r.reason}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-gray-50 flex gap-3 border-t shrink-0">
+              {!batchRunning && batchResults.length === 0 && (
+                <>
+                  <button
+                    onClick={() => setBatchPesquisaOpen(false)}
+                    className="flex-1 py-2 font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={startBatchPesquisa}
+                    className="flex-1 py-2 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 transition flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Pesquisar {itensProjeto.length} item(ns)
+                  </button>
+                </>
+              )}
+              {batchRunning && (
+                <div className="flex-1 text-center text-sm text-gray-500 italic">
+                  Aguarde — a janela fechará após a conclusão de todos os itens.
+                </div>
+              )}
+              {!batchRunning && batchResults.length > 0 && (
+                <button
+                  onClick={() => { setBatchPesquisaOpen(false); setBatchResults([]); }}
+                  className="flex-1 py-2 bg-lie-green text-white font-bold rounded-lg hover:bg-lie-greenDark transition"
+                >
+                  Fechar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,9 +1,13 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
-import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
 import type { Entidade } from '../types';
+
+function downloadStorageFileUrl(path: string): string {
+  const projectId = storage.app.options.projectId;
+  return `https://us-central1-${projectId}.cloudfunctions.net/downloadStorageFile?path=${encodeURIComponent(path)}`;
+}
 
 interface DocItem {
   nome: string;
@@ -86,70 +90,28 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
   if (!url) return null;
   if (url.startsWith('data:')) return url;
 
-  // 1. Tentar via Storage SDK (getBlob)
-  try {
+  const toDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+  let fetchUrl = url;
+  if (url.includes('firebasestorage.googleapis.com')) {
     const match = url.match(/\/o\/([^?]+)/);
     const path = match ? decodeURIComponent(match[1]) : null;
-    if (path) {
-      const blob = await getBlob(ref(storage, path));
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
-  } catch (e) {
-    console.warn('Erro ao carregar via Storage Blob, tentando fetch direto:', e);
+    if (path) fetchUrl = downloadStorageFileUrl(path);
   }
 
-  // 2. Tentar Fetch direto
   try {
-    const resp = await fetch(url);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
+    const resp = await fetch(fetchUrl);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await toDataUrl(await resp.blob());
   } catch (e) {
-    console.warn('Fetch direto bloqueado por CORS, tentando Proxy 1 (Weserv):', e);
+    console.error('Falha ao baixar imagem:', url, e);
+    return null;
   }
-
-  // 3. Tentar via Proxy Weserv
-  try {
-    const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=png`;
-    const resp = await fetch(weservUrl);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
-  } catch (e) {
-    console.warn('Proxy Weserv falhou, tentando Proxy 2 (AllOrigins):', e);
-  }
-
-  // 4. Tentar via Proxy AllOrigins
-  try {
-    const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    const resp = await fetch(allOriginsUrl);
-    if (resp.ok) {
-      const blob = await resp.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    }
-  } catch (e) {
-    console.error('Todos os métodos de carregamento de imagem falharam:', e);
-  }
-
-  return null;
 }
 
 function getImgFormat(url: string): 'PNG' | 'JPEG' | 'WEBP' {

@@ -19,6 +19,7 @@ import ExecucaoMensalPage from './pages/ExecucaoMensalPage';
 import EntidadesPage from './pages/EntidadesPage';
 import EntidadeFormPage from './pages/EntidadeFormPage';
 import EntidadeDocumentosPage from './pages/EntidadeDocumentosPage';
+import CapacidadeTecnicaPage from './pages/CapacidadeTecnicaPage';
 import DirigentesPage from './pages/DirigentesPage';
 import DirigenteFormPage from './pages/DirigenteFormPage';
 import UsuariosPage from './pages/UsuariosPage';
@@ -76,6 +77,7 @@ export default function App() {
           <Route path="/entidades/nova" element={<EntidadeFormPage />} />
           <Route path="/entidades/:id" element={<EntidadeFormPage />} />
           <Route path="/entidades/:id/documentos" element={<EntidadeDocumentosPage />} />
+          <Route path="/entidades/:id/capacidade-tecnica" element={<CapacidadeTecnicaPage />} />
           <Route path="/entidades/:id/dirigentes" element={<DirigentesPage />} />
           <Route path="/entidades/:id/dirigentes/novo" element={<DirigenteFormPage />} />
           <Route path="/entidades/:id/dirigentes/:dirId" element={<DirigenteFormPage />} />

@@ -21,5 +21,5 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "exclude": ["node_modules", "dist", "functions"]
+  "exclude": ["node_modules", "dist", "functions", "scripts"]
 }
