@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit } from 'firebase/firestore';
+import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, where } from 'firebase/firestore';
 import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
@@ -194,6 +194,7 @@ export default function ItensMasterPage() {
     e.preventDefault();
     setSaving(true);
     try {
+      let isLinked = false;
       const id = editId || doc(collection(db, 'items')).id;
       
       let finalCodigo = formData.codigo;
@@ -201,14 +202,55 @@ export default function ItensMasterPage() {
         // Pega o maior código atual
         const maxCodigo = items.length > 0 ? Math.max(...items.map(it => it.codigo)) : 0;
         finalCodigo = maxCodigo + 1;
+      } else {
+        const originalItem = items.find(it => it.id === editId);
+        if (originalItem && (
+          (originalItem.nome || '') !== (formData.nome || '') ||
+          (originalItem.descricao || '') !== (formData.descricao || '') ||
+          (originalItem.unidade || '') !== (formData.unidade || '') ||
+          (originalItem.categoria || '') !== (formData.categoria || '') ||
+          (originalItem.valorUnitario || 0) !== (formData.valorUnitario || 0)
+        )) {
+          const projectsSnap = await getDocs(collection(db, 'projects'));
+          for (const p of projectsSnap.docs) {
+            const itemsSnap = await getDocs(query(collection(db, `projects/${p.id}/items`), where('itemId', '==', editId)));
+            if (!itemsSnap.empty) {
+              isLinked = true;
+              break;
+            }
+          }
+        }
       }
 
-      await setDoc(doc(db, 'items', id), {
-        ...formData,
-        id,
-        codigo: finalCodigo,
-        criadoEm: formData.criadoEm || serverTimestamp()
-      }, { merge: true });
+      if (isLinked) {
+        const confirmar = window.confirm(
+          "Este item já está vinculado a um projeto e não pode sofrer alterações de escopo.\n" +
+          "Se desejar continuar, será criado um novo item com as novas características.\n\n" +
+          "Deseja criar um novo item?"
+        );
+        if (!confirmar) {
+          setSaving(false);
+          return;
+        }
+
+        const newId = doc(collection(db, 'items')).id;
+        const maxCodigo = items.length > 0 ? Math.max(...items.map(it => it.codigo)) : 0;
+        finalCodigo = maxCodigo + 1;
+
+        await setDoc(doc(db, 'items', newId), {
+          ...formData,
+          id: newId,
+          codigo: finalCodigo,
+          criadoEm: serverTimestamp()
+        });
+      } else {
+        await setDoc(doc(db, 'items', id), {
+          ...formData,
+          id,
+          codigo: finalCodigo,
+          criadoEm: formData.criadoEm || serverTimestamp()
+        }, { merge: true });
+      }
 
       setIsFormOpen(false);
       carregarItens();

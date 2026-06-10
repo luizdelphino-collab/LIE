@@ -250,12 +250,12 @@ export default function EntidadeFormPage() {
   return (
     <div className="p-6 max-w-4xl mx-auto pb-24">
       <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleLogoUpload} />
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/entidades')} className="p-2 text-lie-gray hover:bg-gray-100 rounded-lg">
+      <header className="mb-6">
+        <div className="flex items-start gap-4 mb-4">
+          <button onClick={() => navigate('/entidades')} className="p-2 mt-1 text-lie-gray hover:bg-gray-100 rounded-lg shrink-0">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="flex items-center gap-4">
+          <div className="flex items-start gap-4">
             <div 
               onClick={() => fileInputRef.current?.click()}
               className="relative w-16 h-16 rounded-lg overflow-hidden group cursor-pointer shadow-sm border border-gray-200 bg-white shrink-0 flex items-center justify-center"
@@ -283,7 +283,7 @@ export default function EntidadeFormPage() {
           </div>
         </div>
 
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap bg-white p-3 rounded-xl shadow-sm border border-gray-100 w-full">
           {!isNew && !isEditing && (
             <button 
               type="button"

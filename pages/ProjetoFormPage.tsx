@@ -425,16 +425,16 @@ export default function ProjetoFormPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto pb-32">
-      <header className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/projetos')} className="p-2 text-lie-gray hover:bg-gray-100 rounded-lg transition">
+      <header className="mb-6">
+        <div className="flex items-start gap-4 mb-4">
+          <button onClick={() => navigate('/projetos')} className="p-2 mt-1 text-lie-gray hover:bg-gray-100 rounded-lg transition shrink-0">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="flex items-center gap-4">
+          <div className="flex items-start gap-4">
             {formData.logoUrl ? (
-              <img src={formData.logoUrl} alt="Logo" className="w-16 h-16 rounded-lg object-contain bg-white border" />
+              <img src={formData.logoUrl} alt="Logo" className="w-16 h-16 rounded-lg object-contain bg-white border shrink-0" />
             ) : (
-              <div className="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 border border-dashed">
+              <div className="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 border border-dashed shrink-0">
                 <ImageIcon className="w-8 h-8" />
               </div>
             )}
@@ -444,9 +444,11 @@ export default function ProjetoFormPage() {
             </div>
           </div>
         </div>
-        {!isNew && !isEditing && (
-          <div className="flex gap-2">
-            <button 
+        
+        <div className="flex flex-wrap gap-2 bg-white p-3 rounded-xl shadow-sm border border-gray-100 w-full">
+          {!isNew && !isEditing && (
+            <>
+              <button 
               onClick={() => navigate(`/projetos/${id}/itens`)}
               className="group flex items-center bg-white border border-gray-300 text-amber-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-amber-50 shadow-sm"
             >
@@ -493,16 +495,16 @@ export default function ProjetoFormPage() {
                 Editar Projeto
               </span>
             </button>
-          </div>
-        )}
-        {isEditing && (
-          <div className="flex gap-2">
-            {!isNew && (
-              <button 
-                type="button" 
-                onClick={() => setIsEditing(false)} 
-                className="group flex items-center bg-white border border-gray-300 text-gray-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-100 shadow-sm"
-              >
+            </>
+          )}
+          {isEditing && (
+            <>
+              {!isNew && (
+                <button 
+                  type="button" 
+                  onClick={() => setIsEditing(false)} 
+                  className="group flex items-center bg-white border border-gray-300 text-gray-700 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-gray-100 shadow-sm"
+                >
                 <X className="w-5 h-5 shrink-0" />
                 <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
                   Cancelar
@@ -520,8 +522,9 @@ export default function ProjetoFormPage() {
                 {saving ? 'Salvando...' : 'Salvar Projeto'}
               </span>
             </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </header>
 
       <form id="projeto-form" onSubmit={handleSubmit} className="space-y-8">

@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, getDoc, writeBatch, serverTimestamp, orderBy } from 'firebase/firestore';
-import { ArrowLeft, Save, Loader2, FileSpreadsheet, Calendar as CalendarIcon, CheckCircle2, Unlock, FileText } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, FileSpreadsheet, Calendar as CalendarIcon, CheckCircle2, Unlock, FileText, Folder } from 'lucide-react';
 import { db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
-import type { ItemMaster, ItemProjeto, Projeto, CronogramaItem } from '../types';
+import type { ItemMaster, ItemProjeto, Projeto, CronogramaItem, ModuloProjeto } from '../types';
 
 const round2 = (num: number) => Math.round((num + Number.EPSILON) * 100) / 100;
 
@@ -13,6 +13,7 @@ export default function ProjetoCronogramaPage() {
   const navigate = useNavigate();
 
   const [projeto, setProjeto] = useState<Projeto | null>(null);
+  const [modulos, setModulos] = useState<ModuloProjeto[]>([]);
   const [itensProjeto, setItensProjeto] = useState<ItemProjeto[]>([]);
   const [itensMaster, setItensMaster] = useState<ItemMaster[]>([]);
   const [cronogramaItems, setCronogramaItems] = useState<CronogramaItem[]>([]);
@@ -34,6 +35,9 @@ export default function ProjetoCronogramaPage() {
       
       const projSnap = await getDoc(doc(db, 'projects', id));
       if (projSnap.exists()) setProjeto({ id: projSnap.id, ...projSnap.data() } as Projeto);
+
+      const snapModulos = await getDocs(query(collection(db, `projects/${id}/modulos`), orderBy('criadoEm', 'asc')));
+      setModulos(snapModulos.docs.map(d => ({ id: d.id, ...d.data() } as ModuloProjeto)));
 
       const snapProj = await getDocs(query(collection(db, `projects/${id}/items`), orderBy('criadoEm', 'asc')));
       const projItems = snapProj.docs.map(d => ({ id: d.id, ...d.data() } as ItemProjeto));
@@ -155,6 +159,7 @@ export default function ProjetoCronogramaPage() {
 
     const headers = [
       'Nº',
+      'Módulo',
       'Item',
       'Unidade',
       'Qtd Total',
@@ -168,88 +173,120 @@ export default function ProjetoCronogramaPage() {
       headers.push(`Mês ${m} (R$)`);
     }
 
-    const rows = itensProjeto.map(it => {
-      const master = itensMaster.find(m => m.id === it.itemId);
-      const rowData: any[] = [
-        master ? String(master.codigo).padStart(3, '0') : '-',
-        it.nome,
-        it.unidade,
-        it.quantidade,
-        it.valorUnitario,
-        it.valorTotal
+    const generateRowsForItems = (items: ItemProjeto[]) => {
+      const rows = items.map(it => {
+        const master = itensMaster.find(m => m.id === it.itemId);
+        const mod = modulos.find(m => m.id === it.moduloId);
+        const rowData: any[] = [
+          master ? String(master.codigo).padStart(3, '0') : '-',
+          mod ? mod.nome : 'Sem Módulo',
+          it.nome,
+          it.unidade,
+          it.quantidade,
+          it.valorUnitario,
+          it.valorTotal
+        ];
+
+        const itemAllocs = allocations[it.id] || {};
+        for (let m = 1; m <= duracaoMeses; m++) {
+          const qty = itemAllocs[m] || 0;
+          rowData.push(qty);
+          rowData.push(qty * it.valorUnitario);
+        }
+        return rowData;
+      });
+
+      const totalRow = [
+        '',
+        '',
+        'TOTAL',
+        '',
+        '',
+        '',
+        items.reduce((acc, it) => acc + it.valorTotal, 0)
       ];
 
-      const itemAllocs = allocations[it.id] || {};
       for (let m = 1; m <= duracaoMeses; m++) {
-        const qty = itemAllocs[m] || 0;
-        rowData.push(qty);
-        rowData.push(qty * it.valorUnitario);
+        let sumQty = 0;
+        let sumVal = 0;
+        items.forEach(it => {
+          const qty = (allocations[it.id] || {})[m] || 0;
+          sumQty += qty;
+          sumVal += qty * it.valorUnitario;
+        });
+        totalRow.push(sumQty);
+        totalRow.push(sumVal);
       }
-      return rowData;
-    });
 
-    const totalRow = [
-      '',
-      'TOTAL GERAL',
-      '',
-      '',
-      '',
-      itensProjeto.reduce((acc, it) => acc + it.valorTotal, 0)
-    ];
+      return [...rows, totalRow];
+    };
 
-    // Total for each month
-    for (let m = 1; m <= duracaoMeses; m++) {
-      let sumQty = 0;
-      let sumVal = 0;
-      itensProjeto.forEach(it => {
-        const qty = (allocations[it.id] || {})[m] || 0;
-        sumQty += qty;
-        sumVal += qty * it.valorUnitario;
-      });
-      totalRow.push(sumQty);
-      totalRow.push(sumVal);
-    }
-
-    const fileData = [headers, ...rows, totalRow];
-    const worksheet = XLSX.utils.aoa_to_sheet(fileData);
-
-    // Format Number/Currency cells
-    // columns:
-    // 0: Nº, 1: Item, 2: Unidade
-    // 3: Qtd Total (n)
-    // 4: Valor Unitário (currency)
-    // 5: Valor Total (currency)
-    // Then pairs of (Qtd, Currency) starting at index 6
-
-    for (let r = 1; r < fileData.length; r++) {
-      // Format Qtd Total (col 3)
-      let cell = worksheet[XLSX.utils.encode_cell({ r, c: 3 })];
-      if (cell && typeof cell.v === 'number') cell.z = '#,##0.00';
-
-      // Format V. Unitário (col 4)
-      cell = worksheet[XLSX.utils.encode_cell({ r, c: 4 })];
-      if (cell && typeof cell.v === 'number') cell.z = '"R$ "#,##0.00';
-
-      // Format V. Total (col 5)
-      cell = worksheet[XLSX.utils.encode_cell({ r, c: 5 })];
-      if (cell && typeof cell.v === 'number') cell.z = '"R$ "#,##0.00';
-
-      // Month columns
-      let cIdx = 6;
-      for (let m = 1; m <= duracaoMeses; m++) {
-        // Qtd Month
-        cell = worksheet[XLSX.utils.encode_cell({ r, c: cIdx })];
+    const formatSheetCols = (ws: XLSX.WorkSheet, fileDataLength: number) => {
+      for (let r = 1; r < fileDataLength; r++) {
+        // Qtd Total (col 4 / idx 4)
+        let cell = ws[XLSX.utils.encode_cell({ r, c: 4 })];
         if (cell && typeof cell.v === 'number') cell.z = '#,##0.00';
-        cIdx++;
-        // Val Month
-        cell = worksheet[XLSX.utils.encode_cell({ r, c: cIdx })];
+
+        // V. Unitário (col 5 / idx 5)
+        cell = ws[XLSX.utils.encode_cell({ r, c: 5 })];
         if (cell && typeof cell.v === 'number') cell.z = '"R$ "#,##0.00';
-        cIdx++;
+
+        // V. Total (col 6 / idx 6)
+        cell = ws[XLSX.utils.encode_cell({ r, c: 6 })];
+        if (cell && typeof cell.v === 'number') cell.z = '"R$ "#,##0.00';
+
+        let cIdx = 7;
+        for (let m = 1; m <= duracaoMeses; m++) {
+          cell = ws[XLSX.utils.encode_cell({ r, c: cIdx })];
+          if (cell && typeof cell.v === 'number') cell.z = '#,##0.00';
+          cIdx++;
+          cell = ws[XLSX.utils.encode_cell({ r, c: cIdx })];
+          if (cell && typeof cell.v === 'number') cell.z = '"R$ "#,##0.00';
+          cIdx++;
+        }
       }
-    }
+    };
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Cronograma Físico-Financeiro');
+
+    // Aba Geral
+    const geralRows = generateRowsForItems(itensProjeto);
+    const geralData = [headers, ...geralRows];
+    const wsGeral = XLSX.utils.aoa_to_sheet(geralData);
+    formatSheetCols(wsGeral, geralData.length);
+    const maxWidthsGeral = geralData.reduce((acc, row) => {
+      row.forEach((val, i) => {
+        let strVal = String(val || '');
+        if (typeof val === 'number' && i > 4) strVal = 'R$ ' + val.toFixed(2);
+        acc[i] = Math.max(acc[i] || 0, strVal.length);
+      });
+      return acc;
+    }, [] as number[]);
+    wsGeral['!cols'] = maxWidthsGeral.map(w => ({ wch: w + 2 }));
+    XLSX.utils.book_append_sheet(workbook, wsGeral, 'Geral');
+
+    // Abas por Módulo
+    modulos.forEach(mod => {
+      const modItems = itensProjeto.filter(it => it.moduloId === mod.id);
+      if (modItems.length > 0) {
+        const modRows = generateRowsForItems(modItems);
+        const modData = [headers, ...modRows];
+        const wsMod = XLSX.utils.aoa_to_sheet(modData);
+        formatSheetCols(wsMod, modData.length);
+        wsMod['!cols'] = maxWidthsGeral.map(w => ({ wch: w + 2 }));
+        XLSX.utils.book_append_sheet(workbook, wsMod, mod.nome.substring(0, 31)); // excel sheet limit
+      }
+    });
+
+    const semModuloItems = itensProjeto.filter(it => !it.moduloId);
+    if (semModuloItems.length > 0) {
+      const smRows = generateRowsForItems(semModuloItems);
+      const smData = [headers, ...smRows];
+      const wsSm = XLSX.utils.aoa_to_sheet(smData);
+      formatSheetCols(wsSm, smData.length);
+      wsSm['!cols'] = maxWidthsGeral.map(w => ({ wch: w + 2 }));
+      XLSX.utils.book_append_sheet(workbook, wsSm, 'Sem Módulo');
+    }
 
     // Aba 2: Resumo Mensal
     const resumoHeaders = ['Mês', 'Total Previsto (R$)'];
@@ -276,18 +313,48 @@ export default function ProjetoCronogramaPage() {
     worksheetResumo['!cols'] = [{ wch: 20 }, { wch: 25 }];
     XLSX.utils.book_append_sheet(workbook, worksheetResumo, 'Resumo Mensal');
 
-    const maxWidths = fileData.reduce((acc, row) => {
-      row.forEach((val, i) => {
-        let strVal = String(val || '');
-        if (typeof val === 'number' && i > 3) {
-          // just an approximation for formatting width
-          strVal = 'R$ ' + val.toFixed(2);
-        }
-        acc[i] = Math.max(acc[i] || 0, strVal.length);
+    // Aba 3: Resumo por Módulo
+    const resumoModuloHeaders = ['Módulo', ...Array.from({ length: duracaoMeses }).map((_, i) => `Mês ${i+1}`), 'Total (R$)'];
+    const resumoModuloRows = [];
+    
+    modulos.forEach(mod => {
+      const row: (string | number)[] = [mod.nome];
+      let totalMod = 0;
+      for (let m = 1; m <= duracaoMeses; m++) {
+        let sumMes = 0;
+        itensProjeto.filter(it => it.moduloId === mod.id).forEach(it => {
+          const qty = (allocations[it.id] || {})[m] || 0;
+          sumMes += qty * it.valorUnitario;
+        });
+        row.push(sumMes);
+        totalMod += sumMes;
+      }
+      row.push(totalMod);
+      resumoModuloRows.push(row);
+    });
+
+    const rowSemModulo: (string | number)[] = ['Sem Módulo'];
+    let totalSem = 0;
+    for (let m = 1; m <= duracaoMeses; m++) {
+      let sumMes = 0;
+      itensProjeto.filter(it => !it.moduloId).forEach(it => {
+        const qty = (allocations[it.id] || {})[m] || 0;
+        sumMes += qty * it.valorUnitario;
       });
-      return acc;
-    }, [] as number[]);
-    worksheet['!cols'] = maxWidths.map(w => ({ wch: w + 2 }));
+      rowSemModulo.push(sumMes);
+      totalSem += sumMes;
+    }
+    if (totalSem > 0) resumoModuloRows.push(rowSemModulo);
+
+    const resumoModFileData = [resumoModuloHeaders, ...resumoModuloRows];
+    const wsResumoMod = XLSX.utils.aoa_to_sheet(resumoModFileData);
+    for (let r = 1; r < resumoModFileData.length; r++) {
+      for (let c = 1; c <= duracaoMeses + 1; c++) {
+        const cell = wsResumoMod[XLSX.utils.encode_cell({ r, c })];
+        if (cell && typeof cell.v === 'number') cell.z = '"R$ "#,##0.00';
+      }
+    }
+    XLSX.utils.book_append_sheet(workbook, wsResumoMod, 'Resumo por Módulo');
 
     try {
       const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'binary' });
@@ -330,6 +397,17 @@ export default function ProjetoCronogramaPage() {
     const itemAllocs = allocations[itemId] || {};
     const sum = Object.values(itemAllocs).reduce((acc, val) => acc + (val || 0), 0);
     return round2(sum);
+  };
+
+  const calculateTotalGeralDistribuido = () => {
+    let total = 0;
+    for (let m = 1; m <= duracaoMeses; m++) {
+      itensProjeto.forEach(it => {
+        const qty = (allocations[it.id] || {})[m] || 0;
+        total += qty * it.valorUnitario;
+      });
+    }
+    return total;
   };
 
   const monthTotalVal = typeof selectedTab === 'number' ? itensProjeto.reduce((acc, it) => {
@@ -442,7 +520,7 @@ export default function ProjetoCronogramaPage() {
             <div className="p-4 bg-amber-50 border-b border-amber-100 flex justify-between items-center">
               <h2 className="font-bold text-amber-900 text-lg">Resumo Financeiro do Projeto</h2>
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto mb-8">
               <table className="w-full text-left">
                 <thead className="bg-white text-xs font-bold text-lie-gray uppercase border-b border-gray-200">
                   <tr>
@@ -466,12 +544,87 @@ export default function ProjetoCronogramaPage() {
                 </tbody>
                 <tfoot className="bg-gray-100 border-t-2 border-gray-200">
                   <tr>
-                    <td className="px-6 py-5 font-black text-lie-ink text-lg uppercase">Total Geral do Projeto</td>
+                    <td className="px-6 py-5 font-black text-lie-ink text-lg uppercase">Total Geral do Projeto (Valores Distribuídos)</td>
                     <td className="px-6 py-5 text-right font-black text-lie-green text-2xl">
-                      {itensProjeto.reduce((acc, it) => acc + it.valorTotal, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      {calculateTotalGeralDistribuido().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </td>
                   </tr>
                 </tfoot>
+              </table>
+            </div>
+
+            <div className="p-4 bg-emerald-50 border-b border-emerald-100 flex justify-between items-center">
+              <h2 className="font-bold text-emerald-900 text-lg">Resumo Financeiro por Módulo</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left whitespace-nowrap">
+                <thead className="bg-white text-xs font-bold text-lie-gray uppercase border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-4 sticky left-0 bg-white z-10">Módulo</th>
+                    {Array.from({ length: duracaoMeses }).map((_, i) => (
+                      <th key={i} className="px-4 py-4 text-right">Mês {i + 1}</th>
+                    ))}
+                    <th className="px-4 py-4 text-right text-lie-ink">Total Geral</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {modulos.map(mod => {
+                    let totalMod = 0;
+                    return (
+                      <tr key={mod.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-4 font-bold text-lie-ink sticky left-0 bg-white group-hover:bg-gray-50 transition-colors z-10 border-r">{mod.nome}</td>
+                        {Array.from({ length: duracaoMeses }).map((_, i) => {
+                          const m = i + 1;
+                          let sumMes = 0;
+                          itensProjeto.filter(it => it.moduloId === mod.id).forEach(it => {
+                            const qty = (allocations[it.id] || {})[m] || 0;
+                            sumMes += qty * it.valorUnitario;
+                          });
+                          totalMod += sumMes;
+                          return (
+                            <td key={m} className="px-4 py-4 text-right font-medium text-gray-700">
+                              {sumMes > 0 ? sumMes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
+                            </td>
+                          );
+                        })}
+                        <td className="px-4 py-4 text-right font-black text-lie-ink bg-gray-50">
+                          {totalMod.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  
+                  {/* Sem Modulo */}
+                  {(() => {
+                    let totalSem = 0;
+                    const rowCells = Array.from({ length: duracaoMeses }).map((_, i) => {
+                      const m = i + 1;
+                      let sumMes = 0;
+                      itensProjeto.filter(it => !it.moduloId).forEach(it => {
+                        const qty = (allocations[it.id] || {})[m] || 0;
+                        sumMes += qty * it.valorUnitario;
+                      });
+                      totalSem += sumMes;
+                      return (
+                        <td key={m} className="px-4 py-4 text-right font-medium text-gray-700">
+                          {sumMes > 0 ? sumMes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
+                        </td>
+                      );
+                    });
+
+                    if (totalSem === 0) return null;
+
+                    return (
+                      <tr className="hover:bg-gray-50">
+                        <td className="px-4 py-4 font-bold text-gray-500 sticky left-0 bg-white group-hover:bg-gray-50 transition-colors z-10 border-r">Sem Módulo</td>
+                        {rowCells}
+                        <td className="px-4 py-4 text-right font-black text-lie-ink bg-gray-50">
+                          {totalSem.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </td>
+                      </tr>
+                    );
+                  })()}
+                </tbody>
               </table>
             </div>
           </div>
@@ -514,57 +667,153 @@ export default function ProjetoCronogramaPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {itensProjeto.map(it => {
-                    const master = itensMaster.find(m => m.id === it.itemId);
-                    const distributed = calculateTotalDistributed(it.id);
-                    const currentQty = (allocations[it.id] || {})[selectedTab] || 0;
-                    const isComplete = distributed === it.quantidade;
-
+                  {modulos.map(modulo => {
+                    const itensDoModulo = itensProjeto.filter(it => it.moduloId === modulo.id);
+                    if (itensDoModulo.length === 0) return null;
                     return (
-                      <tr key={it.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-3 text-xs font-mono text-gray-500">
-                          {master ? `#${String(master.codigo).padStart(3, '0')}` : '-'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-bold text-lie-ink">{it.nome}</div>
-                          {it.descricao && <div className="text-[10px] text-gray-400 truncate max-w-[200px]">{it.descricao}</div>}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-center">{it.unidade}</td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <span className={`text-xs font-bold ${distributed > 0 ? (isComplete ? 'text-green-600' : 'text-blue-600') : 'text-gray-400'}`}>
-                              {distributed} / {it.quantidade}
-                            </span>
-                            {isComplete && <CheckCircle2 className="w-4 h-4 text-green-500" />}
-                          </div>
-                          <div className="w-full bg-gray-200 h-1.5 mt-1 rounded-full overflow-hidden">
-                            <div 
-                              className={`h-full ${isComplete ? 'bg-green-500' : 'bg-blue-500'}`} 
-                              style={{ width: `${Math.min(100, (distributed / it.quantidade) * 100)}%` }}
-                            ></div>
-                          </div>
-                        </td>
-                        <td className={`px-4 py-3 ${monthLocked[selectedTab] ? 'bg-gray-50' : 'bg-emerald-50/50'} border-l border-emerald-100`}>
-                          <input 
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={currentQty || ''}
-                            onChange={(e) => handleQtyChange(it.id, selectedTab, e.target.value, it.quantidade)}
-                            disabled={monthLocked[selectedTab]}
-                            className={`w-full rounded text-center font-bold shadow-inner ${monthLocked[selectedTab] ? 'bg-gray-100 border-gray-200 text-gray-500' : 'border-emerald-200 focus:ring-emerald-500 focus:border-emerald-500 text-emerald-800'}`}
-                            placeholder="0"
-                          />
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-500">
-                          {it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </td>
-                        <td className="px-4 py-3 text-sm font-bold text-right text-lie-ink bg-gray-50">
-                          {(currentQty * it.valorUnitario).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </td>
-                      </tr>
+                      <React.Fragment key={modulo.id}>
+                        <tr className="bg-gray-200 border-y-2 border-gray-300">
+                          <td colSpan={7} className="px-4 py-3 font-black text-lie-ink uppercase tracking-wide text-xs">
+                            <div className="flex items-center gap-2">
+                              <Folder className="w-4 h-4 text-lie-green" />
+                              {modulo.nome}
+                            </div>
+                          </td>
+                        </tr>
+                        {itensDoModulo.map(it => {
+                          const master = itensMaster.find(m => m.id === it.itemId);
+                          const distributed = calculateTotalDistributed(it.id);
+                          const currentQty = (allocations[it.id] || {})[selectedTab as number] || 0;
+                          const isComplete = distributed === it.quantidade;
+
+                          return (
+                            <tr key={it.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-4 py-3 text-xs font-mono text-gray-500">
+                                {master ? `#${String(master.codigo).padStart(3, '0')}` : '-'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-lie-ink">{it.nome}</div>
+                                {it.descricao && <div className="text-[10px] text-gray-400 truncate max-w-[200px]">{it.descricao}</div>}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-center">{it.unidade}</td>
+                              <td className="px-4 py-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span className={`text-xs font-bold ${distributed > 0 ? (isComplete ? 'text-green-600' : 'text-blue-600') : 'text-gray-400'}`}>
+                                    {distributed} / {it.quantidade}
+                                  </span>
+                                  {isComplete && <CheckCircle2 className="w-4 h-4 text-green-500" />}
+                                </div>
+                                <div className="w-full bg-gray-200 h-1.5 mt-1 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full ${isComplete ? 'bg-green-500' : 'bg-blue-500'}`} 
+                                    style={{ width: `${Math.min(100, (distributed / it.quantidade) * 100)}%` }}
+                                  ></div>
+                                </div>
+                              </td>
+                              <td className={`px-4 py-3 ${monthLocked[selectedTab as number] ? 'bg-gray-50' : 'bg-emerald-50/50'} border-l border-emerald-100`}>
+                                <input 
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={currentQty || ''}
+                                  onChange={(e) => handleQtyChange(it.id, selectedTab as number, e.target.value, it.quantidade)}
+                                  disabled={monthLocked[selectedTab as number]}
+                                  className={`w-full rounded text-center font-bold shadow-inner ${monthLocked[selectedTab as number] ? 'bg-gray-100 border-gray-200 text-gray-500' : 'border-emerald-200 focus:ring-emerald-500 focus:border-emerald-500 text-emerald-800'}`}
+                                  placeholder="0"
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right text-gray-500">
+                                {it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </td>
+                              <td className="px-4 py-3 text-sm font-bold text-right text-lie-ink bg-gray-50">
+                                {(currentQty * it.valorUnitario).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="bg-gray-50 border-t border-gray-200">
+                          <td colSpan={6} className="px-4 py-2 text-right font-bold text-gray-500 text-xs">Subtotal Módulo:</td>
+                          <td className="px-4 py-2 text-right font-bold text-lie-ink">
+                            {itensDoModulo.reduce((acc, it) => acc + (((allocations[it.id] || {})[selectedTab as number] || 0) * it.valorUnitario), 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          </td>
+                        </tr>
+                      </React.Fragment>
                     );
                   })}
+
+                  {/* Itens sem Módulo */}
+                  {(() => {
+                    const semModulo = itensProjeto.filter(it => !it.moduloId);
+                    if (semModulo.length === 0) return null;
+                    return (
+                      <React.Fragment key="sem-modulo">
+                        {modulos.length > 0 && (
+                          <tr className="bg-gray-100 border-y-2 border-gray-200">
+                            <td colSpan={7} className="px-4 py-3 font-bold text-gray-500 uppercase tracking-wide text-xs">Itens sem Módulo</td>
+                          </tr>
+                        )}
+                        {semModulo.map(it => {
+                          const master = itensMaster.find(m => m.id === it.itemId);
+                          const distributed = calculateTotalDistributed(it.id);
+                          const currentQty = (allocations[it.id] || {})[selectedTab as number] || 0;
+                          const isComplete = distributed === it.quantidade;
+
+                          return (
+                            <tr key={it.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-4 py-3 text-xs font-mono text-gray-500">
+                                {master ? `#${String(master.codigo).padStart(3, '0')}` : '-'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-lie-ink">{it.nome}</div>
+                                {it.descricao && <div className="text-[10px] text-gray-400 truncate max-w-[200px]">{it.descricao}</div>}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-center">{it.unidade}</td>
+                              <td className="px-4 py-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span className={`text-xs font-bold ${distributed > 0 ? (isComplete ? 'text-green-600' : 'text-blue-600') : 'text-gray-400'}`}>
+                                    {distributed} / {it.quantidade}
+                                  </span>
+                                  {isComplete && <CheckCircle2 className="w-4 h-4 text-green-500" />}
+                                </div>
+                                <div className="w-full bg-gray-200 h-1.5 mt-1 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full ${isComplete ? 'bg-green-500' : 'bg-blue-500'}`} 
+                                    style={{ width: `${Math.min(100, (distributed / it.quantidade) * 100)}%` }}
+                                  ></div>
+                                </div>
+                              </td>
+                              <td className={`px-4 py-3 ${monthLocked[selectedTab as number] ? 'bg-gray-50' : 'bg-emerald-50/50'} border-l border-emerald-100`}>
+                                <input 
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={currentQty || ''}
+                                  onChange={(e) => handleQtyChange(it.id, selectedTab as number, e.target.value, it.quantidade)}
+                                  disabled={monthLocked[selectedTab as number]}
+                                  className={`w-full rounded text-center font-bold shadow-inner ${monthLocked[selectedTab as number] ? 'bg-gray-100 border-gray-200 text-gray-500' : 'border-emerald-200 focus:ring-emerald-500 focus:border-emerald-500 text-emerald-800'}`}
+                                  placeholder="0"
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right text-gray-500">
+                                {it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </td>
+                              <td className="px-4 py-3 text-sm font-bold text-right text-lie-ink bg-gray-50">
+                                {(currentQty * it.valorUnitario).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {modulos.length > 0 && (
+                          <tr className="bg-gray-50 border-t border-gray-200">
+                            <td colSpan={6} className="px-4 py-2 text-right font-bold text-gray-500 text-xs">Subtotal Sem Módulo:</td>
+                            <td className="px-4 py-2 text-right font-bold text-lie-ink">
+                              {semModulo.reduce((acc, it) => acc + (((allocations[it.id] || {})[selectedTab as number] || 0) * it.valorUnitario), 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })()}
                 </tbody>
                 {itensProjeto.length > 0 && (
                   <tfoot className="bg-gray-100 border-t-2 border-gray-200">

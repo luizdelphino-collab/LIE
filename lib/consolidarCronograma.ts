@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { ref, getBlob } from 'firebase/storage';
 import { db, storage } from './firebase';
-import type { Projeto, Entidade, ItemProjeto } from '../types';
+import type { Projeto, Entidade, ItemProjeto, ModuloProjeto } from '../types';
 
 const MARGIN = 20;
 const PAGE_W = 210;
@@ -244,6 +244,10 @@ export async function consolidarCronograma(
     .map(d => ({ id: d.id, ...d.data() } as ItemProjeto))
     .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
+  // Buscar módulos
+  const modulosSnap = await getDocs(collection(db, `projects/${projetoId}/modulos`));
+  const modulos = modulosSnap.docs.map(d => ({ id: d.id, ...d.data() } as ModuloProjeto));
+
   const cor = hexToRgb((entidade as any).corPredominante || '#16A34A');
   const corClara = lightenRgb(cor, 0.90);
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -376,20 +380,70 @@ export async function consolidarCronograma(
     const monthlyAllocations: any[] = [];
     let subtotalMes = 0;
 
-    itensProjeto.forEach(it => {
+    // Agrupar por módulo
+    modulos.forEach(mod => {
+      const itensDoModulo = itensProjeto.filter(it => it.moduloId === mod.id);
+      let temItem = false;
+      let subtotalMod = 0;
+      
+      const rowsDoModulo: any[] = [];
+
+      itensDoModulo.forEach(it => {
+        const qty = (allocations[it.id] || {})[m] || 0;
+        if (qty > 0) {
+          const itemValTotal = qty * it.valorUnitario;
+          subtotalMod += itemValTotal;
+          rowsDoModulo.push([
+            it.nome,
+            it.unidade,
+            it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+            qty,
+            itemValTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+          ]);
+          temItem = true;
+        }
+      });
+
+      if (temItem) {
+        monthlyAllocations.push([
+          { content: `[ Módulo: ${mod.nome} ]`, colSpan: 5, styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }
+        ]);
+        monthlyAllocations.push(...rowsDoModulo);
+        subtotalMes += subtotalMod;
+      }
+    });
+
+    // Sem Módulo
+    const itensSemModulo = itensProjeto.filter(it => !it.moduloId);
+    let temSemMod = false;
+    let subtotalSemMod = 0;
+    const rowsSemMod: any[] = [];
+    
+    itensSemModulo.forEach(it => {
       const qty = (allocations[it.id] || {})[m] || 0;
       if (qty > 0) {
         const itemValTotal = qty * it.valorUnitario;
-        subtotalMes += itemValTotal;
-        monthlyAllocations.push([
+        subtotalSemMod += itemValTotal;
+        rowsSemMod.push([
           it.nome,
           it.unidade,
           it.valorUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
           qty,
           itemValTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
         ]);
+        temSemMod = true;
       }
     });
+
+    if (temSemMod) {
+      if (modulos.length > 0) {
+        monthlyAllocations.push([
+          { content: `[ Itens Sem Módulo ]`, colSpan: 5, styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }
+        ]);
+      }
+      monthlyAllocations.push(...rowsSemMod);
+      subtotalMes += subtotalSemMod;
+    }
 
     if (monthlyAllocations.length === 0) {
       monthlyAllocations.push([
@@ -438,7 +492,15 @@ export async function consolidarCronograma(
   addSectionTitle(state, 'Resumo Financeiro do Cronograma');
   state.y += 2;
 
-  const totalProjeto = itensProjeto.reduce((acc, it) => acc + it.valorTotal, 0);
+  // Total Geral do Projeto DEVE ser a somatória de cada mês, não o bruto
+  let totalProjeto = 0;
+  for (let m = 1; m <= duracaoMeses; m++) {
+    itensProjeto.forEach(it => {
+      const qty = (allocations[it.id] || {})[m] || 0;
+      totalProjeto += qty * it.valorUnitario;
+    });
+  }
+
   const resumoBody: any[] = [];
   let acumulado = 0;
 
@@ -490,6 +552,65 @@ export async function consolidarCronograma(
       }
     }
   });
+
+  state.y = (pdf as any).lastAutoTable.finalY + 15;
+
+  // ========== PAG. 4 - RESUMO FINANCEIRO POR MÓDULO ==========
+  if (modulos.length > 0) {
+    checkPageSpace(state, 60);
+    addSectionTitle(state, 'Resumo Financeiro por Módulo');
+    state.y += 2;
+
+    const modulosHeaders = ['Módulo', 'Total (R$)'];
+    const modulosBody: any[] = [];
+
+    modulos.forEach(mod => {
+      let totalMod = 0;
+      for (let m = 1; m <= duracaoMeses; m++) {
+        itensProjeto.filter(it => it.moduloId === mod.id).forEach(it => {
+          const qty = (allocations[it.id] || {})[m] || 0;
+          totalMod += qty * it.valorUnitario;
+        });
+      }
+      modulosBody.push([mod.nome, totalMod.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })]);
+    });
+
+    let totalSem = 0;
+    for (let m = 1; m <= duracaoMeses; m++) {
+      itensProjeto.filter(it => !it.moduloId).forEach(it => {
+        const qty = (allocations[it.id] || {})[m] || 0;
+        totalSem += qty * it.valorUnitario;
+      });
+    }
+    if (totalSem > 0) {
+      modulosBody.push(['Sem Módulo', totalSem.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })]);
+    }
+
+    modulosBody.push([
+      { content: 'TOTAL GERAL:', styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: totalProjeto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), styles: { fontStyle: 'bold', fillColor: lightenRgb(cor, 0.95) } }
+    ]);
+
+    autoTable(pdf, {
+      startY: state.y,
+      head: [modulosHeaders],
+      body: modulosBody,
+      margin: { left: MARGIN, right: MARGIN, top: 35, bottom: 22 },
+      headStyles: { fillColor: cor, textColor: [255, 255, 255] },
+      alternateRowStyles: { fillColor: corClara },
+      styles: { fontSize: 9, textColor: [0, 0, 0] },
+      columnStyles: {
+        0: { cellWidth: 100 },
+        1: { cellWidth: 70, halign: 'right' },
+      },
+      didDrawPage: (data) => {
+        const pageCount = data.doc.internal.getNumberOfPages();
+        if (pageCount > 1) {
+          drawLetterheadHeader(data.doc, entidade, logoBase64, cor);
+        }
+      }
+    });
+  }
 
   // Renderizar rodapés, paginação e rubricas nas páginas de miolo (página 2 em diante)
   const total = (pdf as any).internal.getNumberOfPages();

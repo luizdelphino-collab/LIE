@@ -284,6 +284,17 @@ export interface DocumentoProjeto {
   criadoEm: Timestamp;
 }
 
+// ---------- Módulos (Agrupamento de Itens) ----------
+
+export interface ModuloProjeto {
+  id: string;
+  projectId: string;
+  nome: string;
+  descricao?: string;
+  ordem?: number;
+  criadoEm: Timestamp;
+}
+
 // ---------- Itens (Banco de Dados de Itens) ----------
 
 export type CategoriaItem =
@@ -341,6 +352,7 @@ export interface ItemProjeto {
   quantidade: number;
   valorTotal: number;
   ordem?: number;
+  moduloId?: string; // NOVO: Referência ao Módulo
   fornecedoresIds?: string[]; // IDs dos fornecedores vinculados ao item na execução
   criadoEm: Timestamp;
 

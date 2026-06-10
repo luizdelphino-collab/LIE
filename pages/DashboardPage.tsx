@@ -24,7 +24,7 @@ export default function DashboardPage() {
         const [snapProjetos, snapEntidades, snapItens, snapFornecedores] = await Promise.all([
           getDocs(collection(db, 'projects')),
           getDocs(collection(db, 'entidades')),
-          getDocs(collection(db, 'itens_master')),
+          getDocs(collection(db, 'items')),
           getDocs(collection(db, 'fornecedores'))
         ]);
 
@@ -33,34 +33,45 @@ export default function DashboardPage() {
           entidadesMap[d.id] = d.data().nome;
         });
 
-        const projetos = snapProjetos.docs.map((d) => {
-          const data = d.data() as Omit<Projeto, 'id'>;
-          return {
-            id: d.id,
-            ...data,
-            entidadeNome: entidadesMap[data.entidadeId] || 'Entidade desconhecida'
-          };
-        });
+        const projetosData = snapProjetos.docs.map((d) => ({
+          id: d.id,
+          ...d.data()
+        } as Projeto));
+
+        const projetosComValor = await Promise.all(
+          projetosData.map(async (p) => {
+            const itemsSnap = await getDocs(collection(db, `projects/${p.id}/items`));
+            let valorTotalItens = 0;
+            itemsSnap.forEach(doc => {
+              valorTotalItens += (doc.data().valorTotal || 0);
+            });
+            return {
+              ...p,
+              entidadeNome: entidadesMap[p.entidadeId] || 'Entidade desconhecida',
+              valorReal: valorTotalItens > 0 ? valorTotalItens : (p.valorAprovado || 0)
+            };
+          })
+        );
 
         const projetosPorStatus: Record<string, { count: number; valor: number }> = {};
-        projetos.forEach(p => {
+        projetosComValor.forEach(p => {
           const status = p.status || 'em_elaboracao';
           if (!projetosPorStatus[status]) {
             projetosPorStatus[status] = { count: 0, valor: 0 };
           }
           projetosPorStatus[status].count += 1;
-          projetosPorStatus[status].valor += (p.valorAprovado || 0);
+          projetosPorStatus[status].valor += p.valorReal;
         });
 
         const s: Stats = {
-          totalProjetos: projetos.length,
+          totalProjetos: projetosComValor.length,
           totalEntidades: snapEntidades.size,
           totalItens: snapItens.size,
           totalFornecedores: snapFornecedores.size,
           projetosPorStatus
         };
         setStats(s);
-        setProjetosRecentes(projetos.sort((a, b) => b.criadoEm.toMillis() - a.criadoEm.toMillis()).slice(0, 5));
+        setProjetosRecentes(projetosComValor.sort((a, b) => b.criadoEm.toMillis() - a.criadoEm.toMillis()).slice(0, 5));
       } finally {
         setLoading(false);
       }
@@ -167,7 +178,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <div className="text-sm font-semibold text-lie-ink">
-                    {fmt(p.valorAprovado)}
+                    {fmt((p as any).valorReal)}
                   </div>
                 </li>
               ))}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp, deleteField } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
@@ -165,19 +165,25 @@ export default function ProjetoDocumentosPage() {
         return;
       }
 
-      const payload = {
+      const payload: any = {
         ...formData,
         id: docId,
         projectId: id,
         arquivoUrl: finalUrl,
       };
 
+      Object.keys(payload).forEach(key => {
+        if (payload[key] === undefined) {
+          payload[key] = deleteField();
+        }
+      });
+
       if (!editId) {
-        payload.criadoEm = serverTimestamp() as Timestamp;
+        payload.criadoEm = serverTimestamp();
         payload.ordem = documentos.length;
       }
 
-      await setDoc(doc(db, `projects/${id}/documentos`, docId), payload as any, { merge: true });
+      await setDoc(doc(db, `projects/${id}/documentos`, docId), payload, { merge: true });
       
       setIsFormOpen(false);
       carregarDados();
