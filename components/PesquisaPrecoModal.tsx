@@ -277,7 +277,9 @@ export default function PesquisaPrecoModal({ isOpen, onClose, item, projetoTitul
   useEffect(() => {
     if (isOpen && item) {
       if (item.referencias && Array.isArray(item.referencias)) {
-        const elegiveis = item.referencias.filter(r => dentroDaFaixa(r.valorUnitario));
+        // Cotacao importada do Banco de Precos foi curada manualmente pelo
+        // operador — nao se aplica o filtro anti-outlier da busca automatica.
+        const elegiveis = item.referencias.filter(r => r.fonte === 'banco-de-precos' || dentroDaFaixa(r.valorUnitario));
         const removidas = item.referencias.length - elegiveis.length;
         setCestaReferencias(elegiveis);
         if (removidas > 0) {

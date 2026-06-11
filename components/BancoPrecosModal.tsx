@@ -36,7 +36,7 @@ export default function BancoPrecosModal({ item, onClose, onComplete }: Props) {
   const [carregandoPrecos, setCarregandoPrecos] = useState(false);
 
   const [salvando, setSalvando] = useState(false);
-  const [sucesso, setSucesso] = useState<{ refs: number; media: number; mediana: number } | null>(null);
+  const [sucesso, setSucesso] = useState<{ refs: number; media: number; mediana: number; pdfUrl: string } | null>(null);
 
   // Passo 1 — carrega cotações da conta.
   useEffect(() => {
@@ -88,7 +88,7 @@ export default function BancoPrecosModal({ item, onClose, onComplete }: Props) {
     setErro(null);
     try {
       const r = await anexarPrecosAoItem(item, cotacao, bpItem.idItem, precos);
-      setSucesso({ refs: r.refs, media: r.media, mediana: r.mediana });
+      setSucesso({ refs: r.refs, media: r.media, mediana: r.mediana, pdfUrl: r.pdfUrl });
     } catch (e: any) {
       setErro(e.message);
     } finally {
@@ -148,9 +148,22 @@ export default function BancoPrecosModal({ item, onClose, onComplete }: Props) {
               <p className="text-sm text-gray-700 mt-2">
                 Média <strong>{brl(sucesso.media)}</strong> · Mediana <strong>{brl(sucesso.mediana)}</strong>
               </p>
-              <button onClick={onComplete} className="mt-5 px-4 py-2 bg-lie-green text-white rounded-lg font-semibold hover:bg-lie-greenDark transition">
-                Concluir
-              </button>
+              <p className="text-xs text-gray-500 mt-3">
+                Para rever depois: abra a <strong>Pesquisa de Preços</strong> do item (botão ⚖️) — as cotações ficam na cesta.
+              </p>
+              <div className="mt-5 flex items-center justify-center gap-2">
+                <a
+                  href={sucesso.pdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2 border border-lie-green text-lie-green rounded-lg font-semibold hover:bg-lie-green/5 transition"
+                >
+                  <FileText className="w-4 h-4" /> Abrir PDF
+                </a>
+                <button onClick={onComplete} className="px-4 py-2 bg-lie-green text-white rounded-lg font-semibold hover:bg-lie-greenDark transition">
+                  Concluir
+                </button>
+              </div>
             </div>
           ) : (
             <>
