@@ -111,7 +111,7 @@ export default function Layout() {
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1">
             <NavItem to="/" icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" end />
             <NavItem to="/entidades" icon={<Building2 className="w-4 h-4" />} label="Entidades" />
             <NavItem to="/projetos" icon={<Briefcase className="w-4 h-4" />} label="Projetos" />
@@ -167,7 +167,7 @@ export default function Layout() {
             {/* Mobile hamburger */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 text-lie-gray hover:bg-gray-100 rounded-lg transition"
+              className="lg:hidden p-2 text-lie-gray hover:bg-gray-100 rounded-lg transition"
               aria-label="Menu"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -177,7 +177,7 @@ export default function Layout() {
 
         {/* Mobile dropdown menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden bg-white border-t border-gray-100 px-4 pb-4 pt-2 shadow-lg">
+          <div className="lg:hidden bg-white border-t border-gray-100 px-4 pb-4 pt-2 shadow-lg">
             <nav className="flex flex-col gap-1">
               <MobileNavItem to="/" icon={<LayoutDashboard className="w-5 h-5" />} label="Dashboard" end onClick={() => setMobileMenuOpen(false)} />
               <MobileNavItem to="/entidades" icon={<Building2 className="w-5 h-5" />} label="Entidades" onClick={() => setMobileMenuOpen(false)} />
@@ -399,16 +399,15 @@ function NavItem({
     <NavLink
       to={to}
       end={end}
+      title={label}
       className={({ isActive }) =>
-        `group flex items-center p-2 rounded-lg text-sm font-medium transition-all duration-300 overflow-hidden ${
+        `flex items-center gap-1.5 px-2 py-1.5 xl:px-2.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
           isActive ? 'bg-lie-green/10 text-lie-green' : 'text-lie-gray hover:bg-gray-100 hover:text-lie-ink'
         }`
       }
     >
       <div className="shrink-0">{icon}</div>
-      <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out">
-        {label}
-      </span>
+      <span>{label}</span>
     </NavLink>
   );
 }
