@@ -78,7 +78,8 @@ async function getJwt() {
     const now = Date.now();
     if (jwtCache && jwtCache.exp > now + 60_000)
         return jwtCache.token;
-    const apiToken = process.env.BANCO_PRECOS_TOKEN;
+    // .trim() protege contra \n/espaços que o shell costuma anexar ao gravar o segredo.
+    const apiToken = (process.env.BANCO_PRECOS_TOKEN || '').trim();
     if (!apiToken)
         throw new Error('BANCO_PRECOS_TOKEN não configurado no Secret Manager.');
     const resp = await bpRequest('POST', '/api/bp4/Auth/CreateUserToken', null, { usuarioApiToken: apiToken });
