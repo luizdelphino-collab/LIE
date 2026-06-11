@@ -1,10 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sincronizarCatalogoCNBS = exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = void 0;
+exports.sincronizarCatalogoCNBS = exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = exports.bancoPrecosItemPrecos = exports.bancoPrecosCotacaoItens = exports.bancoPrecosCotacoes = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const puppeteer = require("puppeteer");
 admin.initializeApp();
+// Integração Banco de Preços (proxy seguro — segredo BANCO_PRECOS_TOKEN).
+var bancoDePrecos_1 = require("./bancoDePrecos");
+Object.defineProperty(exports, "bancoPrecosCotacoes", { enumerable: true, get: function () { return bancoDePrecos_1.bancoPrecosCotacoes; } });
+Object.defineProperty(exports, "bancoPrecosCotacaoItens", { enumerable: true, get: function () { return bancoDePrecos_1.bancoPrecosCotacaoItens; } });
+Object.defineProperty(exports, "bancoPrecosItemPrecos", { enumerable: true, get: function () { return bancoDePrecos_1.bancoPrecosItemPrecos; } });
 exports.obterPdfContratacaoPublica = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB' })
     .https.onCall(async (data, context) => {

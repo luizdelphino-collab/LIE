@@ -1,0 +1,1545 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "BP4 API - Cotacoes e Autenticacao",
+    "description": "Endpoints de autenticacao JWT e operacoes de cotacoes para fornecedores externos.",
+    "version": "v1"
+  },
+  "paths": {
+    "/api/bp4/Auth/CreateUserToken": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Gera um token JWT a partir do UsuarioApiToken informado.",
+        "description": "Primeira chamada de qualquer integracao com a BP4 API. Use o `usuarioApiToken`\r\ngerado no painel do Banco de Precos (**Configuracoes > Preferencias > 2 - Token\r\nde Acesso API-Banco de Precos**) no body da requisicao. A API devolve um JWT valido\r\npor **8 horas**, que deve ser enviado em `Authorization: Bearer {token}` nas demais\r\nchamadas. Apos o vencimento, chame este endpoint novamente para obter um novo JWT.\r\n            \r\nSe o token informado estiver invalido, revogado ou nao existir, retorna 200 com\r\nmensagem de ausencia ou 401 de credencial invalida conforme o cenario.\r\n            \r\n**Exemplo de body:**\r\n```\r\n{ \"usuarioApiToken\": \"6RcGdFoVEOpG7BwkJgmjdmouYhz56o4BEfSvtN4n\" }\r\n```",
+        "requestBody": {
+          "description": "Payload contendo o UsuarioApiToken.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/User"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/User"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/User"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token gerado com sucesso."
+          },
+          "401": {
+            "description": "Credencial invalida para o usuario."
+          },
+          "500": {
+            "description": "Erro interno ao validar credenciais."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/GetCotacoes": {
+      "get": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Retorna a cotacao completa do usuario autenticado.",
+        "description": "Lista as cotacoes visiveis ao usuario autenticado. Quando nenhum filtro e informado,\r\nretorna as cotacoes do contrato; quando um `IdCotacao` e informado no filtro, retorna\r\nsomente a cotacao correspondente.\r\n            \r\nQuando nao ha cotacoes visiveis, retorna 200 com mensagem de ausencia.",
+        "parameters": [
+          {
+            "name": "IdCotacao",
+            "in": "query",
+            "description": "Identificador da cotacao. Obrigatorio em consultas que filtram por uma cotacao especifica.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "IdUsuario",
+            "in": "query",
+            "description": "Identificador do usuario dono da cotacao. Preenchido pela API a partir do JWT; ignorado no request.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "IdEntidade",
+            "in": "query",
+            "description": "Identificador da entidade (orgao publico) vinculada a cotacao.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "Descricao",
+            "in": "query",
+            "description": "Descricao/nome da cotacao. Obrigatorio em criacao.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Observacao",
+            "in": "query",
+            "description": "Texto livre de observacao da cotacao.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "TipoFormulaCotacaoItem",
+            "in": "query",
+            "description": "Tipo de formula aplicado aos itens da cotacao. Preenchido pela API com base no contrato do usuario.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "DataHoraCriacao",
+            "in": "query",
+            "description": "Data e hora de criacao da cotacao.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "CotacaoItens",
+            "in": "query",
+            "description": "Colecao de itens vinculados a cotacao.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Item"
+              }
+            }
+          },
+          {
+            "name": "CotacaoItensCount",
+            "in": "query",
+            "description": "Total de itens vinculados a cotacao.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "CotacaoConvitesCount",
+            "in": "query",
+            "description": "Total de convites enviados a fornecedores para a cotacao.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "CotacaoConvitesEnviadosCount",
+            "in": "query",
+            "description": "Total de convites ja efetivamente enviados.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "CountFornecedoresPropostas",
+            "in": "query",
+            "description": "Total de fornecedores que apresentaram propostas.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "PrecoPublicoCount",
+            "in": "query",
+            "description": "Total de precos publicos encontrados para os itens.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "hasPrecoPublico",
+            "in": "query",
+            "description": "Indica se a cotacao tem pelo menos um preco publico.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "hasPrecoInciso2",
+            "in": "query",
+            "description": "Indica se a cotacao tem pelo menos um preco Inciso II.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "ItensWithPrecosSelecionados",
+            "in": "query",
+            "description": "Quantidade de itens com precos selecionados.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "idsCotacaoItem",
+            "in": "query",
+            "description": "Lista de ids dos itens da cotacao.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "int32"
+              }
+            }
+          },
+          {
+            "name": "isEditavel",
+            "in": "query",
+            "description": "Indica se a cotacao esta em estado editavel.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "Legislacao",
+            "in": "query",
+            "description": "Legislacao aplicada: 0 = livre, 1 = Lei 8.666/93, 2 = Lei 14.133/21.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "DataPrevistaDivulgacaoEdital",
+            "in": "query",
+            "description": "Data prevista para divulgacao do edital (usada quando Legislacao > 0).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "Finalidade",
+            "in": "query",
+            "description": "Finalidade da cotacao em texto livre.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "CompartilhamentoTipo",
+            "in": "query",
+            "description": "Tipo de compartilhamento externo da cotacao.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "IdCompartilhamentoExterno",
+            "in": "query",
+            "description": "Identificador do compartilhamento externo, quando aplicavel.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "CompartilhamentoExterno_Status",
+            "in": "query",
+            "description": "Status do compartilhamento externo.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "CompartilhamentoExterno_IdCotacaoDestino",
+            "in": "query",
+            "description": "Id da cotacao destino em compartilhamentos externos.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "IdTermoReferencia",
+            "in": "query",
+            "description": "Id do termo de referencia anexado a cotacao.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "TermoReferenciaArquivoNomeOriginal",
+            "in": "query",
+            "description": "Nome original do arquivo de termo de referencia.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "IdFinalidadeConviteFornecedor",
+            "in": "query",
+            "description": "Finalidade do convite de fornecedor: 1 ou 2. Valores fora dessa faixa sao normalizados para 1.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "CotacaoFinalizada",
+            "in": "query",
+            "description": "Indica se a cotacao foi finalizada.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "ExibirEmCotacaoDireta",
+            "in": "query",
+            "description": "Indica se a cotacao deve aparecer entre cotacoes diretas (0 ou 1). Preenchido pela API.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "Cotar_Adm_Publica",
+            "in": "query",
+            "description": "Indica se a cotacao consulta precos de administracao publica (0 ou 1). Preenchido pela API.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "IdContrato",
+            "in": "query",
+            "description": "Id do contrato do usuario. Preenchido pela API a partir do JWT; ignorado no request.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "IdLote",
+            "in": "query",
+            "description": "Filtro para pesquisa de itens por lote.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "IdItem",
+            "in": "query",
+            "description": "Identificador de um item da cotacao. Obrigatorio em GET /GetCotacoesPrecosItens.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado da cotacao ou mensagem de conteudo ausente."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao consultar cotacoes."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/GetCotacaoCompleta": {
+      "get": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Retorna a cotacao, lotes e itens em um unico payload.",
+        "description": "Agrega em uma unica chamada o que seria obtido com tres requisicoes separadas\r\n(`/Cotacoes/GetCotacoes` + `/Cotacoes/GetCotacoesLotes` + `/Cotacoes/GetCotacoesItens`).\r\nUse quando a tela ou integracao precisa dos dados completos da cotacao de uma so vez.\r\n            \r\n`IdCotacao` e obrigatorio no body. Quando a cotacao nao existe ou nao pertence ao\r\nusuario autenticado, retorna 200 com mensagem de ausencia.",
+        "requestBody": {
+          "description": "Filtro de cotacao (IdCotacao obrigatorio).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cotacao completa ou mensagem de ausencia."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao consultar cotacao completa."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/GetCotacoesLotes": {
+      "get": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Retorna os lotes associados a uma cotacao.",
+        "description": "Lista os lotes de uma cotacao especifica. Util para telas que precisam exibir a\r\nestrutura de lotes antes dos itens, ou para filtrar itens por lote em uma segunda\r\nrequisicao a `/Cotacoes/GetCotacoesItens`.\r\n            \r\n`IdCotacao` e obrigatorio no body. Quando a cotacao nao possui lotes, retorna 200\r\ncom mensagem de ausencia.",
+        "requestBody": {
+          "description": "Filtro de cotacao (IdCotacao obrigatorio).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lista de lotes ou mensagem de ausencia."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao consultar lotes."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/GetCotacoesItens": {
+      "get": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Retorna os itens associados a uma cotacao.",
+        "description": "Lista os itens de uma cotacao. Aceita filtro opcional por `IdLote` para paginar\r\nitens de um lote especifico; sem `IdLote` retorna todos os itens da cotacao.\r\n            \r\n`IdCotacao` e obrigatorio no body. Quando a cotacao nao possui itens, retorna 200\r\ncom mensagem de ausencia.",
+        "requestBody": {
+          "description": "Filtro de cotacao (IdCotacao obrigatorio).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lista de itens ou mensagem de ausencia."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao consultar itens."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/GetCotacoesPrecosItens": {
+      "get": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Retorna os precos pesquisados para um item de cotacao.",
+        "description": "Retorna os precos encontrados para um item especifico, agregando todas as fontes\r\ndisponiveis: precos publicos, fornecedores, Inciso II, CMED, Sinapi, agropecuarios,\r\nPMS, etc.\r\n            \r\n`IdItem` e obrigatorio no body. Quando o item nao possui precos coletados, retorna\r\n200 com mensagem de ausencia.",
+        "requestBody": {
+          "description": "Filtro contendo IdItem.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lista de precos ou mensagem de ausencia."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao consultar precos do item."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/CriarCotacoes": {
+      "post": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Cria uma nova cotacao para o usuario autenticado.",
+        "description": "Cria uma cotacao no contrato do usuario autenticado.\r\n            \r\n**Campos obrigatorios:**\r\n- `Descricao`: nome/identificacao da cotacao\r\n- `Legislacao`: 0 (livre), 1 (Lei 8.666/93) ou 2 (Lei 14.133/21)\r\n            \r\n**Regras:**\r\n- O endpoint respeita o **limite de cotacoes do contrato**; quando atingido,\r\n  retorna 200 com mensagem de limite excedido **sem criar** o registro.\r\n- Quando `Legislacao` = 0, o campo `DataPrevistaDivulgacaoEdital` e ignorado.\r\n- Valores de `IdFinalidadeConviteFornecedor` fora da faixa 1..2 sao normalizados para 1.\r\n            \r\nResposta 200 de sucesso inclui `idCotacao` da cotacao criada.",
+        "requestBody": {
+          "description": "Dados da cotacao (descricao e legislacao obrigatorios).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cotacao"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cotacao criada ou mensagem de negocio."
+          },
+          "400": {
+            "description": "Erro ao criar cotacao."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao criar cotacao."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/CriarItens": {
+      "post": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Cria um novo item em uma cotacao existente.",
+        "description": "Adiciona um item a uma cotacao ja existente.\r\n            \r\n**Campos obrigatorios:**\r\n- `IdCotacao`: cotacao alvo (deve pertencer ao usuario autenticado)\r\n- `nome`: maximo **255 caracteres**\r\n- `descricao`: maximo **2000 caracteres**\r\n            \r\n**Validacoes adicionais:**\r\n- `PercentualPrecoMaximo` deve estar entre **-99 e 999** quando informado.\r\n- `AjusteFreteObservacao` aceita no maximo **200 caracteres**.\r\n            \r\nValores de `IdUnidadeMedida` e `IdCidadeEntrega` podem ser obtidos em\r\n`/Cotacoes/GetTodasUnidadeMedida` e `/Cotacoes/GetTodasCidades`. Resposta 200 de\r\nsucesso inclui `idItem` do item criado.",
+        "requestBody": {
+          "description": "Dados do item (nome, descricao e IdCotacao obrigatorios).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CotacaoItem"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CotacaoItem"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CotacaoItem"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Item criado ou mensagem de negocio."
+          },
+          "400": {
+            "description": "Erro ao criar item."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao criar item."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/GetTodasUnidadeMedida": {
+      "get": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Retorna todas as unidades de medida cadastradas.",
+        "description": "Consulta todas as unidades de medida disponiveis no sistema. Retorna uma lista\r\ncompleta das unidades cadastradas, util para **referencia ou selecao** em outras\r\ntelas (ex.: preencher o campo `IdUnidadeMedida` ao criar um item em\r\n`/Cotacoes/CriarItens`).\r\n            \r\nNao aceita filtros.",
+        "responses": {
+          "200": {
+            "description": "Lista de unidades ou mensagem de ausencia."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao consultar unidades."
+          }
+        }
+      }
+    },
+    "/api/bp4/Cotacoes/GetTodasCidades": {
+      "get": {
+        "tags": [
+          "Cotacoes"
+        ],
+        "summary": "Retorna todas as cidades disponiveis para cotacoes.",
+        "description": "Consulta todas as cidades disponiveis no sistema. Retorna uma lista completa para\r\n**referencia ou selecao** em outras telas (ex.: preencher o campo `IdCidadeEntrega`\r\nao criar um item em `/Cotacoes/CriarItens`).\r\n            \r\nNao aceita filtros.",
+        "responses": {
+          "200": {
+            "description": "Lista de cidades ou mensagem de ausencia."
+          },
+          "401": {
+            "description": "Usuario nao autenticado."
+          },
+          "500": {
+            "description": "Erro interno ao consultar cidades."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Cotacao": {
+        "type": "object",
+        "properties": {
+          "idCotacao": {
+            "type": "integer",
+            "description": "Identificador da cotacao. Obrigatorio em consultas que filtram por uma cotacao especifica.",
+            "format": "int32"
+          },
+          "idUsuario": {
+            "type": "integer",
+            "description": "Identificador do usuario dono da cotacao. Preenchido pela API a partir do JWT; ignorado no request.",
+            "format": "int32"
+          },
+          "idEntidade": {
+            "type": "integer",
+            "description": "Identificador da entidade (orgao publico) vinculada a cotacao.",
+            "format": "int32",
+            "nullable": true
+          },
+          "descricao": {
+            "type": "string",
+            "description": "Descricao/nome da cotacao. Obrigatorio em criacao.",
+            "nullable": true
+          },
+          "observacao": {
+            "type": "string",
+            "description": "Texto livre de observacao da cotacao.",
+            "nullable": true
+          },
+          "tipoFormulaCotacaoItem": {
+            "type": "string",
+            "description": "Tipo de formula aplicado aos itens da cotacao. Preenchido pela API com base no contrato do usuario.",
+            "nullable": true
+          },
+          "dataHoraCriacao": {
+            "type": "string",
+            "description": "Data e hora de criacao da cotacao.",
+            "format": "date-time"
+          },
+          "cotacaoItens": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            },
+            "description": "Colecao de itens vinculados a cotacao.",
+            "nullable": true
+          },
+          "cotacaoItensCount": {
+            "type": "integer",
+            "description": "Total de itens vinculados a cotacao.",
+            "format": "int32"
+          },
+          "cotacaoConvitesCount": {
+            "type": "integer",
+            "description": "Total de convites enviados a fornecedores para a cotacao.",
+            "format": "int32"
+          },
+          "cotacaoConvitesEnviadosCount": {
+            "type": "integer",
+            "description": "Total de convites ja efetivamente enviados.",
+            "format": "int32"
+          },
+          "countFornecedoresPropostas": {
+            "type": "integer",
+            "description": "Total de fornecedores que apresentaram propostas.",
+            "format": "int32"
+          },
+          "precoPublicoCount": {
+            "type": "integer",
+            "description": "Total de precos publicos encontrados para os itens.",
+            "format": "int32"
+          },
+          "hasPrecoPublico": {
+            "type": "boolean",
+            "description": "Indica se a cotacao tem pelo menos um preco publico."
+          },
+          "hasPrecoInciso2": {
+            "type": "boolean",
+            "description": "Indica se a cotacao tem pelo menos um preco Inciso II."
+          },
+          "itensWithPrecosSelecionados": {
+            "type": "integer",
+            "description": "Quantidade de itens com precos selecionados.",
+            "format": "int32"
+          },
+          "idsCotacaoItem": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "Lista de ids dos itens da cotacao.",
+            "nullable": true
+          },
+          "isEditavel": {
+            "type": "boolean",
+            "description": "Indica se a cotacao esta em estado editavel."
+          },
+          "legislacao": {
+            "type": "integer",
+            "description": "Legislacao aplicada: 0 = livre, 1 = Lei 8.666/93, 2 = Lei 14.133/21.",
+            "format": "int32"
+          },
+          "dataPrevistaDivulgacaoEdital": {
+            "type": "string",
+            "description": "Data prevista para divulgacao do edital (usada quando Legislacao > 0).",
+            "format": "date-time",
+            "nullable": true
+          },
+          "finalidade": {
+            "type": "string",
+            "description": "Finalidade da cotacao em texto livre.",
+            "nullable": true
+          },
+          "compartilhamentoTipo": {
+            "type": "string",
+            "description": "Tipo de compartilhamento externo da cotacao.",
+            "nullable": true
+          },
+          "idCompartilhamentoExterno": {
+            "type": "integer",
+            "description": "Identificador do compartilhamento externo, quando aplicavel.",
+            "format": "int32",
+            "nullable": true
+          },
+          "compartilhamentoExterno_Status": {
+            "type": "string",
+            "description": "Status do compartilhamento externo.",
+            "nullable": true
+          },
+          "compartilhamentoExterno_IdCotacaoDestino": {
+            "type": "integer",
+            "description": "Id da cotacao destino em compartilhamentos externos.",
+            "format": "int32",
+            "nullable": true
+          },
+          "idTermoReferencia": {
+            "type": "integer",
+            "description": "Id do termo de referencia anexado a cotacao.",
+            "format": "int32",
+            "nullable": true
+          },
+          "termoReferenciaArquivoNomeOriginal": {
+            "type": "string",
+            "description": "Nome original do arquivo de termo de referencia.",
+            "nullable": true
+          },
+          "idFinalidadeConviteFornecedor": {
+            "type": "integer",
+            "description": "Finalidade do convite de fornecedor: 1 ou 2. Valores fora dessa faixa sao normalizados para 1.",
+            "format": "int32",
+            "nullable": true
+          },
+          "cotacaoFinalizada": {
+            "type": "boolean",
+            "description": "Indica se a cotacao foi finalizada.",
+            "nullable": true
+          },
+          "exibirEmCotacaoDireta": {
+            "type": "integer",
+            "description": "Indica se a cotacao deve aparecer entre cotacoes diretas (0 ou 1). Preenchido pela API.",
+            "format": "int32",
+            "nullable": true
+          },
+          "cotar_Adm_Publica": {
+            "type": "integer",
+            "description": "Indica se a cotacao consulta precos de administracao publica (0 ou 1). Preenchido pela API.",
+            "format": "int32"
+          },
+          "idContrato": {
+            "type": "integer",
+            "description": "Id do contrato do usuario. Preenchido pela API a partir do JWT; ignorado no request.",
+            "format": "int32"
+          },
+          "idLote": {
+            "type": "integer",
+            "description": "Filtro para pesquisa de itens por lote.",
+            "format": "int32",
+            "nullable": true
+          },
+          "idItem": {
+            "type": "integer",
+            "description": "Identificador de um item da cotacao. Obrigatorio em GET /GetCotacoesPrecosItens.",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Modelo de cotacao usado em consultas e criacao pela API publica BP4."
+      },
+      "CotacaoItem": {
+        "required": [
+          "descricao",
+          "idCidadeEntrega",
+          "nome",
+          "nome_cidade"
+        ],
+        "type": "object",
+        "properties": {
+          "idItem": {
+            "type": "integer",
+            "description": "Identificador do item (preenchido pela API na resposta).",
+            "format": "int32"
+          },
+          "idCotacao": {
+            "type": "integer",
+            "description": "Identificador da cotacao a qual o item pertence. Obrigatorio na criacao.",
+            "format": "int32"
+          },
+          "codigo": {
+            "type": "integer",
+            "description": "Codigo numerico interno do item.",
+            "format": "int32"
+          },
+          "idLegislacao": {
+            "type": "integer",
+            "description": "Legislacao herdada da cotacao (0 livre, 1 Lei 8.666/93, 2 Lei 14.133/21).",
+            "format": "int32",
+            "nullable": true
+          },
+          "dataPrevistaDivulgacaoEdital": {
+            "type": "string",
+            "description": "Data prevista para divulgacao do edital, herdada da cotacao.",
+            "format": "date-time",
+            "nullable": true
+          },
+          "cotacaoItem_Db": {
+            "$ref": "#/components/schemas/Item"
+          },
+          "ajusteFreteTipo": {
+            "type": "integer",
+            "description": "Tipo de ajuste de frete aplicado.",
+            "format": "int32",
+            "nullable": true
+          },
+          "ajusteFreteValor": {
+            "type": "number",
+            "description": "Valor de ajuste de frete.",
+            "format": "double",
+            "nullable": true
+          },
+          "ajusteFreteObservacao": {
+            "type": "string",
+            "description": "Observacao sobre o ajuste de frete. Maximo de 200 caracteres.",
+            "nullable": true
+          },
+          "quantidadeItem": {
+            "type": "integer",
+            "description": "Quantidade do item na cotacao.",
+            "format": "int32"
+          },
+          "idUnidadeMedida": {
+            "type": "integer",
+            "description": "Id da unidade de medida (ver GET /GetTodasUnidadeMedida).",
+            "format": "int32"
+          },
+          "ordemItem": {
+            "type": "integer",
+            "description": "Posicao ordinal do item na cotacao.",
+            "format": "int32"
+          },
+          "percentualPrecoMaximo": {
+            "type": "number",
+            "description": "Percentual maximo para preco. Aceita valores entre -99 e 999.",
+            "format": "double",
+            "nullable": true
+          },
+          "nomeUnidadeMedida": {
+            "type": "string",
+            "description": "Nome da unidade de medida no singular.",
+            "nullable": true
+          },
+          "nomePluralUnidadeMedida": {
+            "type": "string",
+            "description": "Nome da unidade de medida no plural.",
+            "nullable": true
+          },
+          "siglaUnidade": {
+            "type": "string",
+            "description": "Sigla da unidade de medida.",
+            "nullable": true
+          },
+          "ordemIndex": {
+            "type": "string",
+            "description": "Indice de ordenacao em formato texto.",
+            "nullable": true
+          },
+          "nome": {
+            "maxLength": 255,
+            "minLength": 0,
+            "type": "string",
+            "description": "Nome do item. Obrigatorio, maximo 255 caracteres."
+          },
+          "descricao": {
+            "maxLength": 2000,
+            "minLength": 0,
+            "type": "string",
+            "description": "Descricao detalhada do item. Obrigatoria, maximo 2000 caracteres.",
+            "format": "multiline"
+          },
+          "idCidadeEntrega": {
+            "type": "integer",
+            "description": "Id da cidade de entrega (ver GET /GetTodasCidades).",
+            "format": "int32"
+          },
+          "nomeCidadeEntrega": {
+            "type": "string",
+            "description": "Nome da cidade de entrega (informativo).",
+            "nullable": true
+          },
+          "nome_cidade": {
+            "minLength": 1,
+            "type": "string",
+            "description": "Nome da cidade em texto (compatibilidade com contratos antigos)."
+          },
+          "observacao": {
+            "maxLength": 2000,
+            "minLength": 0,
+            "type": "string",
+            "description": "Observacao livre sobre o item. Maximo de 2000 caracteres.",
+            "format": "multiline",
+            "nullable": true
+          },
+          "hora_finalizacao_adm_publica": {
+            "type": "string",
+            "description": "Prazo de finalizacao dos precos de administracao publica.",
+            "format": "date-time",
+            "nullable": true
+          },
+          "hora_finalizacao_fornecedor": {
+            "type": "string",
+            "description": "Prazo de finalizacao dos precos de fornecedores.",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Modelo de item de cotacao usado na criacao via POST /CriarItens."
+      },
+      "CotacaoItem_PrecoAgropecuarios": {
+        "type": "object",
+        "properties": {
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idPrecoAgropecuario": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "isDesconsideradoDoCalculo": {
+            "type": "boolean"
+          },
+          "justificativaDesconsiderado": {
+            "type": "string",
+            "nullable": true
+          },
+          "filtrosAplicados": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CotacaoItem_PrecoBPS": {
+        "type": "object",
+        "properties": {
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idBPSaudeItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isDesconsideradoDoCalculo": {
+            "type": "boolean"
+          },
+          "justificativaDesconsiderado": {
+            "type": "string",
+            "nullable": true
+          },
+          "filtrosAplicados": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CotacaoItem_PrecoCMED": {
+        "type": "object",
+        "properties": {
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idMedicamentoPreco": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isDesconsideradoDoCalculo": {
+            "type": "boolean"
+          },
+          "justificativaDesconsiderado": {
+            "type": "string",
+            "nullable": true
+          },
+          "filtrosAplicados": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CotacaoItem_PrecoFornecedor": {
+        "type": "object",
+        "properties": {
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idProposta": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "valorProposta": {
+            "type": "number",
+            "format": "double"
+          },
+          "isDesconsideradoDoCalculo": {
+            "type": "boolean"
+          },
+          "justificativaDesconsiderado": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CotacaoItem_PrecoPMS": {
+        "type": "object",
+        "properties": {
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idPmsPreco": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isDesconsideradoDoCalculo": {
+            "type": "boolean"
+          },
+          "justificativaDesconsiderado": {
+            "type": "string",
+            "nullable": true
+          },
+          "filtrosAplicados": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CotacaoItem_PrecoSinapi": {
+        "type": "object",
+        "properties": {
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idSinapiProdutoPreco": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isDesconsideradoDoCalculo": {
+            "type": "boolean"
+          },
+          "justificativaDesconsiderado": {
+            "type": "string",
+            "nullable": true
+          },
+          "filtrosAplicados": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "idCotacao": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ordemIndex": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "nome": {
+            "type": "string",
+            "nullable": true
+          },
+          "descricao": {
+            "type": "string",
+            "nullable": true
+          },
+          "observacao": {
+            "type": "string",
+            "nullable": true
+          },
+          "codigo": {
+            "type": "string",
+            "nullable": true
+          },
+          "idInterno": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "codigoInterno": {
+            "type": "string",
+            "nullable": true
+          },
+          "ajusteFrete_Valor": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "ajusteFrete_Observacao": {
+            "type": "string",
+            "nullable": true
+          },
+          "loteId": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "loteNome": {
+            "type": "string",
+            "nullable": true
+          },
+          "loteDescricao": {
+            "type": "string",
+            "nullable": true
+          },
+          "loteOrdemIndex": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "idCidadeEntrega": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "nomeCidadeEntrega": {
+            "type": "string",
+            "nullable": true
+          },
+          "ufCidadeEntrega": {
+            "type": "string",
+            "nullable": true
+          },
+          "quantidades": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Quantidade"
+            },
+            "nullable": true
+          },
+          "precosMinhaInstituicao": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrecoPublico"
+            },
+            "nullable": true
+          },
+          "precosPublicos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrecoPublico"
+            },
+            "nullable": true
+          },
+          "precos_Inciso2": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Preco_Inciso2"
+            },
+            "nullable": true
+          },
+          "precosFornecedores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CotacaoItem_PrecoFornecedor"
+            },
+            "nullable": true
+          },
+          "precosBPS": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CotacaoItem_PrecoBPS"
+            },
+            "nullable": true
+          },
+          "precosCMED": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CotacaoItem_PrecoCMED"
+            },
+            "nullable": true
+          },
+          "precosSinapi": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CotacaoItem_PrecoSinapi"
+            },
+            "nullable": true
+          },
+          "precosAgropecuarios": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CotacaoItem_PrecoAgropecuarios"
+            },
+            "nullable": true
+          },
+          "precosPMS": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CotacaoItem_PrecoPMS"
+            },
+            "nullable": true
+          },
+          "percentual": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "justificativaPercentual": {
+            "type": "string",
+            "nullable": true
+          },
+          "justificativaPoucosPrecos": {
+            "type": "string",
+            "nullable": true
+          },
+          "idTRWeb": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "cotacaoIdLegislacao": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "cotacaoDataPrevistaDivulgacaoEdital": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "countSugestoes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "countFornecedoresConvidados": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "contemPrecoSelecionado": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PrecoPublico": {
+        "type": "object",
+        "properties": {
+          "idPrecoPublico": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idLicitacaoItem": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "formula": {
+            "type": "string",
+            "nullable": true
+          },
+          "idIndice": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "valorCorrecao": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "dataAtualizacaoIndice": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "nomeIndice": {
+            "type": "string",
+            "nullable": true
+          },
+          "strIdsPropostasRemovidas": {
+            "type": "string",
+            "nullable": true
+          },
+          "idsPropostasRemovidas": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "nullable": true
+          },
+          "isDesconsideradoDoCalculo": {
+            "type": "boolean"
+          },
+          "justificativaDesconsiderado": {
+            "type": "string",
+            "nullable": true
+          },
+          "filtrosAplicados": {
+            "type": "string",
+            "nullable": true
+          },
+          "preco_referencia": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Preco_Inciso2": {
+        "type": "object",
+        "properties": {
+          "idPrecoInciso2": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "url": {
+            "type": "string",
+            "nullable": true
+          },
+          "nomeProduto": {
+            "type": "string",
+            "nullable": true
+          },
+          "valorUnitarioQuandoIncluido": {
+            "type": "number",
+            "format": "double"
+          },
+          "valorUnitarioAtual": {
+            "type": "number",
+            "format": "double"
+          },
+          "dataHoraInclusao": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "comprovanteUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "idProduto": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "loja": {
+            "type": "string",
+            "nullable": true
+          },
+          "isDesconsideradoDoCalculo": {
+            "type": "boolean"
+          },
+          "justificativaDesconsiderado": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "Quantidade": {
+        "type": "object",
+        "properties": {
+          "idQuantidade": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idCotacaoItem": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "valorQuantidade": {
+            "type": "number",
+            "format": "double"
+          },
+          "idUnidadeMedida": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "unidadeMedida_Singular": {
+            "type": "string",
+            "nullable": true
+          },
+          "unidadeMedida_Plural": {
+            "type": "string",
+            "nullable": true
+          },
+          "unidadeMedida_Sigla": {
+            "type": "string",
+            "nullable": true
+          },
+          "ordenacaoIndex": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "userName": {
+            "type": "string",
+            "description": "Nome de usuario (nao utilizado pelo fluxo de token de API).",
+            "nullable": true
+          },
+          "password": {
+            "type": "string",
+            "description": "Senha do usuario (nao utilizada pelo fluxo de token de API).",
+            "nullable": true
+          },
+          "idUsuario": {
+            "type": "integer",
+            "description": "Identificador interno do usuario (preenchido pela API na resposta; ignorado na requisicao).",
+            "format": "int32",
+            "nullable": true
+          },
+          "usuarioApiToken": {
+            "type": "string",
+            "description": "Token de acesso gerado no painel do Banco de Precos em Configuracoes > Preferencias > Token de Acesso API-Banco de Precos.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Payload de autenticacao consumido por /Auth/CreateUserToken."
+      }
+    },
+    "securitySchemes": {
+      "Bearer": {
+        "type": "http",
+        "description": "Informe o token JWT no formato: Bearer {token}",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "security": [
+    {
+      "Bearer": [ ]
+    }
+  ]
+}

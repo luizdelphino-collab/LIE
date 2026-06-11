@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, limit, writeBatch } from 'firebase/firestore';
-import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ShieldCheck, Lightbulb, Package, Scale, Eye } from 'lucide-react';
+import { Plus, Search, Edit3, Trash2, ArrowUpDown, Loader2, ArrowLeft, Upload, Download, FileSpreadsheet, Wand2, X, CheckCircle2, AlertTriangle, ShieldAlert, ShieldCheck, Lightbulb, Package, Scale, Eye, Landmark } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
 import type { ItemMaster, CategoriaItem, UnidadeMedida } from '../types';
@@ -17,6 +17,7 @@ import PesquisaPrecoModal from '../components/PesquisaPrecoModal';
 import { sincronizarCatalogoCNBS, getCatalogoStats, type SincronizarRespostaCatalogo } from '../lib/catalogoPdmsApi';
 import { Database } from 'lucide-react';
 import WizardAtributosPDM from '../components/WizardAtributosPDM';
+import BancoPrecosModal from '../components/BancoPrecosModal';
 
 interface ItemComUso extends ItemMaster {
   projetosUsando: number;
@@ -100,6 +101,8 @@ export default function ItensMasterPage() {
 
   // Pesquisa de preço no Banco (etapa 5C): cesta vive no master, vale pra todos projetos
   const [pesquisaItem, setPesquisaItem] = useState<ItemMaster | null>(null);
+  // Importação de cotação existente do Banco de Preços (BP4) — seleção manual.
+  const [bancoPrecoItem, setBancoPrecoItem] = useState<ItemMaster | null>(null);
 
   // Restauracao dos itens que foram modificados pelo batch Padronizar Nomenclatura (v1.12.x)
   // Reverte nome/descricao/unidade pros valores originais preservados em nomeOriginalLIE/etc.
@@ -1501,6 +1504,13 @@ export default function ItensMasterPage() {
                         >
                           <Scale className="w-3.5 h-3.5" />
                         </button>
+                        <button
+                          onClick={() => setBancoPrecoItem(it)}
+                          className="p-1 text-indigo-500 hover:bg-indigo-50 rounded transition"
+                          title="Importar pesquisa do Banco de Preços (cotação existente)"
+                        >
+                          <Landmark className="w-3.5 h-3.5" />
+                        </button>
                         {it.pesquisado && it.tokenPesquisa && (
                           <a
                             href={`/#/validar?token=${it.tokenPesquisa}`}
@@ -1883,6 +1893,15 @@ export default function ItensMasterPage() {
           projetoTitulo={undefined}
           entidadeNome={undefined}
           onSave={() => { carregarItens(); }}
+        />
+      )}
+
+      {/* ===== MODAL BANCO DE PREÇOS (importar cotação existente) ===== */}
+      {bancoPrecoItem && (
+        <BancoPrecosModal
+          item={bancoPrecoItem}
+          onClose={() => setBancoPrecoItem(null)}
+          onComplete={() => { setBancoPrecoItem(null); carregarItens(); }}
         />
       )}
 

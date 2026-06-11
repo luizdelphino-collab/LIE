@@ -4,6 +4,9 @@ import * as puppeteer from 'puppeteer';
 
 admin.initializeApp();
 
+// Integração Banco de Preços (proxy seguro — segredo BANCO_PRECOS_TOKEN).
+export { bancoPrecosCotacoes, bancoPrecosCotacaoItens, bancoPrecosItemPrecos } from './bancoDePrecos';
+
 export const obterPdfContratacaoPublica = functions
   .runWith({ timeoutSeconds: 300, memory: '1GB' })
   .https.onCall(async (data: any, context: functions.https.CallableContext) => {

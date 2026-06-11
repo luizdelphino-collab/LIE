@@ -395,6 +395,8 @@ export interface PrecoReferencia {
   fonte:
     // Fontes governamentais automaticas (IN 73/2020 art. 5o I e II)
     | 'compras.gov.br' | 'pncp' | 'pncp-contratacao' | 'pncp-ata' | 'tce-pe'
+    // Pesquisa importada de cotacao existente no Banco de Precos (BP4)
+    | 'banco-de-precos'
     // Fontes manuais categorizadas (IN 73/2020 art. 5o II/III/IV/V)
     | 'contrato-publico'  // contratos publicos similares de outros entes (II)
     | 'convenio'          // convenios (II)
