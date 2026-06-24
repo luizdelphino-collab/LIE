@@ -4,7 +4,9 @@ import ProjetoWorkspaceNav from '../components/ProjetoWorkspaceNav';
 import AutoResizeTextarea from '../components/AutoResizeTextarea';
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query, writeBatch, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, Printer, FileText, Package, Settings } from 'lucide-react';
+import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, Printer, FileText, Package, Settings, Sparkles } from 'lucide-react';
+import AssistentePlanoModal from '../components/AssistentePlanoModal';
+import type { PlanoIaNarrativo } from '../lib/planoIaApi';
 import { db, storage } from '../lib/firebase';
 import { consolidarProjeto, type PrintOptions } from '../lib/consolidarProjeto';
 import PrintOptionsModal from '../components/PrintOptionsModal';
@@ -46,6 +48,21 @@ export default function ProjetoFormPage() {
   const [isManagingModalidades, setIsManagingModalidades] = useState(false);
   const [novaModalidadeGlobal, setNovaModalidadeGlobal] = useState('');
   const [savingModGlobal, setSavingModGlobal] = useState(false);
+  const [assistenteOpen, setAssistenteOpen] = useState(false);
+
+  // Aplica o texto gerado pela IA nos campos narrativos (entra em modo edição).
+  const aplicarPlanoIA = (n: PlanoIaNarrativo) => {
+    setIsEditing(true);
+    setFormData(p => ({
+      ...p,
+      resumo: n.resumo || p.resumo,
+      objetivoGeral: n.objetivoGeral || p.objetivoGeral,
+      objetivosEspecificos: n.objetivosEspecificos?.length ? n.objetivosEspecificos : p.objetivosEspecificos,
+      justificativa: n.justificativa || p.justificativa,
+      caracterizacaoSocioeconomica: n.caracterizacaoSocioeconomica || p.caracterizacaoSocioeconomica,
+      metodologia: n.metodologia || p.metodologia,
+    }));
+  };
 
   const [formData, setFormData] = useState<Partial<Projeto>>({
     titulo: '',
@@ -500,6 +517,30 @@ export default function ProjetoFormPage() {
           </div>
         )}
       </header>
+
+      {!isNew && (
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-violet-50 border border-violet-200 rounded-xl p-3">
+          <div className="flex items-start gap-2 text-sm text-violet-900">
+            <Sparkles className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
+            <span><strong>Assistente de IA:</strong> gera resumo, objetivos, justificativa, caracterização e metodologia a partir do histórico da entidade e de um brief curto.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAssistenteOpen(true)}
+            className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg font-bold shadow-sm whitespace-nowrap shrink-0"
+          >
+            <Sparkles className="w-4 h-4" /> Gerar com IA
+          </button>
+        </div>
+      )}
+
+      {assistenteOpen && (
+        <AssistentePlanoModal
+          projeto={formData}
+          onClose={() => setAssistenteOpen(false)}
+          onApply={aplicarPlanoIA}
+        />
+      )}
 
       <form id="projeto-form" onSubmit={handleSubmit} className="space-y-8">
         

@@ -121,7 +121,9 @@ const ALLOWED_ORIGINS = [
   'https://lie-projetos.firebaseapp.com',
   'http://localhost:5173',
   'http://localhost:5000',
+  'http://localhost:3001',
   'http://127.0.0.1:5173',
+  'http://127.0.0.1:3001',
 ];
 
 function pickAllowedOrigin(reqOrigin: string | undefined): string {
@@ -1950,4 +1952,133 @@ export const sincronizarCatalogoCNBS = functions
       erros,
       timestamp: new Date().toISOString(),
     });
+  });
+
+/**
+ * gerarPlanoTrabalho — Assistente de IA do Plano de Trabalho (Fase A: campos narrativos).
+ * Recebe um brief curto + contexto do projeto/entidade e devolve os textos formais
+ * do plano de trabalho LIE: resumo, objetivo geral, objetivos específicos,
+ * justificativa, caracterização socioeconômica e metodologia.
+ *
+ * POST JSON: { titulo, brief?, modalidades?, publicoAlvo?, local?, periodoMeses?,
+ *              historicoEntidade?, entidadeNome?, instrumentoOrigem? }
+ * Resposta: { resumo, objetivoGeral, objetivosEspecificos[], justificativa,
+ *             caracterizacaoSocioeconomica, metodologia }
+ */
+export const gerarPlanoTrabalho = functions
+  .runWith({ timeoutSeconds: 120, memory: '512MB', secrets: ['GEMINI_API_KEY'] })
+  .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin as string | undefined);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Vary', 'Origin');
+
+    if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+    if (req.method !== 'POST') { res.status(405).json({ error: 'Apenas POST é suportado.' }); return; }
+
+    const body = (req.body || {}) as Record<string, any>;
+    const titulo = String(body.titulo || '').trim();
+    if (!titulo) { res.status(400).json({ error: 'Campo "titulo" é obrigatório.' }); return; }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error('GEMINI_API_KEY não disponível no ambiente');
+      res.status(500).json({ error: 'Servidor sem chave Gemini configurada.' });
+      return;
+    }
+
+    const modalidades = Array.isArray(body.modalidades) ? body.modalidades.join(', ') : String(body.modalidades || '');
+    const ctx = [
+      `TÍTULO DO PROJETO: ${titulo}`,
+      body.entidadeNome ? `ENTIDADE PROPONENTE: ${body.entidadeNome}` : '',
+      body.historicoEntidade ? `HISTÓRICO DA ENTIDADE: ${String(body.historicoEntidade).slice(0, 2500)}` : '',
+      body.instrumentoOrigem ? `INSTRUMENTO: ${body.instrumentoOrigem}` : '',
+      modalidades ? `MODALIDADES ESPORTIVAS: ${modalidades}` : '',
+      body.publicoAlvo ? `PÚBLICO-ALVO: ${body.publicoAlvo}` : '',
+      body.local ? `LOCAL DE EXECUÇÃO: ${body.local}` : '',
+      body.periodoMeses ? `DURAÇÃO: ${body.periodoMeses} meses` : '',
+      body.brief ? `DESCRIÇÃO LIVRE DO PROPONENTE: ${String(body.brief).slice(0, 1500)}` : '',
+    ].filter(Boolean).join('\n');
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { GoogleGenerativeAI } = require('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        generationConfig: { temperature: 0.6, maxOutputTokens: 8192, responseMimeType: 'application/json' },
+      });
+
+      const prompt = `Você é um especialista em elaboração de projetos esportivos da Lei de Incentivo ao Esporte (LIE) no Brasil, que redige Planos de Trabalho formais para aprovação em órgãos públicos (Ministério do Esporte, Secretarias estaduais/municipais).
+
+Sua tarefa: a partir do contexto abaixo, redigir os textos do Plano de Trabalho em português formal, técnico e convincente, adequados à análise de um parecerista público. Use o histórico da entidade quando fornecido para dar credibilidade. Seja específico e concreto (evite frases genéricas vazias).
+
+CONTEXTO DO PROJETO:
+${ctx}
+
+Produza:
+- resumo: 1 parágrafo denso apresentando o projeto (o quê, para quem, onde, por quê).
+- objetivoGeral: 1 frase clara e mensurável com o propósito central.
+- objetivosEspecificos: 4 a 6 objetivos específicos, cada um começando com verbo no infinitivo.
+- justificativa: 2 a 3 parágrafos defendendo a relevância social, esportiva e educacional do projeto.
+- caracterizacaoSocioeconomica: 1 a 2 parágrafos sobre o perfil socioeconômico do público e território (use dados plausíveis e gerais quando não houver específicos, sem inventar números oficiais precisos).
+- metodologia: 2 parágrafos descrevendo COMO o projeto será executado (etapas, abordagem pedagógica/esportiva, gestão).
+
+Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
+{
+  "resumo": "...",
+  "objetivoGeral": "...",
+  "objetivosEspecificos": ["...", "...", "..."],
+  "justificativa": "...",
+  "caracterizacaoSocioeconomica": "...",
+  "metodologia": "..."
+}`;
+
+      const generateWithRetry = async (): Promise<string> => {
+        const delays = [1000, 4000, 9000];
+        let ultimoErro: any = null;
+        for (let tentativa = 0; tentativa < 3; tentativa++) {
+          try {
+            const result = await model.generateContent(prompt);
+            return result.response.text();
+          } catch (err: any) {
+            ultimoErro = err;
+            const msg = String(err?.message || '');
+            const transiente = /429|503|quota|overload|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(msg);
+            if (transiente && tentativa < 2) {
+              await new Promise(r => setTimeout(r, delays[tentativa]));
+              continue;
+            }
+            throw err;
+          }
+        }
+        throw ultimoErro;
+      };
+
+      const texto = await generateWithRetry();
+      let data: any;
+      try {
+        data = JSON.parse(texto);
+      } catch {
+        const m = texto.match(/\{[\s\S]*\}/);
+        data = m ? JSON.parse(m[0]) : null;
+      }
+      if (!data || typeof data !== 'object') {
+        res.status(502).json({ error: 'Resposta da IA não pôde ser interpretada.' });
+        return;
+      }
+      res.status(200).json({
+        resumo: String(data.resumo || ''),
+        objetivoGeral: String(data.objetivoGeral || ''),
+        objetivosEspecificos: Array.isArray(data.objetivosEspecificos) ? data.objetivosEspecificos.map(String) : [],
+        justificativa: String(data.justificativa || ''),
+        caracterizacaoSocioeconomica: String(data.caracterizacaoSocioeconomica || ''),
+        metodologia: String(data.metodologia || ''),
+        modelo: 'gemini-2.5-flash',
+      });
+    } catch (e: any) {
+      console.error('gerarPlanoTrabalho erro:', e?.message || e);
+      res.status(500).json({ error: 'Falha ao gerar o plano: ' + (e?.message || String(e)) });
+    }
   });
