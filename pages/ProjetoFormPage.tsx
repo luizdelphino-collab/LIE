@@ -6,7 +6,6 @@ import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, que
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, Printer, FileText, Package, Settings, Sparkles } from 'lucide-react';
 import AssistentePlanoModal from '../components/AssistentePlanoModal';
-import type { PlanoIaNarrativo } from '../lib/planoIaApi';
 import { db, storage } from '../lib/firebase';
 import { consolidarProjeto, type PrintOptions } from '../lib/consolidarProjeto';
 import PrintOptionsModal from '../components/PrintOptionsModal';
@@ -50,18 +49,10 @@ export default function ProjetoFormPage() {
   const [savingModGlobal, setSavingModGlobal] = useState(false);
   const [assistenteOpen, setAssistenteOpen] = useState(false);
 
-  // Aplica o texto gerado pela IA nos campos narrativos (entra em modo edição).
-  const aplicarPlanoIA = (n: PlanoIaNarrativo) => {
+  // Aplica os campos coletados/gerados pela wizard de IA (entra em modo edição).
+  const aplicarPlanoIA = (dados: Partial<typeof formData>) => {
     setIsEditing(true);
-    setFormData(p => ({
-      ...p,
-      resumo: n.resumo || p.resumo,
-      objetivoGeral: n.objetivoGeral || p.objetivoGeral,
-      objetivosEspecificos: n.objetivosEspecificos?.length ? n.objetivosEspecificos : p.objetivosEspecificos,
-      justificativa: n.justificativa || p.justificativa,
-      caracterizacaoSocioeconomica: n.caracterizacaoSocioeconomica || p.caracterizacaoSocioeconomica,
-      metodologia: n.metodologia || p.metodologia,
-    }));
+    setFormData(p => ({ ...p, ...dados }));
   };
 
   const [formData, setFormData] = useState<Partial<Projeto>>({
