@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ProjetosPage from './pages/ProjetosPage';
+import ProjetoOverviewPage from './pages/ProjetoOverviewPage';
 import ProjetoFormPage from './pages/ProjetoFormPage';
 import ProjetoDocumentosPage from './pages/ProjetoDocumentosPage';
 import ProjetoCronogramaPage from './pages/ProjetoCronogramaPage';
@@ -55,7 +56,8 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/projetos" element={<ProjetosPage />} />
           <Route path="/projetos/novo" element={<ProjetoFormPage />} />
-          <Route path="/projetos/:id" element={<ProjetoFormPage />} />
+          <Route path="/projetos/:id" element={<ProjetoOverviewPage />} />
+          <Route path="/projetos/:id/plano" element={<ProjetoFormPage />} />
           <Route path="/projetos/:id/documentos" element={<ProjetoDocumentosPage />} />
           <Route path="/projetos/:id/itens" element={<ProjetoItensPage />} />
           <Route path="/projetos/:id/cronograma" element={<ProjetoCronogramaPage />} />
