@@ -55,6 +55,11 @@ export default function ProjetoFormPage() {
     setFormData(p => ({ ...p, ...dados }));
   };
 
+  // Projeto novo: abre o assistente de IA automaticamente para conduzir a criação.
+  useEffect(() => {
+    if (isNew) setAssistenteOpen(true);
+  }, [isNew]);
+
   const [formData, setFormData] = useState<Partial<Projeto>>({
     titulo: '',
     entidadeId: '',
@@ -509,11 +514,11 @@ export default function ProjetoFormPage() {
         )}
       </header>
 
-      {!isNew && (
+      {(
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-violet-50 border border-violet-200 rounded-xl p-3">
           <div className="flex items-start gap-2 text-sm text-violet-900">
             <Sparkles className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
-            <span><strong>Assistente de IA:</strong> gera resumo, objetivos, justificativa, caracterização e metodologia a partir do histórico da entidade e de um brief curto.</span>
+            <span><strong>Assistente de IA:</strong> {isNew ? 'comece respondendo o assistente — ele monta o plano inteiro pra você.' : 'gera resumo, objetivos, justificativa, caracterização e metodologia a partir do histórico da entidade e de um brief curto.'}</span>
           </div>
           <button
             type="button"
