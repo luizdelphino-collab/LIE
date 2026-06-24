@@ -34,3 +34,6 @@ functions/.env
 # Claude
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+
+# Exemplos de projetos reais (NÃO versionar — repo é público)
+docs/exemplos/

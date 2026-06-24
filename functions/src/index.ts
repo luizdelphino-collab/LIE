@@ -2012,18 +2012,28 @@ export const gerarPlanoTrabalho = functions
 
       const prompt = `Você é um especialista em elaboração de projetos esportivos da Lei de Incentivo ao Esporte (LIE) no Brasil, que redige Planos de Trabalho formais para aprovação em órgãos públicos (Ministério do Esporte, Secretarias estaduais/municipais).
 
-Sua tarefa: a partir do contexto abaixo, redigir os textos do Plano de Trabalho em português formal, técnico e convincente, adequados à análise de um parecerista público. Use o histórico da entidade quando fornecido para dar credibilidade. Seja específico e concreto (evite frases genéricas vazias).
+Sua tarefa: a partir do contexto abaixo, redigir os textos do Plano de Trabalho em português formal, técnico, impessoal e institucional, adequados à análise de um parecerista público. Seja específico e concreto — evite frases genéricas vazias. USE FORTEMENTE o histórico da entidade fornecido para dar credibilidade (trajetória, experiência, resultados).
 
 CONTEXTO DO PROJETO:
 ${ctx}
 
+DIRETRIZES DE REDAÇÃO (padrão de planos de trabalho esportivos aprovados):
+1. TOM: impessoal, institucional, formal e técnico. Terceira pessoa.
+2. MARCO LEGAL: fundamente sempre que cabível na Constituição Federal art. 217 (prioridade ao desporto educacional), na Lei Pelé (Lei 9.615/1998) e na Lei Geral do Esporte (Lei 14.597/2023); para o esporte escolar, cite também LDB, PNE e BNCC. Priorize a categoria "Desporto Educacional".
+3. JUSTIFICATIVA em camadas, nesta lógica: (a) marco legal; (b) relevância do esporte como política pública de transformação social e educacional; (c) credibilidade da ENTIDADE com base no histórico fornecido; (d) alinhamento aos Objetivos de Desenvolvimento Sustentável (ODS) da ONU pertinentes — tipicamente ODS 3 (Saúde e Bem-Estar), 4 (Educação de Qualidade), 5 (Igualdade de Gênero), 10 (Redução das Desigualdades) e 16 (Paz, Justiça e Instituições). Cite os ODS pelos nomes.
+4. OBJETIVOS ESPECÍFICOS: cada um inicia com verbo no infinitivo e, quando possível, traz uma meta quantitativa (ex.: "Atender X estudantes", "Capacitar Y professores").
+5. CARACTERIZAÇÃO SOCIOECONÔMICA: descreva o perfil socioeconômico do público e do território (escolas públicas, vulnerabilidade, acesso ao esporte). Use enquadramento geral plausível; NÃO invente números oficiais precisos de IDH/IBGE — se não houver dados, escreva de forma qualitativa consistente.
+6. METODOLOGIA: descreva a execução em etapas operacionais concretas (mobilização/divulgação, inscrição, realização das atividades/competições, premiação, monitoramento e prestação de contas) e a abordagem pedagógica/esportiva.
+7. PLANO DE DIVULGAÇÃO: objetivos da divulgação + estratégias por canal (assessoria de imprensa, redes sociais, comunicação direta com escolas e com o órgão parceiro).
+
 Produza:
-- resumo: 1 parágrafo denso apresentando o projeto (o quê, para quem, onde, por quê).
-- objetivoGeral: 1 frase clara e mensurável com o propósito central.
-- objetivosEspecificos: 4 a 6 objetivos específicos, cada um começando com verbo no infinitivo.
-- justificativa: 2 a 3 parágrafos defendendo a relevância social, esportiva e educacional do projeto.
-- caracterizacaoSocioeconomica: 1 a 2 parágrafos sobre o perfil socioeconômico do público e território (use dados plausíveis e gerais quando não houver específicos, sem inventar números oficiais precisos).
-- metodologia: 2 parágrafos descrevendo COMO o projeto será executado (etapas, abordagem pedagógica/esportiva, gestão).
+- resumo: 1 a 2 parágrafos densos apresentando o projeto (o quê, para quem, onde, quantos, por quê).
+- objetivoGeral: 1 parágrafo articulando ação + público + finalidade social + base legal.
+- objetivosEspecificos: 4 a 6 itens (verbo no infinitivo + quantitativo quando possível).
+- justificativa: 3 a 4 parágrafos seguindo as camadas (a)-(d) acima.
+- caracterizacaoSocioeconomica: 1 a 2 parágrafos.
+- metodologia: 2 a 3 parágrafos com as etapas operacionais.
+- planoDivulgacao: 1 a 2 parágrafos com objetivos e estratégias de comunicação.
 
 Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
 {
@@ -2032,7 +2042,8 @@ Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
   "objetivosEspecificos": ["...", "...", "..."],
   "justificativa": "...",
   "caracterizacaoSocioeconomica": "...",
-  "metodologia": "..."
+  "metodologia": "...",
+  "planoDivulgacao": "..."
 }`;
 
       const generateWithRetry = async (): Promise<string> => {
@@ -2075,6 +2086,7 @@ Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
         justificativa: String(data.justificativa || ''),
         caracterizacaoSocioeconomica: String(data.caracterizacaoSocioeconomica || ''),
         metodologia: String(data.metodologia || ''),
+        planoDivulgacao: String(data.planoDivulgacao || ''),
         modelo: 'gemini-2.5-flash',
       });
     } catch (e: any) {

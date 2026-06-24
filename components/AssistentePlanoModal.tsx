@@ -141,6 +141,7 @@ export default function AssistentePlanoModal({ projeto, onClose, onApply }: Prop
       justificativa: resultado.justificativa,
       caracterizacaoSocioeconomica: resultado.caracterizacaoSocioeconomica,
       metodologia: resultado.metodologia,
+      planoDivulgacao: resultado.planoDivulgacao,
     };
     onApply(dados);
     onClose();
@@ -287,6 +288,7 @@ export default function AssistentePlanoModal({ projeto, onClose, onApply }: Prop
                 ['Justificativa', resultado.justificativa],
                 ['Caracterização Socioeconômica', resultado.caracterizacaoSocioeconomica],
                 ['Metodologia', resultado.metodologia],
+                ['Plano de Divulgação', resultado.planoDivulgacao],
               ] as [string, string][]).map(([t, txt]) => (
                 <div key={t} className="border border-gray-200 rounded-lg p-3">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">{t}</div>

@@ -26,6 +26,7 @@ export interface PlanoIaNarrativo {
   justificativa: string;
   caracterizacaoSocioeconomica: string;
   metodologia: string;
+  planoDivulgacao: string;
 }
 
 /**
