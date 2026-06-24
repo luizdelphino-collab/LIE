@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import ProjetoWorkspaceNav from '../components/ProjetoWorkspaceNav';
 import { collection, query, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { ArrowLeft, Plus, FileText, Trash2, Edit3, Eye, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
@@ -205,6 +206,7 @@ export default function ProjetoDocumentosPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {id && <ProjetoWorkspaceNav projetoId={id} active="documentos" status={projeto?.status} />}
       <header className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate(`/projetos/${id}`)} className="p-2 text-lie-gray hover:bg-gray-100 rounded-lg transition">

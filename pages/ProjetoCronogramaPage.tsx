@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import ProjetoWorkspaceNav from '../components/ProjetoWorkspaceNav';
 import { collection, query, getDocs, doc, getDoc, writeBatch, serverTimestamp, orderBy } from 'firebase/firestore';
 import { ArrowLeft, Save, Loader2, FileSpreadsheet, Calendar as CalendarIcon, CheckCircle2, Unlock, FileText } from 'lucide-react';
 import { db } from '../lib/firebase';
@@ -341,6 +342,7 @@ export default function ProjetoCronogramaPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto pb-32">
+      {id && <ProjetoWorkspaceNav projetoId={id} active="cronograma" status={projeto?.status} />}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate(`/projetos/${id}`)} className="p-2 text-lie-gray hover:bg-gray-100 rounded-lg transition">

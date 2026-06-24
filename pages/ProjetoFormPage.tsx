@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import ProjetoWorkspaceNav from '../components/ProjetoWorkspaceNav';
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query, writeBatch, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, Printer, FileText, Package, Settings } from 'lucide-react';
@@ -425,6 +426,7 @@ export default function ProjetoFormPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto pb-32">
+      {!isNew && id && <ProjetoWorkspaceNav projetoId={id} active="plano" status={formData.status} />}
       <header className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate('/projetos')} className="p-2 text-lie-gray hover:bg-gray-100 rounded-lg transition">
@@ -446,33 +448,6 @@ export default function ProjetoFormPage() {
         </div>
         {!isNew && !isEditing && (
           <div className="flex gap-2">
-            <button 
-              onClick={() => navigate(`/projetos/${id}/itens`)}
-              className="group flex items-center bg-white border border-gray-300 text-amber-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-amber-50 shadow-sm"
-            >
-              <Package className="w-5 h-5 shrink-0" />
-              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
-                Itens
-              </span>
-            </button>
-            <button 
-              onClick={() => navigate(`/projetos/${id}/cronograma`)}
-              className="group flex items-center bg-white border border-gray-300 text-emerald-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-emerald-50 shadow-sm"
-            >
-              <Calendar className="w-5 h-5 shrink-0" />
-              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
-                Cronograma Financeiro
-              </span>
-            </button>
-            <button 
-              onClick={() => navigate(`/projetos/${id}/documentos`)}
-              className="group flex items-center bg-white border border-gray-300 text-blue-600 rounded-lg p-2 transition-all duration-300 overflow-hidden hover:bg-blue-50 shadow-sm"
-            >
-              <FileText className="w-5 h-5 shrink-0" />
-              <span className="max-w-0 opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 whitespace-nowrap transition-all duration-300 ease-in-out font-medium">
-                Documentos
-              </span>
-            </button>
             <button 
               onClick={handleConsolidar} 
               disabled={consolidando}
