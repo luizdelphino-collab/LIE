@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ProjetoWorkspaceNav from '../components/ProjetoWorkspaceNav';
+import AutoResizeTextarea from '../components/AutoResizeTextarea';
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, orderBy, query, writeBatch, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Save, ArrowLeft, Image as ImageIcon, Plus, Trash2, Calendar, MapPin, Target, ListChecks, Info, X, Loader2, Printer, FileText, Package, Settings } from 'lucide-react';
@@ -598,11 +599,11 @@ export default function ProjetoFormPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="md:col-span-2">
               <label className="block text-sm font-semibold text-gray-700 mb-1">Resumo do Projeto</label>
-              <textarea name="resumo" rows={3} value={formData.resumo} onChange={handleChange} disabled={!isEditing} className={inputCls}></textarea>
+              <AutoResizeTextarea name="resumo" minRows={5} value={formData.resumo} onChange={handleChange} disabled={!isEditing} className={inputCls} />
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-semibold text-gray-700 mb-1">Plano de Divulgação</label>
-              <textarea name="planoDivulgacao" rows={3} value={(formData as any).planoDivulgacao || ''} onChange={handleChange} disabled={!isEditing} className={inputCls} placeholder="Descreva como o projeto será divulgado..." ></textarea>
+              <AutoResizeTextarea name="planoDivulgacao" minRows={5} value={(formData as any).planoDivulgacao || ''} onChange={handleChange} disabled={!isEditing} className={inputCls} placeholder="Descreva como o projeto será divulgado..." />
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Mês de Início *</label>
@@ -776,7 +777,7 @@ export default function ProjetoFormPage() {
           <div className="space-y-6">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Objetivo Geral *</label>
-              <textarea name="objetivoGeral" rows={2} required value={formData.objetivoGeral} onChange={handleChange} disabled={!isEditing} className={inputCls}></textarea>
+              <AutoResizeTextarea name="objetivoGeral" minRows={3} required value={formData.objetivoGeral} onChange={handleChange} disabled={!isEditing} className={inputCls} />
             </div>
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -818,15 +819,15 @@ export default function ProjetoFormPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Justificativa *</label>
-              <textarea name="justificativa" rows={4} required value={formData.justificativa} onChange={handleChange} disabled={!isEditing} className={inputCls}></textarea>
+              <AutoResizeTextarea name="justificativa" minRows={6} required value={formData.justificativa} onChange={handleChange} disabled={!isEditing} className={inputCls} />
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Caracterização Socioeconômica (IDH, Região) *</label>
-              <textarea name="caracterizacaoSocioeconomica" rows={3} required value={formData.caracterizacaoSocioeconomica} onChange={handleChange} disabled={!isEditing} className={inputCls}></textarea>
+              <AutoResizeTextarea name="caracterizacaoSocioeconomica" minRows={5} required value={formData.caracterizacaoSocioeconomica} onChange={handleChange} disabled={!isEditing} className={inputCls} />
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Metodologia de Aplicação *</label>
-              <textarea name="metodologia" rows={4} required value={formData.metodologia} onChange={handleChange} disabled={!isEditing} className={inputCls}></textarea>
+              <AutoResizeTextarea name="metodologia" minRows={6} required value={formData.metodologia} onChange={handleChange} disabled={!isEditing} className={inputCls} />
             </div>
           </div>
         </section>
