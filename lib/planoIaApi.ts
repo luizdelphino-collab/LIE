@@ -14,9 +14,25 @@ export interface PlanoIaInput {
   publicoAlvo?: string;
   local?: string;
   periodoMeses?: number;
+  mesInicio?: string;
+  mesTermino?: string;
   historicoEntidade?: string;
   entidadeNome?: string;
   instrumentoOrigem?: string;
+}
+
+export interface MetaIa {
+  meta: string;
+  indicador: string;
+  formula: string;
+  verificacao: string;
+}
+
+export interface AcaoIa {
+  acao: string;
+  descricao: string;
+  mesInicio: string;
+  mesTermino: string;
 }
 
 export interface PlanoIaNarrativo {
@@ -27,6 +43,9 @@ export interface PlanoIaNarrativo {
   caracterizacaoSocioeconomica: string;
   metodologia: string;
   planoDivulgacao: string;
+  metasQualitativas: MetaIa[];
+  metasQuantitativas: MetaIa[];
+  cronograma: AcaoIa[];
 }
 
 /**

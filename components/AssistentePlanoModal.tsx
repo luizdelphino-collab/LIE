@@ -110,6 +110,8 @@ export default function AssistentePlanoModal({ projeto, onClose, onApply }: Prop
         publicoAlvo: publicoAlvoStr,
         local: `${localStr} (âmbito ${ambito})`,
         periodoMeses: duracaoMeses,
+        mesInicio: mesInicio || undefined,
+        mesTermino: mesTermino || undefined,
         historicoEntidade: historico,
         entidadeNome,
         instrumentoOrigem: instrumento || undefined,
@@ -142,6 +144,9 @@ export default function AssistentePlanoModal({ projeto, onClose, onApply }: Prop
       caracterizacaoSocioeconomica: resultado.caracterizacaoSocioeconomica,
       metodologia: resultado.metodologia,
       planoDivulgacao: resultado.planoDivulgacao,
+      ...(resultado.metasQualitativas?.length ? { metasQualitativas: resultado.metasQualitativas.map((m, i) => ({ id: `ql${Date.now()}-${i}`, ...m })) } : {}),
+      ...(resultado.metasQuantitativas?.length ? { metasQuantitativas: resultado.metasQuantitativas.map((m, i) => ({ id: `qn${Date.now()}-${i}`, ...m })) } : {}),
+      ...(resultado.cronograma?.length ? { cronograma: resultado.cronograma.map((a, i) => ({ id: `cr${Date.now()}-${i}`, ...a })) } : {}),
     };
     onApply(dados);
     onClose();
@@ -295,6 +300,33 @@ export default function AssistentePlanoModal({ projeto, onClose, onApply }: Prop
                   <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{txt || <span className="text-gray-400 italic">— vazio</span>}</div>
                 </div>
               ))}
+
+              {resultado && (resultado.metasQualitativas?.length > 0 || resultado.metasQuantitativas?.length > 0) && (
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">
+                    Metas ({resultado.metasQualitativas?.length || 0} qualitativas · {resultado.metasQuantitativas?.length || 0} quantitativas)
+                  </div>
+                  <div className="space-y-1.5">
+                    {[...(resultado.metasQualitativas || []).map(m => ['QUAL', m] as const), ...(resultado.metasQuantitativas || []).map(m => ['QUANT', m] as const)].map(([tipo, m], i) => (
+                      <div key={i} className="text-xs text-gray-700 leading-snug">
+                        <span className={`text-[9px] font-bold mr-1 px-1 py-0.5 rounded ${tipo === 'QUAL' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{tipo}</span>
+                        <strong>{m.meta}</strong> — {m.indicador} <span className="text-gray-400">| verif.: {m.verificacao}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {resultado && resultado.cronograma?.length > 0 && (
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">Cronograma previsto ({resultado.cronograma.length} ações)</div>
+                  <div className="space-y-1">
+                    {resultado.cronograma.map((a, i) => (
+                      <div key={i} className="text-xs text-gray-700"><strong>{a.acao}</strong> <span className="text-gray-400">({a.mesInicio} → {a.mesTermino})</span></div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

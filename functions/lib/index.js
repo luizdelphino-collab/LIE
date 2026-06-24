@@ -1875,6 +1875,7 @@ exports.gerarPlanoTrabalho = functions
         body.publicoAlvo ? `PÚBLICO-ALVO: ${body.publicoAlvo}` : '',
         body.local ? `LOCAL DE EXECUÇÃO: ${body.local}` : '',
         body.periodoMeses ? `DURAÇÃO: ${body.periodoMeses} meses` : '',
+        (body.mesInicio && body.mesTermino) ? `PERÍODO: de ${body.mesInicio} a ${body.mesTermino} (formato AAAA-MM)` : '',
         body.brief ? `DESCRIÇÃO LIVRE DO PROPONENTE: ${String(body.brief).slice(0, 1500)}` : '',
     ].filter(Boolean).join('\n');
     try {
@@ -1909,6 +1910,9 @@ Produza:
 - caracterizacaoSocioeconomica: 1 a 2 parágrafos.
 - metodologia: 2 a 3 parágrafos com as etapas operacionais.
 - planoDivulgacao: 1 a 2 parágrafos com objetivos e estratégias de comunicação.
+- metasQualitativas: 3 metas QUALITATIVAS. Cada uma é um objeto com: "meta" (título curto, ex.: "Satisfação dos participantes"), "indicador" (o que se mede), "formula" (como se calcula — ex.: "Escala Likert de 5 pontos"), "verificacao" (meio de verificação — ex.: "Questionário aplicado a todos os participantes").
+- metasQuantitativas: 3 metas QUANTITATIVAS. Mesmos 4 campos, mas mensuráveis por números (ex.: meta "Participações", indicador "Nº de inscritos/presentes", formula "Contagem via sistema de inscrição", verificacao "Listas de presença e relatórios").
+- cronograma: 5 a 8 ações do projeto, cada uma com "acao" (título), "descricao" (detalhe), "mesInicio" e "mesTermino" no formato AAAA-MM DENTRO do período informado. Inclua mobilização/divulgação no início e prestação de contas ao final.
 
 Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
 {
@@ -1918,7 +1922,10 @@ Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
   "justificativa": "...",
   "caracterizacaoSocioeconomica": "...",
   "metodologia": "...",
-  "planoDivulgacao": "..."
+  "planoDivulgacao": "...",
+  "metasQualitativas": [{"meta":"...","indicador":"...","formula":"...","verificacao":"..."}],
+  "metasQuantitativas": [{"meta":"...","indicador":"...","formula":"...","verificacao":"..."}],
+  "cronograma": [{"acao":"...","descricao":"...","mesInicio":"AAAA-MM","mesTermino":"AAAA-MM"}]
 }`;
         const generateWithRetry = async () => {
             const delays = [1000, 4000, 9000];
@@ -1954,6 +1961,22 @@ Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
             res.status(502).json({ error: 'Resposta da IA não pôde ser interpretada.' });
             return;
         }
+        const mapMetas = (arr) => Array.isArray(arr)
+            ? arr.slice(0, 6).map((m) => ({
+                meta: String(m?.meta || ''),
+                indicador: String(m?.indicador || ''),
+                formula: String(m?.formula || ''),
+                verificacao: String(m?.verificacao || ''),
+            })).filter((m) => m.meta)
+            : [];
+        const mapCrono = (arr) => Array.isArray(arr)
+            ? arr.slice(0, 30).map((a) => ({
+                acao: String(a?.acao || ''),
+                descricao: String(a?.descricao || ''),
+                mesInicio: String(a?.mesInicio || ''),
+                mesTermino: String(a?.mesTermino || ''),
+            })).filter((a) => a.acao)
+            : [];
         res.status(200).json({
             resumo: String(data.resumo || ''),
             objetivoGeral: String(data.objetivoGeral || ''),
@@ -1962,6 +1985,9 @@ Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
             caracterizacaoSocioeconomica: String(data.caracterizacaoSocioeconomica || ''),
             metodologia: String(data.metodologia || ''),
             planoDivulgacao: String(data.planoDivulgacao || ''),
+            metasQualitativas: mapMetas(data.metasQualitativas),
+            metasQuantitativas: mapMetas(data.metasQuantitativas),
+            cronograma: mapCrono(data.cronograma),
             modelo: 'gemini-2.5-flash',
         });
     }
