@@ -315,30 +315,33 @@ export default function ProjetoOrcamentoPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {grupos.map(etapa => {
+                {grupos.map((etapa, gi) => {
                   const itensEtapa = itens.filter(it => (it.etapaId || '') === etapa.id);
-                  const tipos = Array.from(new Set(itensEtapa.map(it => it.categoria || 'Outro')));
+                  const tipos = CATEGORIAS.filter(c => itensEtapa.some(it => (it.categoria || 'Outro') === c));
+                  const numEtapa = gi + 1;
                   return (
                     <Fragment key={etapa.id || 'sem'}>
                       {/* Cabeçalho da Etapa */}
                       <tr key={`et-${etapa.id || 'sem'}`} className="bg-lie-ink/5">
                         <td colSpan={colTotal - 1} className="px-3 py-2 sticky left-0 bg-lie-ink/5 z-10">
-                          <span className="font-bold text-lie-ink uppercase text-[12px] tracking-wide">{etapa.nome}</span>
+                          {etapa.id !== '' && <span className="font-mono font-bold text-lie-green mr-2">{numEtapa}.0</span>}<span className="font-bold text-lie-ink uppercase text-[12px] tracking-wide">{etapa.nome}</span>
                           {etapa.id !== '' && (
                             <button onClick={() => abrirPicker(etapa.id)} className="ml-3 text-[11px] font-bold text-lie-green hover:underline"><Plus className="w-3 h-3 inline" /> adicionar item</button>
                           )}
                         </td>
                         <td className="px-2 py-2 text-right font-bold text-lie-ink whitespace-nowrap">{FMT(subtotalEtapa(etapa.id))}</td>
                       </tr>
-                      {tipos.map(tipo => (
+                      {tipos.map((tipo, ti) => (
                         <Fragment key={`${etapa.id}-${tipo}`}>
                           <tr key={`tp-${etapa.id}-${tipo}`} className="bg-gray-50/70">
-                            <td colSpan={colTotal} className="px-3 py-1 sticky left-0 bg-gray-50/70 z-10 text-[11px] font-bold uppercase tracking-wider text-gray-500">{tipo}</td>
+                            <td colSpan={colTotal} className="px-3 py-1 sticky left-0 bg-gray-50/70 z-10 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+                              {etapa.id !== '' && <span className="text-lie-green/80 mr-1">{numEtapa}.{ti + 1}</span>}{tipo}
+                            </td>
                           </tr>
-                          {itensEtapa.filter(it => (it.categoria || 'Outro') === tipo).map(it => (
+                          {itensEtapa.filter(it => (it.categoria || 'Outro') === tipo).map((it, ii) => (
                             <tr key={it.id} className="hover:bg-gray-50/50">
                               <td className="px-3 py-2 sticky left-0 bg-white z-10">
-                                <div className="font-semibold text-lie-ink leading-tight">{it.nome}</div>
+                                <div className="font-semibold text-lie-ink leading-tight">{etapa.id !== '' && <span className="font-mono text-[11px] text-gray-400 mr-1.5">{numEtapa}.{ti + 1}.{ii + 1}</span>}{it.nome}</div>
                                 <div className="flex items-center gap-1 mt-1">
                                   <select value={it.etapaId || ''} onChange={e => setItemCampo(it.id, { etapaId: e.target.value })} className="text-[10px] border border-gray-200 rounded px-1 py-0.5 text-gray-500">
                                     <option value="">Sem etapa</option>
