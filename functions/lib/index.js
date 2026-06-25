@@ -2055,7 +2055,9 @@ exports.gerarMemorialCalculo = functions
         });
         const prompt = `Você é um especialista em planos de trabalho esportivos (Lei de Incentivo ao Esporte / FEDEESP) que redige MEMORIAIS DE CÁLCULO para aprovação por pareceristas públicos.
 
-Escreva o memorial de cálculo do item abaixo: um texto formal e técnico (2 a 4 frases) que JUSTIFICA a quantidade do item, conectando-a aos parâmetros do projeto (nº de participantes/público, modalidades, eventos/etapas, meses de execução e a distribuição mensal). Quando houver, explicite a conta (ex.: "X por participante × Y participantes × Z eventos = total"). Referencie o valor unitário e, se houver, a mediana da pesquisa de preço como respaldo. NÃO invente números além dos fornecidos; use apenas os dados abaixo.
+Escreva o memorial de cálculo do item abaixo: um texto formal e técnico (2 a 4 frases) que JUSTIFICA a quantidade do item, conectando-a aos parâmetros do projeto (nº de participantes/público, modalidades, eventos/etapas, meses de execução e a distribuição mensal). Explicite a conta (ex.: "X por participante × Y participantes × Z eventos = total"). Referencie o valor unitário e, se houver, a mediana da pesquisa de preço como respaldo. NÃO invente números além dos fornecidos; use apenas os dados abaixo.
+
+REGRA OBRIGATÓRIA E INEGOCIÁVEL: o RESULTADO FINAL da conta apresentada no memorial deve ser EXATAMENTE igual à QUANTIDADE TOTAL informada (${b.quantidadeTotal != null ? b.quantidadeTotal : 'a fornecida'} ${b.unidade || ''}). Escolha os fatores (ex.: quantidade por dia × nº de dias; por participante × nº de participantes) de modo que o produto/soma resulte EXATAMENTE nesse número. NUNCA conclua o memorial com um total diferente da QUANTIDADE TOTAL; se preciso, ajuste os fatores para fechar exatamente nela.
 
 DADOS:
 ${ctx}

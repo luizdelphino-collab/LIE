@@ -102,6 +102,12 @@ export default function ProjetoOrcamentoPage() {
   const qtdPrev = (it: ItemProjeto) => round2(it.quantidade || 0); // quantidade total prevista do item
   const saldoItem = (it: ItemProjeto) => round2(qtdPrev(it) - totalItem(it.id)); // falta distribuir
   const valorItem = (it: ItemProjeto) => round2(qtdPrev(it) * (it.valorUnitario || 0));
+  // O total do memorial deve bater exatamente com a quantidade prevista.
+  const memorialBateQtd = (it: ItemProjeto): boolean => {
+    const mem = it.memorialCalculo || ''; const q = qtdPrev(it);
+    if (!mem.trim() || !q) return true;
+    return mem.replace(/[.\s]/g, '').includes(String(Math.round(q)));
+  };
   const totalProjeto = round2(itens.reduce((s, it) => s + valorItem(it), 0));
   const subtotalEtapa = (eid: string) => round2(itens.filter(it => (it.etapaId || '') === eid).reduce((s, it) => s + valorItem(it), 0));
 
@@ -429,6 +435,9 @@ export default function ProjetoOrcamentoPage() {
                                     <div className="flex-1">
                                       <div className="text-[11px] font-bold uppercase tracking-wider text-violet-700 mb-1">Memorial de cálculo — {numEtapa}.{ti + 1}.{ii + 1} {it.nome}</div>
                                       <AutoResizeTextarea minRows={2} value={it.memorialCalculo || ''} onChange={e => setItemCampo(it.id, { memorialCalculo: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Justifique a quantidade (ex.: 5 unid. × 2.200 participantes × 6 eventos = 66.000) — ou gere com IA." />
+                                      {!memorialBateQtd(it) && (
+                                        <div className="text-[11px] text-amber-600 font-semibold mt-1">⚠ O total do memorial deve ser exatamente <strong>{qtdPrev(it)} {it.unidade}</strong> (a Qtd prev.). Ajuste a conta ou gere de novo com IA.</div>
+                                      )}
                                     </div>
                                     <button type="button" onClick={() => gerarMemorial(it)} disabled={gerandoMem.has(it.id)} className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap mt-5">
                                       {gerandoMem.has(it.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />} Gerar com IA
