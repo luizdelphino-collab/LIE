@@ -1563,33 +1563,65 @@ export async function consolidarProjeto(projetoId: string, options: PrintOptions
   // ========== CAP 7: RELAÇÃO DE ITENS DO PROJETO ==========
   forceNewPage(state);
   const p7 = (pdf as any).internal.getCurrentPageInfo().pageNumber;
-  addChapterTitle(state, '7. Relação de Itens do Projeto');
-  toc.push({ num: '7', title: 'Relação de Itens do Projeto', page: p7 });
+  addChapterTitle(state, '7. Plano de Aplicação — Itens e Memorial de Cálculo');
+  toc.push({ num: '7', title: 'Plano de Aplicação — Itens e Memorial de Cálculo', page: p7 });
 
-  const itemsBody = itensProjeto.length > 0
-    ? itensProjeto.map((it, idx) => [
-        `${idx + 1}`,
-        it.nome,
-        it.descricao || '-',
-        it.memorialCalculo || '-',
-        it.unidade
-      ])
-    : [['—', 'Nenhum item cadastrado', '-', '-', '-']];
+  // Plano de Aplicação agrupado por Etapa › Tipo (categoria), numerado N.0 / N.M / N.M.K,
+  // com o memorial de cálculo de cada item.
+  const fmtBRL = (v: number) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const CATS_PDF = ['Alimento', 'Transporte', 'Material Esportivo', 'Material não Esportivo', 'Recurso Humano', 'Outro'];
+  const etapasPDF: { id: string; nome: string }[] = [
+    ...((projeto.etapas || []).map(e => ({ id: e.id, nome: e.nome }))),
+    ...(itensProjeto.some(it => !it.etapaId) ? [{ id: '', nome: 'Sem etapa' }] : []),
+  ];
+  const corHdr = lightenRgb(cor, 0.0);
+  const corSub = lightenRgb(cor, 0.85);
+  const itemsBody: any[] = [];
+  let totalGeral = 0;
+  etapasPDF.forEach((etapa, gi) => {
+    const itensEt = itensProjeto.filter(it => (it.etapaId || '') === etapa.id);
+    if (itensEt.length === 0) return;
+    const numEt = gi + 1;
+    const codEt = etapa.id ? `${numEt}.0 — ` : '';
+    let subEt = 0;
+    itemsBody.push([{ content: `${codEt}${(etapa.nome || '').toUpperCase()}`, colSpan: 7, styles: { fillColor: corHdr, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 } }]);
+    const tipos = CATS_PDF.filter(c => itensEt.some(it => (it.categoria || 'Outro') === c));
+    tipos.forEach((tipo, ti) => {
+      itemsBody.push([{ content: `${etapa.id ? `${numEt}.${ti + 1} — ` : ''}${tipo}`, colSpan: 7, styles: { fillColor: corSub, fontStyle: 'bold', fontSize: 8 } }]);
+      itensEt.filter(it => (it.categoria || 'Outro') === tipo).forEach((it, ii) => {
+        const vtot = it.valorTotal || (it.valorUnitario * it.quantidade) || 0;
+        subEt += vtot; totalGeral += vtot;
+        const cod = etapa.id ? `${numEt}.${ti + 1}.${ii + 1}` : `${ii + 1}`;
+        const nomeEsp = it.descricao ? `${it.nome}\n${it.descricao}` : it.nome;
+        itemsBody.push([
+          cod, nomeEsp, it.memorialCalculo || '—', it.unidade,
+          String(it.quantidade || 0), fmtBRL(it.valorUnitario), fmtBRL(vtot),
+        ]);
+      });
+    });
+    itemsBody.push([{ content: `Subtotal — ${etapa.nome}`, colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: corSub } }, { content: fmtBRL(subEt), styles: { halign: 'right', fontStyle: 'bold', fillColor: corSub } }]);
+  });
+  if (itemsBody.length === 0) {
+    itemsBody.push([{ content: 'Nenhum item cadastrado no projeto.', colSpan: 7, styles: { halign: 'center', textColor: [140, 140, 140] } }]);
+  } else {
+    itemsBody.push([{ content: 'TOTAL GERAL DO PROJETO', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: corHdr, textColor: [255, 255, 255] } }, { content: fmtBRL(totalGeral), styles: { halign: 'right', fontStyle: 'bold', fillColor: corHdr, textColor: [255, 255, 255] } }]);
+  }
 
   autoTable(pdf, {
     startY: state.y,
-    head: [['Item', 'Nome', 'Descrição', 'Memorial de Cálculo', 'Unidade']],
+    head: [['Cód.', 'Item / Especificação', 'Memorial de Cálculo', 'Un.', 'Qtd', 'V. Unit.', 'V. Total']],
     body: itemsBody,
     margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
     headStyles: { fillColor: cor, textColor: [255, 255, 255] },
-    alternateRowStyles: { fillColor: corClara },
-    styles: { fontSize: 9, textColor: [0, 0, 0] },
+    styles: { fontSize: 8, textColor: [0, 0, 0], valign: 'top' },
     columnStyles: {
-      0: { cellWidth: 10 },
-      1: { cellWidth: 38 },
-      2: { cellWidth: 48 },
-      3: { cellWidth: 55 },
-      4: { cellWidth: 19 },
+      0: { cellWidth: 12 },
+      1: { cellWidth: 34 },
+      2: { cellWidth: 52 },
+      3: { cellWidth: 12 },
+      4: { cellWidth: 12, halign: 'right' },
+      5: { cellWidth: 22, halign: 'right' },
+      6: { cellWidth: 24, halign: 'right' },
     },
     didDrawPage: (data) => {
       if (data.doc.internal.getNumberOfPages() > 1)
