@@ -10,9 +10,9 @@
  */
 
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, FileText, Package, Calendar, FolderOpen, ArrowLeft } from 'lucide-react';
+import { LayoutDashboard, FileText, Package, Calendar, FolderOpen, ArrowLeft, Truck } from 'lucide-react';
 
-type Secao = 'visao' | 'plano' | 'itens' | 'cronograma' | 'documentos';
+type Secao = 'visao' | 'plano' | 'itens' | 'cronograma' | 'execucao' | 'documentos';
 
 interface Props {
   projetoId: string;
@@ -25,6 +25,7 @@ const SECOES: { id: Secao; label: string; icon: typeof FileText; rota: (id: stri
   { id: 'visao', label: 'Visão Geral', icon: LayoutDashboard, rota: id => `/projetos/${id}` },
   { id: 'plano', label: 'Plano de Trabalho', icon: FileText, rota: id => `/projetos/${id}/plano` },
   { id: 'itens', label: 'Itens, Orçamento & Cronograma', icon: Package, rota: id => `/projetos/${id}/itens` },
+  { id: 'execucao', label: 'Execução', icon: Truck, rota: id => `/projetos/${id}/execucao` },
   { id: 'documentos', label: 'Documentos', icon: FolderOpen, rota: id => `/projetos/${id}/documentos` },
 ];
 
