@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.gerarPlanoTrabalho = exports.sincronizarCatalogoCNBS = exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = exports.bancoPrecosItemPrecos = exports.bancoPrecosCotacaoItens = exports.bancoPrecosCotacoes = void 0;
+exports.gerarMemorialCalculo = exports.gerarPlanoTrabalho = exports.sincronizarCatalogoCNBS = exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = exports.bancoPrecosItemPrecos = exports.bancoPrecosCotacaoItens = exports.bancoPrecosCotacoes = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const puppeteer = require("puppeteer");
@@ -1994,6 +1994,88 @@ Responda APENAS em JSON puro (sem markdown), nesta estrutura exata:
     catch (e) {
         console.error('gerarPlanoTrabalho erro:', e?.message || e);
         res.status(500).json({ error: 'Falha ao gerar o plano: ' + (e?.message || String(e)) });
+    }
+});
+/**
+ * gerarMemorialCalculo — escreve o Memorial de Cálculo de UM item do orçamento.
+ * Justifica a quantidade conectando-a aos parâmetros do projeto (público, eventos,
+ * etapas, meses) e referencia o preço (valor unitário + mediana de mercado).
+ *
+ * POST JSON: { itemNome, unidade, valorUnitario, quantidadeTotal, distribuicao?,
+ *              tituloProjeto?, publicoAlvo?, modalidades?, periodoMeses?, medianaReferencia? }
+ * Resposta: { memorial }
+ */
+exports.gerarMemorialCalculo = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB', secrets: ['GEMINI_API_KEY'] })
+    .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Vary', 'Origin');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Apenas POST.' });
+        return;
+    }
+    const b = (req.body || {});
+    const itemNome = String(b.itemNome || '').trim();
+    if (!itemNome) {
+        res.status(400).json({ error: 'itemNome é obrigatório.' });
+        return;
+    }
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        res.status(500).json({ error: 'Servidor sem chave Gemini.' });
+        return;
+    }
+    const mods = Array.isArray(b.modalidades) ? b.modalidades.join(', ') : String(b.modalidades || '');
+    const ctx = [
+        `ITEM: ${itemNome}`,
+        b.unidade ? `UNIDADE: ${b.unidade}` : '',
+        (b.quantidadeTotal != null) ? `QUANTIDADE TOTAL: ${b.quantidadeTotal}` : '',
+        b.distribuicao ? `DISTRIBUIÇÃO POR MÊS: ${String(b.distribuicao).slice(0, 400)}` : '',
+        (b.valorUnitario != null) ? `VALOR UNITÁRIO: R$ ${b.valorUnitario}` : '',
+        (b.medianaReferencia != null && b.medianaReferencia > 0) ? `MEDIANA DA PESQUISA DE PREÇO: R$ ${b.medianaReferencia}` : '',
+        b.tituloProjeto ? `PROJETO: ${b.tituloProjeto}` : '',
+        b.publicoAlvo ? `PÚBLICO-ALVO: ${b.publicoAlvo}` : '',
+        mods ? `MODALIDADES: ${mods}` : '',
+        b.periodoMeses ? `DURAÇÃO: ${b.periodoMeses} meses` : '',
+    ].filter(Boolean).join('\n');
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({
+            model: 'gemini-2.5-flash',
+            generationConfig: { temperature: 0.45, maxOutputTokens: 4096, responseMimeType: 'application/json' },
+        });
+        const prompt = `Você é um especialista em planos de trabalho esportivos (Lei de Incentivo ao Esporte / FEDEESP) que redige MEMORIAIS DE CÁLCULO para aprovação por pareceristas públicos.
+
+Escreva o memorial de cálculo do item abaixo: um texto formal e técnico (2 a 4 frases) que JUSTIFICA a quantidade do item, conectando-a aos parâmetros do projeto (nº de participantes/público, modalidades, eventos/etapas, meses de execução e a distribuição mensal). Quando houver, explicite a conta (ex.: "X por participante × Y participantes × Z eventos = total"). Referencie o valor unitário e, se houver, a mediana da pesquisa de preço como respaldo. NÃO invente números além dos fornecidos; use apenas os dados abaixo.
+
+DADOS:
+${ctx}
+
+Responda APENAS em JSON puro: {"memorial": "..."}`;
+        const result = await model.generateContent(prompt);
+        const txt = result.response.text();
+        let data;
+        try {
+            data = JSON.parse(txt);
+        }
+        catch {
+            const m = txt.match(/\{[\s\S]*\}/);
+            data = m ? JSON.parse(m[0]) : null;
+        }
+        res.status(200).json({ memorial: String(data?.memorial || ''), modelo: 'gemini-2.5-flash' });
+    }
+    catch (e) {
+        console.error('gerarMemorialCalculo erro:', e?.message || e);
+        res.status(500).json({ error: 'Falha ao gerar memorial: ' + (e?.message || String(e)) });
     }
 });
 //# sourceMappingURL=index.js.map

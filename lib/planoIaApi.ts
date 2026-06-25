@@ -73,3 +73,34 @@ export async function gerarPlanoComIA(input: PlanoIaInput): Promise<PlanoIaNarra
 
   return await resp.json();
 }
+
+export interface MemorialIaInput {
+  itemNome: string;
+  unidade?: string;
+  valorUnitario?: number;
+  quantidadeTotal?: number;
+  distribuicao?: string;
+  tituloProjeto?: string;
+  publicoAlvo?: string;
+  modalidades?: string[];
+  periodoMeses?: number;
+  medianaReferencia?: number;
+}
+
+/** Gera o memorial de cálculo de um item do orçamento via Gemini. */
+export async function gerarMemorialCalculo(input: MemorialIaInput): Promise<string> {
+  const projectId = storage.app.options.projectId;
+  const url = `https://us-central1-${projectId}.cloudfunctions.net/gerarMemorialCalculo`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!resp.ok) {
+    let msg = `Falha ao gerar memorial (HTTP ${resp.status}).`;
+    try { const j = await resp.json(); if (j?.error) msg = j.error; } catch { /* ignora */ }
+    throw new Error(msg);
+  }
+  const j = await resp.json();
+  return String(j?.memorial || '');
+}

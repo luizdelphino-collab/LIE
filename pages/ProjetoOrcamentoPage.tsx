@@ -20,11 +20,13 @@ import {
 } from 'firebase/firestore';
 import {
   Plus, Search, Trash2, Loader2, Save, Package, X, Sparkles, ChevronRight, Pencil, Layers,
-  ShieldCheck, ShieldAlert,
+  ShieldCheck, ShieldAlert, Wand2, FileText, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import type { Projeto, ItemMaster, ItemProjeto, CronogramaItem, CategoriaItem, EtapaProjeto } from '../types';
 import ProjetoWorkspaceNav from '../components/ProjetoWorkspaceNav';
+import AutoResizeTextarea from '../components/AutoResizeTextarea';
+import { gerarMemorialCalculo } from '../lib/planoIaApi';
 
 const FMT = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -108,6 +110,34 @@ export default function ProjetoOrcamentoPage() {
   };
   const setItemCampo = (itemId: string, patch: Partial<ItemProjeto>) =>
     setItens(prev => prev.map(it => it.id === itemId ? { ...it, ...patch } : it));
+
+  // ---- Memorial de cálculo (expansível + IA) ----
+  const [expandido, setExpandido] = useState<Set<string>>(new Set());
+  const [gerandoMem, setGerandoMem] = useState<Set<string>>(new Set());
+  const toggleExpand = (itemId: string) => setExpandido(prev => {
+    const s = new Set(prev); s.has(itemId) ? s.delete(itemId) : s.add(itemId); return s;
+  });
+  const gerarMemorial = async (it: ItemProjeto) => {
+    setGerandoMem(prev => new Set(prev).add(it.id));
+    try {
+      const a = alloc[it.id] || {};
+      const distribuicao = meses.filter(m => (a[m] || 0) > 0).map(m => `${rotuloMes(m, projeto?.mesInicio)}: ${a[m]}`).join('; ');
+      const pa = projeto?.publicoAlvo;
+      const publicoAlvo = pa ? [pa.direto && `direto: ${pa.direto}`, pa.faixaEtaria && `faixa: ${pa.faixaEtaria}`, pa.indireto && `indireto: ${pa.indireto}`].filter(Boolean).join(' · ') : '';
+      const memorial = await gerarMemorialCalculo({
+        itemNome: it.nome, unidade: it.unidade, valorUnitario: it.valorUnitario,
+        quantidadeTotal: totalItem(it.id), distribuicao,
+        tituloProjeto: projeto?.titulo, publicoAlvo,
+        modalidades: (projeto?.modalidades || []).map(m => m.nome),
+        periodoMeses: projeto?.duracaoMeses, medianaReferencia: it.medianaReferencia,
+      });
+      if (memorial) { setItemCampo(it.id, { memorialCalculo: memorial }); setExpandido(prev => new Set(prev).add(it.id)); }
+    } catch (e: any) {
+      alert('Erro ao gerar memorial: ' + (e?.message || e));
+    } finally {
+      setGerandoMem(prev => { const s = new Set(prev); s.delete(it.id); return s; });
+    }
+  };
 
   // ---- Etapas ----
   const addEtapa = () => {
@@ -346,7 +376,8 @@ export default function ProjetoOrcamentoPage() {
                             </td>
                           </tr>
                           {itensEtapa.filter(it => (it.categoria || 'Outro') === tipo).map((it, ii) => (
-                            <tr key={it.id} className="hover:bg-gray-50/50">
+                            <Fragment key={it.id}>
+                            <tr className="hover:bg-gray-50/50">
                               <td className="px-3 py-2 sticky left-0 bg-white z-10">
                                 <div className="font-semibold text-lie-ink leading-tight">{etapa.id !== '' && <span className="font-mono text-[11px] text-gray-400 mr-1.5">{numEtapa}.{ti + 1}.{ii + 1}</span>}{it.nome}</div>
                                 <div className="flex items-center gap-1 mt-1">
@@ -367,6 +398,10 @@ export default function ProjetoOrcamentoPage() {
                                       <ShieldAlert className="w-3 h-3" /> sem pesquisa
                                     </a>
                                   )}
+                                  <button type="button" onClick={() => toggleExpand(it.id)} className="inline-flex items-center gap-0.5 text-[9px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1 rounded hover:bg-violet-100" title="Memorial de cálculo">
+                                    <FileText className="w-3 h-3" /> memorial{it.memorialCalculo ? <span className="text-emerald-600 ml-0.5">✓</span> : ''}
+                                    {expandido.has(it.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                  </button>
                                 </div>
                               </td>
                               <td className="px-2 py-2 text-right text-gray-600 whitespace-nowrap font-mono text-[12px]">{FMT(it.valorUnitario || 0)}</td>
@@ -380,6 +415,22 @@ export default function ProjetoOrcamentoPage() {
                               <td className="px-2 py-2 text-right font-bold text-lie-green whitespace-nowrap font-mono text-[12px]">{FMT(valorItem(it))}</td>
                               <td className="px-1 py-2 text-center"><button onClick={() => removerItem(it)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Remover"><Trash2 className="w-4 h-4" /></button></td>
                             </tr>
+                            {expandido.has(it.id) && (
+                              <tr className="bg-violet-50/40">
+                                <td colSpan={colTotal} className="px-4 py-3">
+                                  <div className="flex items-start gap-3">
+                                    <div className="flex-1">
+                                      <div className="text-[11px] font-bold uppercase tracking-wider text-violet-700 mb-1">Memorial de cálculo — {numEtapa}.{ti + 1}.{ii + 1} {it.nome}</div>
+                                      <AutoResizeTextarea minRows={2} value={it.memorialCalculo || ''} onChange={e => setItemCampo(it.id, { memorialCalculo: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Justifique a quantidade (ex.: 5 unid. × 2.200 participantes × 6 eventos = 66.000) — ou gere com IA." />
+                                    </div>
+                                    <button type="button" onClick={() => gerarMemorial(it)} disabled={gerandoMem.has(it.id)} className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap mt-5">
+                                      {gerandoMem.has(it.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />} Gerar com IA
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            </Fragment>
                           ))}
                         </Fragment>
                       ))}
