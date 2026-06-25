@@ -397,7 +397,8 @@ export default function ProjetoFormPage() {
       }
 
       setIsEditing(false);
-      if (isNew) navigate(`/projetos/${projId}`, { replace: true });
+      // Fase 2: ao salvar o plano de um projeto novo, segue para Itens, Orçamento & Cronograma.
+      if (isNew) navigate(`/projetos/${projId}/itens`, { replace: true });
     } catch (err) {
       console.error(err);
       alert('Erro ao salvar projeto: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));

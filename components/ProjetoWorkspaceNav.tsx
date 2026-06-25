@@ -24,8 +24,7 @@ interface Props {
 const SECOES: { id: Secao; label: string; icon: typeof FileText; rota: (id: string) => string }[] = [
   { id: 'visao', label: 'Visão Geral', icon: LayoutDashboard, rota: id => `/projetos/${id}` },
   { id: 'plano', label: 'Plano de Trabalho', icon: FileText, rota: id => `/projetos/${id}/plano` },
-  { id: 'itens', label: 'Itens & Orçamento', icon: Package, rota: id => `/projetos/${id}/itens` },
-  { id: 'cronograma', label: 'Cronograma', icon: Calendar, rota: id => `/projetos/${id}/cronograma` },
+  { id: 'itens', label: 'Itens, Orçamento & Cronograma', icon: Package, rota: id => `/projetos/${id}/itens` },
   { id: 'documentos', label: 'Documentos', icon: FolderOpen, rota: id => `/projetos/${id}/documentos` },
 ];
 

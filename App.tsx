@@ -10,6 +10,7 @@ import ProjetoDocumentosPage from './pages/ProjetoDocumentosPage';
 import ProjetoCronogramaPage from './pages/ProjetoCronogramaPage';
 import ItensMasterPage from './pages/ItensMasterPage';
 import ProjetoItensPage from './pages/ProjetoItensPage';
+import ProjetoOrcamentoPage from './pages/ProjetoOrcamentoPage';
 import FornecedoresPage from './pages/FornecedoresPage';
 import FornecedorFormPage from './pages/FornecedorFormPage';
 import FornecedorDocumentosPage from './pages/FornecedorDocumentosPage';
@@ -59,8 +60,10 @@ export default function App() {
           <Route path="/projetos/:id" element={<ProjetoOverviewPage />} />
           <Route path="/projetos/:id/plano" element={<ProjetoFormPage />} />
           <Route path="/projetos/:id/documentos" element={<ProjetoDocumentosPage />} />
-          <Route path="/projetos/:id/itens" element={<ProjetoItensPage />} />
-          <Route path="/projetos/:id/cronograma" element={<ProjetoCronogramaPage />} />
+          <Route path="/projetos/:id/itens" element={<ProjetoOrcamentoPage />} />
+          <Route path="/projetos/:id/cronograma" element={<ProjetoOrcamentoPage />} />
+          {/* tela legada de itens (mantida p/ referência): /projetos/:id/itens-antigo */}
+          <Route path="/projetos/:id/itens-antigo" element={<ProjetoItensPage />} />
           <Route path="/itens" element={<ItensMasterPage />} />
           <Route path="/fornecedores" element={<FornecedoresPage />} />
           <Route path="/fornecedores/novo" element={<FornecedorFormPage />} />
