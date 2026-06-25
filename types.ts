@@ -83,6 +83,24 @@ export interface ModalidadeProjeto {
   paralimpica: boolean;
 }
 
+// Prestação de contas — periodicidade flexível (parcial/final), por intervalo de meses.
+export type StatusPrestacao = 'em_elaboracao' | 'submetida' | 'aprovada' | 'reprovada';
+export interface Prestacao {
+  id: string;
+  projectId: string;
+  tipo: 'parcial' | 'final';
+  titulo: string;
+  mesInicio: number; // 1..duracao
+  mesFim: number;
+  status: StatusPrestacao;
+  resumoExecutivo?: string;
+  metasAtingidas?: string;
+  dificuldades?: string;
+  observacoes?: string;
+  criadoEm: Timestamp;
+  dataSubmissao?: Timestamp;
+}
+
 export type EsferaIncentivo = 'federal' | 'estadual' | 'municipal';
 
 export interface Patrocinador {

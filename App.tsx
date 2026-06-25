@@ -12,6 +12,7 @@ import ItensMasterPage from './pages/ItensMasterPage';
 import ProjetoItensPage from './pages/ProjetoItensPage';
 import ProjetoOrcamentoPage from './pages/ProjetoOrcamentoPage';
 import ProjetoExecucaoPage from './pages/ProjetoExecucaoPage';
+import ProjetoPrestacaoPage from './pages/ProjetoPrestacaoPage';
 import FornecedoresPage from './pages/FornecedoresPage';
 import FornecedorFormPage from './pages/FornecedorFormPage';
 import FornecedorDocumentosPage from './pages/FornecedorDocumentosPage';
@@ -66,6 +67,7 @@ export default function App() {
           {/* tela legada de itens (mantida p/ referência): /projetos/:id/itens-antigo */}
           <Route path="/projetos/:id/itens-antigo" element={<ProjetoItensPage />} />
           <Route path="/projetos/:id/execucao" element={<ProjetoExecucaoPage />} />
+          <Route path="/projetos/:id/prestacao" element={<ProjetoPrestacaoPage />} />
           <Route path="/itens" element={<ItensMasterPage />} />
           <Route path="/fornecedores" element={<FornecedoresPage />} />
           <Route path="/fornecedores/novo" element={<FornecedorFormPage />} />
