@@ -108,6 +108,14 @@ export default function ProjetoExecucaoPage() {
   const totalPrevMes = round2(itens.reduce((s, it) => s + aExecutar(it.id, mesAtivo) * (it.valorUnitario || 0), 0));
   const totalRealMes = round2(itens.reduce((s, it) => s + realMes(it.id, mesAtivo) * (it.valorUnitario || 0), 0));
 
+  // ---- financeiro do projeto inteiro (saldo a devolver) ----
+  const valorUnitDe = (iid: string) => itens.find(i => i.id === iid)?.valorUnitario || 0;
+  const totalOrcado = round2(itens.reduce((s, it) => s + (it.valorTotal || (it.quantidade * (it.valorUnitario || 0)) || 0), 0));
+  const totalExecutado = round2(execucoes.reduce((s, e) => s + (e.quantidade || 0) * valorUnitDe(e.itemProjetoId), 0));
+  const saldoDevolver = round2(totalOrcado - totalExecutado);
+  const pctExec = totalOrcado > 0 ? Math.round((totalExecutado / totalOrcado) * 100) : 0;
+  const itensNaoExecutados = itens.filter(it => execucoes.every(e => e.itemProjetoId !== it.id));
+
   // ---- upload + lançamento ----
   const handleUpload = async (campo: 'notaFiscalUrl' | 'certidoesUrl' | 'pagamentoUrl', file: File) => {
     if (!id || !file || !addingFor) return;
@@ -155,6 +163,21 @@ export default function ProjetoExecucaoPage() {
         <h1 className="text-2xl font-bold text-lie-ink">Execução do Projeto</h1>
         <p className="text-sm text-lie-gray">Registre o realizado por etapa. O saldo (previsto − realizado) rola automaticamente para a próxima execução.</p>
       </header>
+
+      {/* Financeiro do projeto — saldo a devolver */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 shadow-sm">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-bold text-lie-ink">Financeiro do projeto</span>
+          <span className="text-xs text-gray-400">{pctExec}% executado</span>
+        </div>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <div><div className="text-[11px] uppercase text-gray-500 font-bold">Orçado</div><div className="text-lg font-bold text-lie-ink font-mono">{FMT(totalOrcado)}</div></div>
+          <div><div className="text-[11px] uppercase text-gray-500 font-bold">Executado</div><div className="text-lg font-bold text-lie-green font-mono">{FMT(totalExecutado)}</div></div>
+          <div><div className="text-[11px] uppercase text-gray-500 font-bold">Saldo a devolver</div><div className="text-lg font-bold text-amber-600 font-mono">{FMT(saldoDevolver)}</div></div>
+        </div>
+        <div className="h-2 bg-gray-100 rounded-full overflow-hidden mt-3"><div className="h-full bg-lie-green rounded-full transition-all" style={{ width: `${pctExec}%` }} /></div>
+        {itensNaoExecutados.length > 0 && <div className="text-[11px] text-amber-600 mt-2">{itensNaoExecutados.length} item(ns) sem nenhuma execução — somam ao saldo a devolver.</div>}
+      </div>
 
       {/* Navegação por mês */}
       <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
