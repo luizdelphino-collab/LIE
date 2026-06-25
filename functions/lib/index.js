@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.gerarMemorialCalculo = exports.gerarPlanoTrabalho = exports.sincronizarCatalogoCNBS = exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = exports.bancoPrecosItemPrecos = exports.bancoPrecosCotacaoItens = exports.bancoPrecosCotacoes = void 0;
+exports.gerarPrestacaoContas = exports.gerarMemorialCalculo = exports.gerarPlanoTrabalho = exports.sincronizarCatalogoCNBS = exports.coletarMercadoItem = exports.validarCatmat = exports.consultarPrecosCompras = exports.padronizarItemNomenclatura = exports.traduzirTermoCatmat = exports.obterArquivosContratacao = exports.consultarPrecosMulti = exports.downloadStorageFile = exports.obterPdfContratacaoPublica = exports.bancoPrecosItemPrecos = exports.bancoPrecosCotacaoItens = exports.bancoPrecosCotacoes = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const puppeteer = require("puppeteer");
@@ -2076,6 +2076,98 @@ Responda APENAS em JSON puro: {"memorial": "..."}`;
     catch (e) {
         console.error('gerarMemorialCalculo erro:', e?.message || e);
         res.status(500).json({ error: 'Falha ao gerar memorial: ' + (e?.message || String(e)) });
+    }
+});
+/**
+ * gerarPrestacaoContas — narrativa da prestação de contas (relatório de cumprimento
+ * do objeto) a partir das metas planejadas + a execução real (previsto × realizado).
+ *
+ * POST JSON: { tituloProjeto, objetivoGeral?, periodo?, publicoAlvo?, modalidades?,
+ *   metasQualitativas?, metasQuantitativas?, demonstrativo?, totalOrcado?,
+ *   totalExecutado?, saldoDevolver?, remanejamento? }
+ * Resposta: { resumoExecutivo, metasAtingidas, dificuldades }
+ */
+exports.gerarPrestacaoContas = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB', secrets: ['GEMINI_API_KEY'] })
+    .https.onRequest(async (req, res) => {
+    const origin = pickAllowedOrigin(req.headers.origin);
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Vary', 'Origin');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Apenas POST.' });
+        return;
+    }
+    const b = (req.body || {});
+    const titulo = String(b.tituloProjeto || '').trim();
+    if (!titulo) {
+        res.status(400).json({ error: 'tituloProjeto é obrigatório.' });
+        return;
+    }
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        res.status(500).json({ error: 'Servidor sem chave Gemini.' });
+        return;
+    }
+    const metasTxt = (arr, rotulo) => Array.isArray(arr) && arr.length
+        ? `${rotulo}:\n` + arr.map((m, i) => `  ${i + 1}. ${m?.meta || ''} — indicador: ${m?.indicador || ''}; verificação: ${m?.verificacao || ''}`).join('\n')
+        : '';
+    const ctx = [
+        `PROJETO: ${titulo}`,
+        b.objetivoGeral ? `OBJETIVO GERAL: ${b.objetivoGeral}` : '',
+        b.periodo ? `PERÍODO DA PRESTAÇÃO: ${b.periodo}` : '',
+        b.publicoAlvo ? `PÚBLICO-ALVO: ${b.publicoAlvo}` : '',
+        Array.isArray(b.modalidades) && b.modalidades.length ? `MODALIDADES: ${b.modalidades.join(', ')}` : '',
+        metasTxt(b.metasQualitativas, 'METAS QUALITATIVAS PLANEJADAS'),
+        metasTxt(b.metasQuantitativas, 'METAS QUANTITATIVAS PLANEJADAS'),
+        b.demonstrativo ? `EXECUÇÃO (previsto × realizado):\n${String(b.demonstrativo).slice(0, 3000)}` : '',
+        (b.totalOrcado != null) ? `VALOR INICIAL: R$ ${b.totalOrcado}` : '',
+        (b.totalExecutado != null) ? `TOTAL EXECUTADO: R$ ${b.totalExecutado}` : '',
+        (b.saldoDevolver != null) ? `SALDO A DEVOLVER: R$ ${b.saldoDevolver}` : '',
+        b.remanejamento ? `REMANEJAMENTO (justificativa): ${b.remanejamento}` : '',
+    ].filter(Boolean).join('\n');
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0.5, maxOutputTokens: 8192, responseMimeType: 'application/json' } });
+        const prompt = `Você é um especialista em PRESTAÇÃO DE CONTAS de projetos esportivos (Lei de Incentivo ao Esporte / FEDEESP), que redige o Relatório de Cumprimento do Objeto para análise do órgão concedente.
+
+A partir das METAS PLANEJADAS e da EXECUÇÃO REAL abaixo, redija em português formal e institucional. Use os NÚMEROS fornecidos (previsto × realizado, valores, saldo); NÃO invente dados.
+
+${ctx}
+
+Produza:
+- resumoExecutivo: 2 a 3 parágrafos sintetizando o que foi realizado no período (execução física e financeira), com os principais números.
+- metasAtingidas: para cada meta planejada, indique se foi ATINGIDA, PARCIALMENTE ATINGIDA ou NÃO ATINGIDA, comparando com o realizado e citando números/indicadores. Seja específico.
+- dificuldades: eventuais dificuldades, justificativas de remanejamento de quantidades e do saldo a devolver, quando houver; se não houver, registre que a execução transcorreu conforme o planejado.
+
+Responda APENAS em JSON puro: {"resumoExecutivo":"...","metasAtingidas":"...","dificuldades":"..."}`;
+        const result = await model.generateContent(prompt);
+        const txt = result.response.text();
+        let data;
+        try {
+            data = JSON.parse(txt);
+        }
+        catch {
+            const m = txt.match(/\{[\s\S]*\}/);
+            data = m ? JSON.parse(m[0]) : null;
+        }
+        res.status(200).json({
+            resumoExecutivo: String(data?.resumoExecutivo || ''),
+            metasAtingidas: String(data?.metasAtingidas || ''),
+            dificuldades: String(data?.dificuldades || ''),
+            modelo: 'gemini-2.5-flash',
+        });
+    }
+    catch (e) {
+        console.error('gerarPrestacaoContas erro:', e?.message || e);
+        res.status(500).json({ error: 'Falha ao gerar narrativa: ' + (e?.message || String(e)) });
     }
 });
 //# sourceMappingURL=index.js.map

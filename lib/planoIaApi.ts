@@ -104,3 +104,32 @@ export async function gerarMemorialCalculo(input: MemorialIaInput): Promise<stri
   const j = await resp.json();
   return String(j?.memorial || '');
 }
+
+export interface PrestacaoIaInput {
+  tituloProjeto: string;
+  objetivoGeral?: string;
+  periodo?: string;
+  publicoAlvo?: string;
+  modalidades?: string[];
+  metasQualitativas?: { meta: string; indicador: string; verificacao: string }[];
+  metasQuantitativas?: { meta: string; indicador: string; verificacao: string }[];
+  demonstrativo?: string;
+  totalOrcado?: number;
+  totalExecutado?: number;
+  saldoDevolver?: number;
+  remanejamento?: string;
+}
+export interface PrestacaoIaNarrativa { resumoExecutivo: string; metasAtingidas: string; dificuldades: string; }
+
+/** Gera a narrativa da prestação de contas (cumprimento do objeto) via Gemini. */
+export async function gerarPrestacaoContas(input: PrestacaoIaInput): Promise<PrestacaoIaNarrativa> {
+  const projectId = storage.app.options.projectId;
+  const url = `https://us-central1-${projectId}.cloudfunctions.net/gerarPrestacaoContas`;
+  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  if (!resp.ok) {
+    let msg = `Falha ao gerar narrativa (HTTP ${resp.status}).`;
+    try { const j = await resp.json(); if (j?.error) msg = j.error; } catch { /* ignora */ }
+    throw new Error(msg);
+  }
+  return await resp.json();
+}

@@ -16,12 +16,13 @@ import {
   collection, query, getDocs, getDoc, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp,
 } from 'firebase/firestore';
 import {
-  Loader2, Plus, FileText, FileCheck2, Trash2, ChevronLeft, Send, Layers, Building2, CheckCircle2,
+  Loader2, Plus, FileText, FileCheck2, Trash2, ChevronLeft, Send, Layers, Building2, CheckCircle2, Wand2,
 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import type { Projeto, ItemProjeto, CronogramaItem, Fornecedor, EtapaProjeto, Prestacao, StatusPrestacao } from '../types';
 import ProjetoWorkspaceNav from '../components/ProjetoWorkspaceNav';
 import AutoResizeTextarea from '../components/AutoResizeTextarea';
+import { gerarPrestacaoContas } from '../lib/planoIaApi';
 
 const FMT = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -53,6 +54,7 @@ export default function ProjetoPrestacaoPage() {
   const [prestacoes, setPrestacoes] = useState<Prestacao[]>([]);
   const [sel, setSel] = useState<Prestacao | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const [gerandoIA, setGerandoIA] = useState(false);
   const [novoTipo, setNovoTipo] = useState<'parcial' | 'final'>('final');
   const [novoMesIni, setNovoMesIni] = useState(1);
   const [novoMesFim, setNovoMesFim] = useState(1);
@@ -139,6 +141,34 @@ export default function ProjetoPrestacaoPage() {
   const totalOrcado = round2(itens.reduce((s, it) => s + ((it.valorTotal || (it.quantidade * (it.valorUnitario || 0))) || 0), 0));
   const totalExecAll = round2(execucoes.reduce((s, e) => s + (e.quantidade || 0) * valorUnitDe(e.itemProjetoId), 0));
   const saldoDevolver = round2(totalOrcado - totalExecAll);
+
+  const gerarNarrativaIA = async () => {
+    if (!sel || !projeto) return;
+    setGerandoIA(true);
+    try {
+      const grps: EtapaProjeto[] = [...etapas, ...(itens.some(it => !it.etapaId) ? [{ id: '', nome: 'Sem etapa' } as EtapaProjeto] : [])];
+      const linhas: string[] = [];
+      grps.forEach((et, gi) => {
+        const itensEt = itens.filter(it => (it.etapaId || '') === et.id && (prevItem(it.id, sel) > 0 || realItem(it.id, sel) > 0));
+        if (!itensEt.length) return;
+        linhas.push(`${et.id ? `${gi + 1}.0 ` : ''}${et.nome}:`);
+        itensEt.forEach(it => linhas.push(`  - ${it.nome}: previsto ${prevItem(it.id, sel)} ${it.unidade}, realizado ${realItem(it.id, sel)} ${it.unidade}`));
+      });
+      const pa = projeto.publicoAlvo ? [projeto.publicoAlvo.direto, projeto.publicoAlvo.faixaEtaria].filter(Boolean).join(' · ') : '';
+      const r = await gerarPrestacaoContas({
+        tituloProjeto: projeto.titulo || '', objetivoGeral: projeto.objetivoGeral,
+        periodo: `${rotuloMes(sel.mesInicio, projeto.mesInicio)}–${rotuloMes(sel.mesFim, projeto.mesInicio)} (${sel.tipo})`,
+        publicoAlvo: pa, modalidades: (projeto.modalidades || []).map(m => m.nome),
+        metasQualitativas: (projeto.metasQualitativas || []).map(m => ({ meta: m.meta, indicador: m.indicador, verificacao: m.verificacao })),
+        metasQuantitativas: (projeto.metasQuantitativas || []).map(m => ({ meta: m.meta, indicador: m.indicador, verificacao: m.verificacao })),
+        demonstrativo: linhas.join('\n'),
+        totalOrcado, totalExecutado: totalExecAll, saldoDevolver,
+        remanejamento: projeto.justificativaRemanejamento,
+      });
+      setSel({ ...sel, resumoExecutivo: r.resumoExecutivo || sel.resumoExecutivo, metasAtingidas: r.metasAtingidas || sel.metasAtingidas, dificuldades: r.dificuldades || sel.dificuldades });
+    } catch (e: any) { alert('Erro ao gerar narrativa: ' + (e?.message || e)); }
+    finally { setGerandoIA(false); }
+  };
 
   if (loading) return <div className="p-6 flex items-center gap-2 text-lie-gray"><Loader2 className="w-5 h-5 animate-spin" /> Carregando…</div>;
 
@@ -272,7 +302,12 @@ export default function ProjetoPrestacaoPage() {
 
       {/* Narrativa (mista — IA na próxima etapa) */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 shadow-sm space-y-3">
-        <h2 className="text-sm font-bold text-lie-ink">Relatório de cumprimento do objeto</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-bold text-lie-ink">Relatório de cumprimento do objeto</h2>
+          <button onClick={gerarNarrativaIA} disabled={gerandoIA} className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-sm font-bold">
+            {gerandoIA ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />} {gerandoIA ? 'Gerando…' : 'Gerar com IA'}
+          </button>
+        </div>
         {([
           ['Resumo executivo', 'resumoExecutivo'],
           ['Metas atingidas', 'metasAtingidas'],
@@ -285,7 +320,7 @@ export default function ProjetoPrestacaoPage() {
           </div>
         ))}
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-violet-600">✨ Geração por IA (a partir das metas + execução) vem na próxima etapa.</span>
+          <span className="text-[11px] text-gray-400">A IA preenche resumo, metas atingidas e dificuldades a partir das metas + execução. "Observações" é sempre manual.</span>
           <button onClick={salvarNarrativa} disabled={salvando} className="flex items-center gap-2 bg-lie-green hover:bg-lie-greenDark text-white px-5 py-2 rounded-lg font-bold disabled:opacity-50">
             {salvando ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Salvar prestação
           </button>
