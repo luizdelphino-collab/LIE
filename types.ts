@@ -129,6 +129,8 @@ export interface Projeto {
   cronograma?: AcaoCronograma[];
   // Etapas/fases de execução (agrupam os itens do orçamento)
   etapas?: EtapaProjeto[];
+  // Registro/justificativa do remanejamento de quantidades entre itens na execução
+  justificativaRemanejamento?: string;
   
   // Público e Metas
   publicoAlvo?: {

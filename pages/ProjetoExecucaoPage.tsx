@@ -64,6 +64,8 @@ export default function ProjetoExecucaoPage() {
   const [form, setForm] = useState({ ...FORM_VAZIO });
   const [uploadField, setUploadField] = useState<string | null>(null);
   const [salvandoExec, setSalvandoExec] = useState(false);
+  const [justRemanej, setJustRemanej] = useState('');
+  const [salvandoJust, setSalvandoJust] = useState(false);
 
   const duracao = projeto?.duracaoMeses || 12;
   const meses = useMemo(() => Array.from({ length: duracao }, (_, i) => i + 1), [duracao]);
@@ -73,7 +75,7 @@ export default function ProjetoExecucaoPage() {
     setLoading(true);
     try {
       const projSnap = await getDoc(doc(db, 'projects', id));
-      if (projSnap.exists()) { const p = { id: projSnap.id, ...projSnap.data() } as Projeto; setProjeto(p); setEtapas(p.etapas || []); }
+      if (projSnap.exists()) { const p = { id: projSnap.id, ...projSnap.data() } as Projeto; setProjeto(p); setEtapas(p.etapas || []); setJustRemanej(p.justificativaRemanejamento || ''); }
       const [itSnap, fSnap, cSnap, eSnap] = await Promise.all([
         getDocs(query(collection(db, `projects/${id}/items`), orderBy('criadoEm', 'asc'))),
         getDocs(query(collection(db, 'suppliers'), orderBy('razaoSocial', 'asc'))),
@@ -115,6 +117,12 @@ export default function ProjetoExecucaoPage() {
   const saldoDevolver = round2(totalOrcado - totalExecutado);
   const pctExec = totalOrcado > 0 ? Math.round((totalExecutado / totalOrcado) * 100) : 0;
   const itensNaoExecutados = itens.filter(it => execucoes.every(e => e.itemProjetoId !== it.id));
+  // Remanejamento de quantidade: executado − previsto, por item (valor inicial é fixo).
+  const orcadoItem = (it: ItemProjeto) => round2((it.valorTotal || (it.quantidade * (it.valorUnitario || 0))) || 0);
+  const execItemTotal = (iid: string) => round2(execucoes.filter(e => e.itemProjetoId === iid).reduce((s, e) => s + (e.quantidade || 0) * valorUnitDe(iid), 0));
+  const remanejItem = (it: ItemProjeto) => round2(execItemTotal(it.id) - orcadoItem(it));
+  const itensRemanejados = itens.filter(it => Math.abs(remanejItem(it)) > 0.001);
+  const excedeInicial = totalExecutado > totalOrcado + 0.001;
 
   // ---- upload + lançamento ----
   const handleUpload = async (campo: 'notaFiscalUrl' | 'certidoesUrl' | 'pagamentoUrl', file: File) => {
@@ -154,6 +162,15 @@ export default function ProjetoExecucaoPage() {
     setExecucoes(prev => prev.filter(x => x.id !== e.id));
   };
 
+  const salvarJustRemanej = async () => {
+    if (!id) return;
+    setSalvandoJust(true);
+    try {
+      await setDoc(doc(db, 'projects', id), { justificativaRemanejamento: justRemanej }, { merge: true });
+      alert('Justificativa de remanejamento salva.');
+    } finally { setSalvandoJust(false); }
+  };
+
   if (loading) return <div className="p-6 flex items-center gap-2 text-lie-gray"><Loader2 className="w-5 h-5 animate-spin" /> Carregando…</div>;
 
   return (
@@ -171,13 +188,47 @@ export default function ProjetoExecucaoPage() {
           <span className="text-xs text-gray-400">{pctExec}% executado</span>
         </div>
         <div className="grid grid-cols-3 gap-3 text-center">
-          <div><div className="text-[11px] uppercase text-gray-500 font-bold">Orçado</div><div className="text-lg font-bold text-lie-ink font-mono">{FMT(totalOrcado)}</div></div>
+          <div><div className="text-[11px] uppercase text-gray-500 font-bold">Valor inicial (fixo)</div><div className="text-lg font-bold text-lie-ink font-mono">{FMT(totalOrcado)}</div></div>
           <div><div className="text-[11px] uppercase text-gray-500 font-bold">Executado</div><div className="text-lg font-bold text-lie-green font-mono">{FMT(totalExecutado)}</div></div>
           <div><div className="text-[11px] uppercase text-gray-500 font-bold">Saldo a devolver</div><div className="text-lg font-bold text-amber-600 font-mono">{FMT(saldoDevolver)}</div></div>
         </div>
         <div className="h-2 bg-gray-100 rounded-full overflow-hidden mt-3"><div className="h-full bg-lie-green rounded-full transition-all" style={{ width: `${pctExec}%` }} /></div>
         {itensNaoExecutados.length > 0 && <div className="text-[11px] text-amber-600 mt-2">{itensNaoExecutados.length} item(ns) sem nenhuma execução — somam ao saldo a devolver.</div>}
+        {excedeInicial && <div className="text-[11px] text-red-600 font-bold mt-1">⚠ A execução excede o valor inicial do projeto (que é fixo). Reduza a quantidade de algum item.</div>}
       </div>
+
+      {/* Remanejamento de quantidades entre itens */}
+      {itensRemanejados.length > 0 && (
+        <div className="bg-white border border-amber-200 rounded-xl p-4 mb-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-sm font-bold text-lie-ink">Remanejamento de quantidades</h2>
+            <span className="text-[11px] text-gray-400">executado a mais num item, a menos em outro — valor inicial preservado</span>
+          </div>
+          <table className="w-full text-xs mb-3">
+            <thead><tr className="text-gray-500 uppercase tracking-wider text-[10px]"><th className="text-left py-1">Item</th><th className="text-right">Orçado</th><th className="text-right">Executado</th><th className="text-right">Remanejamento</th></tr></thead>
+            <tbody className="divide-y divide-gray-100">
+              {itensRemanejados.map(it => {
+                const r = remanejItem(it);
+                return (
+                  <tr key={it.id}>
+                    <td className="py-1 font-semibold text-lie-ink">{it.nome}</td>
+                    <td className="text-right font-mono text-gray-600">{FMT(orcadoItem(it))}</td>
+                    <td className="text-right font-mono text-gray-600">{FMT(execItemTotal(it.id))}</td>
+                    <td className={`text-right font-mono font-bold ${r > 0 ? 'text-amber-600' : 'text-blue-600'}`}>{r > 0 ? '+' : ''}{FMT(r)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <label className="block text-[11px] font-bold text-gray-600 mb-1">Justificativa do remanejamento (registro)</label>
+          <textarea value={justRemanej} onChange={e => setJustRemanej(e.target.value)} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Explique por que as quantidades foram remanejadas entre os itens (mantendo o valor inicial do projeto)." />
+          <div className="flex justify-end mt-2">
+            <button onClick={salvarJustRemanej} disabled={salvandoJust} className="flex items-center gap-1.5 bg-lie-green hover:bg-lie-greenDark text-white px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50">
+              {salvandoJust ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Salvar justificativa
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Navegação por mês */}
       <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
