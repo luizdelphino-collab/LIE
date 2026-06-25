@@ -10,19 +10,20 @@
  * (Replanejamento 2026-06.)
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   collection, query, getDocs, getDoc, doc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp,
 } from 'firebase/firestore';
 import {
-  Loader2, Plus, FileText, FileCheck2, Trash2, ChevronLeft, Send, Layers, Building2, CheckCircle2, Wand2,
+  Loader2, Plus, FileText, FileCheck2, Trash2, ChevronLeft, Send, Layers, Building2, CheckCircle2, Wand2, Printer, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import type { Projeto, ItemProjeto, CronogramaItem, Fornecedor, EtapaProjeto, Prestacao, StatusPrestacao } from '../types';
 import ProjetoWorkspaceNav from '../components/ProjetoWorkspaceNav';
 import AutoResizeTextarea from '../components/AutoResizeTextarea';
 import { gerarPrestacaoContas } from '../lib/planoIaApi';
+import { gerarPrestacaoPdf } from '../lib/gerarPrestacaoPdf';
 
 const FMT = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -55,6 +56,8 @@ export default function ProjetoPrestacaoPage() {
   const [sel, setSel] = useState<Prestacao | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [gerandoIA, setGerandoIA] = useState(false);
+  const [entidadeNome, setEntidadeNome] = useState('');
+  const [expandido, setExpandido] = useState<Set<string>>(new Set());
   const [novoTipo, setNovoTipo] = useState<'parcial' | 'final'>('final');
   const [novoMesIni, setNovoMesIni] = useState(1);
   const [novoMesFim, setNovoMesFim] = useState(1);
@@ -69,7 +72,10 @@ export default function ProjetoPrestacaoPage() {
       try {
         const projSnap = await getDoc(doc(db, 'projects', id));
         let dur = 12;
-        if (projSnap.exists()) { const p = { id: projSnap.id, ...projSnap.data() } as Projeto; setProjeto(p); setEtapas(p.etapas || []); dur = p.duracaoMeses || 12; }
+        if (projSnap.exists()) {
+          const p = { id: projSnap.id, ...projSnap.data() } as Projeto; setProjeto(p); setEtapas(p.etapas || []); dur = p.duracaoMeses || 12;
+          if (p.entidadeId) { const ent = await getDoc(doc(db, 'entities', p.entidadeId)); if (ent.exists()) setEntidadeNome((ent.data() as any).nome || ''); }
+        }
         setNovoMesFim(dur);
         const [itSnap, fSnap, cSnap, eSnap, pSnap] = await Promise.all([
           getDocs(query(collection(db, `projects/${id}/items`), orderBy('criadoEm', 'asc'))),
@@ -170,6 +176,12 @@ export default function ProjetoPrestacaoPage() {
     finally { setGerandoIA(false); }
   };
 
+  const toggle = (iid: string) => setExpandido(prev => { const s = new Set(prev); s.has(iid) ? s.delete(iid) : s.add(iid); return s; });
+  const imprimir = () => {
+    if (!sel || !projeto) return;
+    gerarPrestacaoPdf({ projeto, prestacao: sel, itens, etapas, execucoes, fornecedores, previsto, entidadeNome, totalOrcado, totalExecutado: totalExecAll, saldoDevolver });
+  };
+
   if (loading) return <div className="p-6 flex items-center gap-2 text-lie-gray"><Loader2 className="w-5 h-5 animate-spin" /> Carregando…</div>;
 
   // ===== LISTA / CRIAÇÃO =====
@@ -225,6 +237,7 @@ export default function ProjetoPrestacaoPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${STATUS_INFO[sel.status].cls}`}>{STATUS_INFO[sel.status].label}</span>
+          <button onClick={imprimir} className="flex items-center gap-1.5 bg-lie-ink hover:bg-lie-ink/90 text-white px-3 py-1.5 rounded-lg text-sm font-bold" title="Gerar PDF da prestação (imprimir todos)"><Printer className="w-4 h-4" /> Imprimir todos</button>
           {sel.status === 'em_elaboracao' && <button onClick={() => mudarStatus('submetida')} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-bold"><Send className="w-4 h-4" /> Submeter</button>}
         </div>
       </header>
@@ -240,21 +253,47 @@ export default function ProjetoPrestacaoPage() {
                 const itensEt = itens.filter(it => (it.etapaId || '') === et.id && (prevItem(it.id, sel) > 0 || realItem(it.id, sel) > 0));
                 if (itensEt.length === 0) return null;
                 return (
-                  <tr key={et.id || 'sem'}><td colSpan={5} className="pt-0"><table className="w-full"><tbody>
+                  <Fragment key={et.id || 'sem'}>
                     <tr className="bg-lie-ink/5"><td colSpan={5} className="px-1 py-1 font-bold text-lie-ink text-[11px] uppercase">{et.id ? `${gi + 1}.0 — ` : ''}{et.nome}</td></tr>
                     {itensEt.map(it => {
                       const pq = prevItem(it.id, sel), rq = realItem(it.id, sel), vu = it.valorUnitario || 0;
+                      const exItem = execucoes.filter(e => e.itemProjetoId === it.id && e.mes >= sel.mesInicio && e.mes <= sel.mesFim);
+                      const open = expandido.has(it.id);
                       return (
-                        <tr key={it.id} className="border-b border-gray-50">
-                          <td className="py-1 pl-2 text-lie-ink">{it.nome} <span className="text-gray-400">({it.unidade})</span></td>
-                          <td className="text-right text-gray-600">{pq}</td>
-                          <td className="text-right font-bold text-lie-green">{rq}</td>
-                          <td className="text-right font-mono text-gray-600">{FMT(pq * vu)}</td>
-                          <td className="text-right font-mono font-bold text-lie-ink">{FMT(rq * vu)}</td>
-                        </tr>
+                        <Fragment key={it.id}>
+                          <tr className="border-b border-gray-50 hover:bg-gray-50/50">
+                            <td className="py-1 pl-2 text-lie-ink">
+                              <button onClick={() => toggle(it.id)} className="inline-flex items-center gap-1 hover:text-lie-green text-left">
+                                {open ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
+                                {it.nome} <span className="text-gray-400">({it.unidade})</span>
+                                {exItem.length > 0 && <span className="text-[9px] text-gray-400">· {exItem.length} exec.</span>}
+                              </button>
+                            </td>
+                            <td className="text-right text-gray-600">{pq}</td>
+                            <td className="text-right font-bold text-lie-green">{rq}</td>
+                            <td className="text-right font-mono text-gray-600">{FMT(pq * vu)}</td>
+                            <td className="text-right font-mono font-bold text-lie-ink">{FMT(rq * vu)}</td>
+                          </tr>
+                          {open && (
+                            <tr className="bg-gray-50/60"><td colSpan={5} className="px-3 py-2">
+                              {exItem.length === 0 ? <span className="text-[11px] text-gray-400">Nenhuma execução deste item no período.</span> : (
+                                <div className="space-y-1">
+                                  {exItem.map(e => (
+                                    <div key={e.id} className="flex items-center gap-2 text-[11px]">
+                                      <span className="text-gray-400">{rotuloMes(e.mes, projeto?.mesInicio)}</span>
+                                      <span className="font-semibold text-lie-ink">{e.quantidade} {it.unidade}</span>
+                                      <span className="flex items-center gap-1 text-gray-600"><Building2 className="w-3 h-3" />{fornecedorNome(e.fornecedorId)}</span>
+                                      <span className="flex items-center gap-1.5 ml-auto"><Doc url={e.notaFiscalUrl} s="NF" /><Doc url={e.certidoesUrl} s="Cert." /><Doc url={e.pagamentoUrl} s="Pgto" /></span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td></tr>
+                          )}
+                        </Fragment>
                       );
                     })}
-                  </tbody></table></td></tr>
+                  </Fragment>
                 );
               })}
             </tbody>
