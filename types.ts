@@ -62,6 +62,14 @@ export interface AcaoCronograma {
   mesTermino: string; // YYYY-MM
 }
 
+// Etapa/fase de execução do projeto (definida pelo usuário). Os itens do
+// orçamento são agrupados por Etapa › Tipo (categoria do item).
+export interface EtapaProjeto {
+  id: string;
+  nome: string;
+  ordem?: number;
+}
+
 export interface MetaProjeto {
   id: string;
   meta: string;
@@ -119,6 +127,8 @@ export interface Projeto {
   
   // Cronograma
   cronograma?: AcaoCronograma[];
+  // Etapas/fases de execução (agrupam os itens do orçamento)
+  etapas?: EtapaProjeto[];
   
   // Público e Metas
   publicoAlvo?: {
@@ -462,6 +472,9 @@ export interface ItemProjeto {
   quantidade: number;
   valorTotal: number;
   ordem?: number;
+  // Agrupamento na grade de orçamento: Etapa (definida no projeto) › Tipo (categoria do item)
+  etapaId?: string;
+  categoria?: string;
   fornecedoresIds?: string[]; // IDs dos fornecedores vinculados ao item na execução
   criadoEm: Timestamp;
 
