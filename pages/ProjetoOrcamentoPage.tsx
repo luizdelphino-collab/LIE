@@ -63,7 +63,7 @@ export default function ProjetoOrcamentoPage() {
 
   const duracao = projeto?.duracaoMeses || 12;
   const meses = useMemo(() => Array.from({ length: duracao }, (_, i) => i + 1), [duracao]);
-  const colTotal = meses.length + 5;
+  const colTotal = meses.length + 6;
 
   useEffect(() => {
     if (!id) return;
@@ -98,8 +98,10 @@ export default function ProjetoOrcamentoPage() {
     })();
   }, [id]);
 
-  const totalItem = (itemId: string) => round2(Object.values(alloc[itemId] || {}).reduce((s, q) => s + (q || 0), 0));
-  const valorItem = (it: ItemProjeto) => round2(totalItem(it.id) * (it.valorUnitario || 0));
+  const totalItem = (itemId: string) => round2(Object.values(alloc[itemId] || {}).reduce((s, q) => s + (q || 0), 0)); // distribuído pelos meses
+  const qtdPrev = (it: ItemProjeto) => round2(it.quantidade || 0); // quantidade total prevista do item
+  const saldoItem = (it: ItemProjeto) => round2(qtdPrev(it) - totalItem(it.id)); // falta distribuir
+  const valorItem = (it: ItemProjeto) => round2(qtdPrev(it) * (it.valorUnitario || 0));
   const totalProjeto = round2(itens.reduce((s, it) => s + valorItem(it), 0));
   const subtotalEtapa = (eid: string) => round2(itens.filter(it => (it.etapaId || '') === eid).reduce((s, it) => s + valorItem(it), 0));
 
@@ -126,7 +128,7 @@ export default function ProjetoOrcamentoPage() {
       const publicoAlvo = pa ? [pa.direto && `direto: ${pa.direto}`, pa.faixaEtaria && `faixa: ${pa.faixaEtaria}`, pa.indireto && `indireto: ${pa.indireto}`].filter(Boolean).join(' · ') : '';
       const memorial = await gerarMemorialCalculo({
         itemNome: it.nome, unidade: it.unidade, valorUnitario: it.valorUnitario,
-        quantidadeTotal: totalItem(it.id), distribuicao,
+        quantidadeTotal: qtdPrev(it), distribuicao,
         tituloProjeto: projeto?.titulo, publicoAlvo,
         modalidades: (projeto?.modalidades || []).map(m => m.nome),
         periodoMeses: projeto?.duracaoMeses, medianaReferencia: it.medianaReferencia,
@@ -219,7 +221,7 @@ export default function ProjetoOrcamentoPage() {
       batch.set(doc(db, 'projects', id), { etapas }, { merge: true });
       for (const rid of removidos) batch.delete(doc(db, `projects/${id}/items`, rid));
       for (const it of itens) {
-        const qtd = totalItem(it.id);
+        const qtd = qtdPrev(it);
         batch.set(doc(db, `projects/${id}/items`, it.id), {
           ...it, etapaId: it.etapaId || '', categoria: it.categoria || 'Outro',
           quantidade: qtd, valorTotal: round2(qtd * (it.valorUnitario || 0)),
@@ -345,8 +347,9 @@ export default function ProjetoOrcamentoPage() {
                 <tr className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-500">
                   <th className="text-left px-3 py-2 sticky left-0 bg-gray-50 z-10 min-w-[260px]">Item / Tipo / Etapa</th>
                   <th className="text-right px-2 py-2 whitespace-nowrap">Valor unit.</th>
+                  <th className="text-right px-2 py-2 whitespace-nowrap">Qtd prev.</th>
                   {meses.map(m => <th key={m} className="px-1 py-2 text-center min-w-[58px]" title={`Mês ${m}`}>{rotuloMes(m, projeto?.mesInicio)}</th>)}
-                  <th className="text-right px-2 py-2">Qtd</th>
+                  <th className="text-right px-2 py-2">Saldo</th>
                   <th className="text-right px-2 py-2 whitespace-nowrap">Total R$</th>
                   <th className="px-1 py-2"></th>
                 </tr>
@@ -405,13 +408,17 @@ export default function ProjetoOrcamentoPage() {
                                 </div>
                               </td>
                               <td className="px-2 py-2 text-right text-gray-600 whitespace-nowrap font-mono text-[12px]">{FMT(it.valorUnitario || 0)}</td>
+                              <td className="px-1 py-1">
+                                <input type="number" min={0} step="0.01" value={it.quantidade || ''} onChange={e => setItemCampo(it.id, { quantidade: round2(parseFloat(e.target.value) || 0) })}
+                                  className="w-[64px] text-right border border-gray-300 rounded px-1.5 py-1 text-[12px] font-bold focus:border-lie-green focus:ring-1 focus:ring-lie-green/30" placeholder="0" />
+                              </td>
                               {meses.map(m => (
                                 <td key={m} className="px-0.5 py-1">
                                   <input type="number" min={0} step="0.01" value={alloc[it.id]?.[m] || ''} onChange={e => setCelula(it.id, m, e.target.value)}
                                     className="w-[54px] text-center border border-gray-200 rounded px-1 py-1 text-[12px] focus:border-lie-green focus:ring-1 focus:ring-lie-green/30" placeholder="0" />
                                 </td>
                               ))}
-                              <td className="px-2 py-2 text-right font-bold text-lie-ink whitespace-nowrap">{totalItem(it.id) || 0}</td>
+                              <td className={`px-2 py-2 text-right font-bold whitespace-nowrap ${saldoItem(it) > 0 ? 'text-amber-600' : saldoItem(it) < 0 ? 'text-red-600' : 'text-emerald-600'}`} title="Quantidade prevista − distribuída pelos meses">{saldoItem(it)}</td>
                               <td className="px-2 py-2 text-right font-bold text-lie-green whitespace-nowrap font-mono text-[12px]">{FMT(valorItem(it))}</td>
                               <td className="px-1 py-2 text-center"><button onClick={() => removerItem(it)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Remover"><Trash2 className="w-4 h-4" /></button></td>
                             </tr>
